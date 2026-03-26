@@ -1,0 +1,56 @@
+# Clarix Pulse — Agent Configuration
+# Copy this file to config.yaml and fill in values for each PC
+# config.yaml is gitignored — never commit it
+
+agent_id: ny-main-pc          # unique per PC (must match hub AGENT_TOKENS)
+pc_name: NY-MAIN              # human-readable label
+site_id: ny-main              # site grouping
+hub_url: https://pulse.clarixtech.com
+agent_token: REPLACE_ME       # pre-shared secret — get from hub admin
+poll_interval_seconds: 10
+
+instances:
+  - id: ny-main-insta-1
+    playout_type: insta
+    paths:
+      shared_log_dir: C:\Program Files\Indytek\Insta log
+      instance_root: C:\Program Files\Indytek\Insta Playout\Settings
+      fnf_log: C:\Program Files\Indytek\Insta Playout\logs\FNF
+      playlistscan_log: C:\Program Files\Indytek\Insta Playout\logs\playlistscan
+    udp_probe:
+      enabled: false
+      stream_url: ""
+      thumbnail_interval_s: 10
+
+  - id: ny-main-insta-2
+    playout_type: insta
+    paths:
+      shared_log_dir: C:\Program Files\Indytek\Insta log
+      instance_root: C:\Program Files\Indytek\Insta Playout 2\Settings
+      fnf_log: C:\Program Files\Indytek\Insta Playout 2\logs\FNF
+      playlistscan_log: C:\Program Files\Indytek\Insta Playout 2\logs\playlistscan
+    udp_probe:
+      enabled: false
+      stream_url: ""
+      thumbnail_interval_s: 10
+
+  - id: ny-main-admax-1
+    playout_type: admax
+    paths:
+      admax_root: C:\Program Files (x86)\Unimedia\Admax One 2.0.2\admax
+    udp_probe:
+      enabled: false
+      stream_url: ""
+      thumbnail_interval_s: 10
+
+# --- NY Backup example (with UDP probe) ---
+# agent_id: ny-backup-pc
+# instances:
+#   - id: ny-backup-admax-1
+#     playout_type: admax
+#     paths:
+#       admax_root: C:\Program Files (x86)\Unimedia\Admax One 2.0.2\admax
+#     udp_probe:
+#       enabled: true
+#       stream_url: udp://192.168.1.50:5000
+#       thumbnail_interval_s: 10

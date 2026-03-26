@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background-color: #0f172a;
+    color: #f1f5f9;
+  }
+}
+
+@layer utilities {
+  .status-green  { @apply bg-emerald-500/20 border-emerald-500 text-emerald-300; }
+  .status-yellow { @apply bg-yellow-500/20 border-yellow-500 text-yellow-300; }
+  .status-red    { @apply bg-red-500/20 border-red-500 text-red-300; }
+  .status-orange { @apply bg-orange-500/20 border-orange-500 text-orange-300; }
+  .status-gray   { @apply bg-slate-700/50 border-slate-600 text-slate-400; }
+}

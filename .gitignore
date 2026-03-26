@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Build outputs
+packages/hub/dist/
+packages/dashboard/dist/
+packages/agent/dist/
+packages/agent/build/
+*.spec
+
+# Environment / secrets — NEVER commit these
+.env.local
+*.env.local
+**/.env.local
+.env.production
+
+# SQLite database (contains live state — back up separately)
+packages/hub/data/
+
+# Python virtual environments
+packages/agent/venv/
+packages/agent/.venv/
+
+# PyInstaller output
+packages/agent/clarix-agent-*.zip
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test outputs
+coverage/
+.pytest_cache/

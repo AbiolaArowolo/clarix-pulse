@@ -1,0 +1,19 @@
+{
+  "name": "clarix-pulse",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Clarix Pulse — Broadcast monitoring system for NOIRE TV",
+  "workspaces": [
+    "packages/hub",
+    "packages/dashboard"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=packages/hub\" \"npm run dev --workspace=packages/dashboard\"",
+    "build": "npm run build --workspace=packages/hub && npm run build --workspace=packages/dashboard",
+    "hub": "npm run dev --workspace=packages/hub",
+    "dashboard": "npm run dev --workspace=packages/dashboard"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
