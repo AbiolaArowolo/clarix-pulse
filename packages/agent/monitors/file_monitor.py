@@ -74,7 +74,7 @@ def _classify_insta_runtime_state(
         return "paused"
     if running_flag == 0:
         return "stopped"
-    if running_flag == 1:
+    if running_flag is not None and running_flag > 0:
         return "healthy"
     return None
 

@@ -149,18 +149,24 @@ export async function markInstanceOffline(instanceId: string): Promise<InstanceS
   const broadcastStartedAt = existing?.broadcastHealth === 'unknown'
     ? existing.broadcastStartedAt
     : timestamp;
+  const runtimeStartedAt = existing?.runtimeHealth === 'unknown'
+    ? existing.runtimeStartedAt
+    : timestamp;
 
   await db.execute({
     sql: `UPDATE instance_state
-          SET broadcast_health = 'unknown', connectivity_health = 'offline', broadcast_started_at = ?, updated_at = ?
+          SET broadcast_health = 'unknown', runtime_health = 'unknown', connectivity_health = 'offline',
+              broadcast_started_at = ?, runtime_started_at = ?, updated_at = ?
           WHERE instance_id = ?`,
-    args: [broadcastStartedAt, timestamp, instanceId],
+    args: [broadcastStartedAt, runtimeStartedAt, timestamp, instanceId],
   });
 
   if (existing) {
     existing.broadcastHealth = 'unknown';
+    existing.runtimeHealth = 'unknown';
     existing.connectivityHealth = 'offline';
     existing.broadcastStartedAt = broadcastStartedAt;
+    existing.runtimeStartedAt = runtimeStartedAt;
     existing.updatedAt = timestamp;
   }
 

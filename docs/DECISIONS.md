@@ -320,3 +320,10 @@ fault, and clears the red alarm on the first healthy UDP sample after recovery.
 faster live feedback. The tracked Optimum node config now uses a 2-second poll interval, and the
 UDP scaffolding in the templates was expanded to 5 ready-to-fill inputs so all node bundles share
 the same UDP-capable software shape even when UDP is currently disabled.
+
+**2026-03-26 13:44:38 America/New_York**: Optimum false off-air handling was corrected at both the
+agent and hub layers. The Insta monitor now treats positive `runningstatus.txt` values such as
+`6|0` as active playback instead of `unknown`, the process/window probe now accepts any matching
+visible Insta window rather than the first helper/background process it sees, and heartbeat timeout
+handling now clears stale runtime red before marking a node offline so network loss stays a yellow
+connectivity incident instead of being misreported as OFF AIR.

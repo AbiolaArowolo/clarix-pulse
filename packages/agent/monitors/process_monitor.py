@@ -119,8 +119,8 @@ def _check_window_exists(pid: int, selectors: dict) -> bool:
 
 def check(instance_id: str, playout_type: str, selectors: dict | None = None) -> dict:
     selectors = selectors or {}
-    proc = next(iter(_iter_matching_processes(playout_type, selectors)), None)
-    process_up = proc is not None
+    matching_processes = list(_iter_matching_processes(playout_type, selectors))
+    process_up = len(matching_processes) > 0
 
     if instance_id not in _restart_events:
         _restart_events[instance_id] = deque()
@@ -140,11 +140,14 @@ def check(instance_id: str, playout_type: str, selectors: dict | None = None) ->
     restart_count = len(_restart_events[instance_id])
     window_up = False
 
-    if process_up and proc:
-        try:
-            window_up = _check_window_exists(proc.pid, selectors)
-        except Exception:
-            window_up = False
+    if process_up:
+        for proc in matching_processes:
+            try:
+                if _check_window_exists(proc.pid, selectors):
+                    window_up = True
+                    break
+            except Exception:
+                continue
 
     return {
         "playout_process_up": 1 if process_up else 0,

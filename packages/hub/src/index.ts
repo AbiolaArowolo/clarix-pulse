@@ -66,7 +66,7 @@ setInterval(async () => {
       io.emit('state_update', {
         instanceId: state.instanceId,
         broadcastHealth: 'unknown',
-        runtimeHealth: updated?.runtimeHealth ?? state.runtimeHealth,
+        runtimeHealth: updated?.runtimeHealth ?? 'unknown',
         connectivityHealth: 'offline',
         lastHeartbeatAt: state.lastHeartbeatAt,
         updatedAt: updated?.updatedAt ?? new Date().toISOString(),
