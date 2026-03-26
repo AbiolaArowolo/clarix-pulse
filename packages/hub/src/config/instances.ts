@@ -1,5 +1,5 @@
-// Player registry — source of truth for all monitored playout players.
-// Nodes map to players via nodeId → allowedPlayerIds.
+// Player registry - source of truth for all monitored playout players.
+// Nodes map to players via nodeId -> allowedPlayerIds.
 
 export interface InstanceConfig {
   id: string;
@@ -34,7 +34,7 @@ export const INSTANCES: InstanceConfig[] = [
   player({
     playerId: 'ny-main-insta-1',
     nodeId: 'ny-main-pc',
-    label: 'NY Main — Insta 1',
+    label: 'NY Main - Insta 1',
     siteId: 'ny-main',
     siteName: 'NY Main',
     playoutType: 'insta',
@@ -43,7 +43,7 @@ export const INSTANCES: InstanceConfig[] = [
   player({
     playerId: 'ny-main-insta-2',
     nodeId: 'ny-main-pc',
-    label: 'NY Main — Insta 2',
+    label: 'NY Main - Insta 2',
     siteId: 'ny-main',
     siteName: 'NY Main',
     playoutType: 'insta',
@@ -52,7 +52,7 @@ export const INSTANCES: InstanceConfig[] = [
   player({
     playerId: 'ny-main-admax-1',
     nodeId: 'ny-main-pc',
-    label: 'NY Main — Admax 1',
+    label: 'NY Main - Admax 1',
     siteId: 'ny-main',
     siteName: 'NY Main',
     playoutType: 'admax',
@@ -61,7 +61,7 @@ export const INSTANCES: InstanceConfig[] = [
   player({
     playerId: 'ny-backup-admax-1',
     nodeId: 'ny-backup-pc',
-    label: 'NY Backup — Admax 1',
+    label: 'NY Backup - Admax 1',
     siteId: 'ny-backup',
     siteName: 'NY Backup',
     playoutType: 'admax',
@@ -70,25 +70,25 @@ export const INSTANCES: InstanceConfig[] = [
   player({
     playerId: 'ny-backup-admax-2',
     nodeId: 'ny-backup-pc',
-    label: 'NY Backup — Admax 2',
+    label: 'NY Backup - Admax 2',
     siteId: 'ny-backup',
     siteName: 'NY Backup',
     playoutType: 'admax',
     udpMonitoringCapable: true,
   }),
   player({
-    playerId: 'nj-optimum-admax-1',
+    playerId: 'nj-optimum-insta-1',
     nodeId: 'nj-optimum-pc',
-    label: 'NJ Optimum — Admax',
+    label: 'NJ Optimum - Insta',
     siteId: 'nj-optimum',
     siteName: 'NJ Optimum',
-    playoutType: 'admax',
+    playoutType: 'insta',
     udpMonitoringCapable: true,
   }),
   player({
     playerId: 'digicel-admax-1',
     nodeId: 'digicel-pc',
-    label: 'FL Digicel — Admax',
+    label: 'FL Digicel - Admax',
     siteId: 'digicel',
     siteName: 'FL Digicel',
     playoutType: 'admax',
@@ -130,7 +130,7 @@ export const AGENT_MAP: AgentConfig[] = [
   },
   {
     nodeId: 'nj-optimum-pc',
-    allowedPlayerIds: ['nj-optimum-admax-1'],
+    allowedPlayerIds: ['nj-optimum-insta-1'],
   },
   {
     nodeId: 'digicel-pc',

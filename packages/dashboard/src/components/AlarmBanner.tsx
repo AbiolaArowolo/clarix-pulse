@@ -26,6 +26,8 @@ export function AlarmBanner({ sites, muted, onToggleMute }: Props) {
           </div>
         </div>
         <button
+          type="button"
+          aria-pressed={muted}
           onClick={onToggleMute}
           className="shrink-0 rounded-lg bg-red-900/60 border border-red-500 text-white text-sm font-semibold px-4 py-1.5 hover:bg-red-800 transition-colors"
         >

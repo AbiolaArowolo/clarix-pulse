@@ -204,7 +204,7 @@ This node may carry 2-5 UDP inputs across one or more players. Set a distinct `u
 
 | Player ID | Type | UDP |
 |---|---|---|
-| `nj-optimum-admax-1` | admax | optional |
+| `nj-optimum-insta-1` | insta | optional |
 
 ### FL Digicel node (`digicel-pc`)
 

@@ -46,7 +46,7 @@ Build **Pulse**: a production-grade broadcast monitoring system that provides:
 |---|---|---|---|---|
 | `ny-main-pc` | `ny-main` | New York, Main | `ny-main-insta-1`, `ny-main-insta-2`, `ny-main-admax-1` | optional, per player |
 | `ny-backup-pc` | `ny-backup` | New York, Backup | `ny-backup-admax-1`, `ny-backup-admax-2` | both players |
-| `nj-optimum-pc` | `nj-optimum` | New Jersey | `nj-optimum-admax-1` | optional |
+| `nj-optimum-pc` | `nj-optimum` | New Jersey | `nj-optimum-insta-1` | optional |
 | `digicel-pc` | `digicel` | Florida | `digicel-admax-1` | enabled |
 
 **Total**: 4 nodes, 7 playout players across 2 software types (Insta Playout, Admax).

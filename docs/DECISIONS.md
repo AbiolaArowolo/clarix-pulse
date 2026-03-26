@@ -254,3 +254,12 @@ persistent Windows service `ClarixPulseAgent` from `%ProgramData%\ClarixPulse\Ag
 Optimum PC. Post-install verification confirmed the service is `RUNNING`, startup is `AUTO_START`,
 the live hub is receiving heartbeats from `nj-optimum-pc`, and the temporary direct-run test agent
 from the release folder was removed so only the service-owned runtime remains active.
+
+**2026-03-26 11:56:50 America/New_York**: Runtime alerting was adjusted to better match live
+operations on the Optimum Insta node. NJ Optimum is now treated as `nj-optimum-insta-1` instead of
+Admax, Insta `runningstatus.txt` is treated as the durable runtime source when available, and the
+log tailer now starts from the current end-of-file so historical `Paused` lines do not replay as
+fresh alarms after an agent restart. For local-runtime-only incidents without UDP confirmation,
+Pulse now shows `paused` / `stopped` immediately but waits about 45 seconds of continuous runtime
+failure before escalating to red OFF AIR, and it clears the red alarm automatically on the next
+healthy heartbeat after playback resumes.

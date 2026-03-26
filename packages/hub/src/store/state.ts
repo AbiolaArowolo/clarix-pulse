@@ -11,6 +11,7 @@ const cache = new Map<string, InstanceState>();
 const now = () => new Date().toISOString();
 
 function rowToState(row: Record<string, unknown>): InstanceState {
+  const updatedAt = row.updated_at as string;
   return {
     instanceId: row.instance_id as string,
     agentId: row.agent_id as string,
@@ -21,7 +22,8 @@ function rowToState(row: Record<string, unknown>): InstanceState {
     lastObservations: row.last_observations ? JSON.parse(row.last_observations as string) : null,
     thumbnailData: (row.thumbnail_data as string) ?? null,
     thumbnailAt: (row.thumbnail_at as string) ?? null,
-    updatedAt: row.updated_at as string,
+    runtimeStartedAt: (row.runtime_started_at as string) ?? updatedAt,
+    updatedAt,
   };
 }
 
@@ -34,12 +36,13 @@ export async function initState(): Promise<void> {
 
   for (const inst of INSTANCES) {
     if (!existingIds.has(inst.id)) {
+      const timestamp = now();
       await db.execute({
         sql: `INSERT OR IGNORE INTO instance_state
               (instance_id, agent_id, broadcast_health, runtime_health, connectivity_health,
-               last_heartbeat_at, last_observations, updated_at)
-              VALUES (?, '', 'unknown', 'unknown', 'offline', NULL, NULL, ?)`,
-        args: [inst.id, now()],
+               last_heartbeat_at, last_observations, runtime_started_at, updated_at)
+              VALUES (?, '', 'unknown', 'unknown', 'offline', NULL, NULL, ?, ?)`,
+        args: [inst.id, timestamp, timestamp],
       });
     }
   }
@@ -70,12 +73,15 @@ export async function updateState(
 ): Promise<{ previous: InstanceState | undefined; current: InstanceState }> {
   const previous = cache.get(instanceId);
   const timestamp = now();
+  const runtimeStartedAt = previous?.runtimeHealth === runtimeHealth
+    ? previous.runtimeStartedAt
+    : timestamp;
 
   await db.execute({
     sql: `INSERT INTO instance_state
             (instance_id, agent_id, broadcast_health, runtime_health, connectivity_health,
-             last_heartbeat_at, last_observations, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             last_heartbeat_at, last_observations, runtime_started_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(instance_id) DO UPDATE SET
             agent_id = excluded.agent_id,
             broadcast_health = excluded.broadcast_health,
@@ -83,10 +89,11 @@ export async function updateState(
             connectivity_health = excluded.connectivity_health,
             last_heartbeat_at = excluded.last_heartbeat_at,
             last_observations = excluded.last_observations,
+            runtime_started_at = excluded.runtime_started_at,
             updated_at = excluded.updated_at`,
     args: [
       instanceId, agentId, broadcastHealth, runtimeHealth, connectivityHealth,
-      timestamp, JSON.stringify(observations), timestamp,
+      timestamp, JSON.stringify(observations), runtimeStartedAt, timestamp,
     ],
   });
 
@@ -95,6 +102,7 @@ export async function updateState(
     lastHeartbeatAt: timestamp, lastObservations: observations,
     thumbnailData: previous?.thumbnailData ?? null,
     thumbnailAt: previous?.thumbnailAt ?? null,
+    runtimeStartedAt,
     updatedAt: timestamp,
   };
 

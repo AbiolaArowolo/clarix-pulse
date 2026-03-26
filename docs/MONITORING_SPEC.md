@@ -14,7 +14,7 @@
 | `ny-main-pc` | `ny-main-admax-1` | NY Main | Admax | Optional |
 | `ny-backup-pc` | `ny-backup-admax-1` | NY Backup | Admax | Enabled |
 | `ny-backup-pc` | `ny-backup-admax-2` | NY Backup | Admax | Enabled |
-| `nj-optimum-pc` | `nj-optimum-admax-1` | NJ Optimum | Admax | Optional |
+| `nj-optimum-pc` | `nj-optimum-insta-1` | NJ Optimum | Insta Playout | Optional |
 | `digicel-pc` | `digicel-admax-1` | FL Digicel | Admax | Enabled |
 
 A node can carry 2-5 UDP inputs across one or more players. UDP is never a node-wide assumption; it
@@ -43,10 +43,10 @@ Three independent domains - never mixed:
 | Value | Meaning | Trigger |
 |---|---|---|
 | `healthy` | Process up, log active, position advancing | Default when no issues |
-| `paused` | Explicit pause token in log | `stopxxx2` (Admax) / "Paused" (Insta) |
+| `paused` | Explicit pause state from runtime file or log fallback | `stopxxx2` (Admax) / `runningstatus.txt` or "Paused" (Insta) |
 | `restarting` | Process restarted or re-init token seen | restart event or `reinit` log token |
 | `stalled` | Process up but position frozen >30s | filebar/Frame delta = 0 |
-| `stopped` | Process absent | `playout_process_up = 0` |
+| `stopped` | Process absent or runtime file reports not running | `playout_process_up = 0` or Insta runtime state |
 | `content_error` | New entries in FNF or playlistscan log | new log lines in error files |
 | `unknown` | Insufficient data | No observations received |
 
@@ -79,13 +79,14 @@ Every 10 seconds, the agent runs these checks in order for each player on the no
 | Insta Playout | `C:\Program Files\Indytek\Insta log\DD-MM-YYYY.txt` | "Paused", "Fully Played", playlist transitions |
 | Admax | `<admax_root>\logs\logs\Playout\YYYY-MM-DD.txt` | `stopxxx2` -> paused; "Application Exited by client!" -> stopped; re-init pattern -> restarting |
 
-Log file is tailed (new lines only) every poll. File rotation at midnight is handled.
+Log file is tailed from the current end-of-file for the active agent session so stale historical
+pause lines do not replay as fresh alarms after restart. File rotation at midnight is handled.
 
 ### Step 3: File state indicators
 
 | Software | File | Metric | Stall warning | Stall critical |
 |---|---|---|---|---|
-| Insta | `filebar.txt` (JSON) | `FilePosition` | delta=0 for 30s | delta=0 for 60s |
+| Insta | `filebar.txt` (JSON) + `runningstatus.txt` | `FilePosition` plus persistent runtime state | delta=0 for 30s | delta=0 for 60s |
 | Admax | `Settings.ini` | `Frame` value | delta=0 for 30s | delta=0 for 60s |
 
 Content error detection (both software types):
@@ -126,10 +127,10 @@ signal.
 | `output_signal_present=0` (UDP enabled) | `off_air_confirmed` | - |
 | `output_freeze_seconds >= 20` (UDP enabled) | `off_air_confirmed` | - |
 | `output_black_ratio >= 0.98` (UDP enabled) | `off_air_confirmed` | - |
-| `playout_process_up=0` | `off_air_likely` | `stopped` |
+| `playout_process_up=0` for about 45s continuous, without UDP confirmation | `off_air_likely` | `stopped` |
 | `log_last_token=app_exited` | `off_air_likely` | `stopped` |
 | `log_last_token=stopxxx2` | `degraded` | `paused` |
-| `log_last_token=paused` | `degraded` | `paused` |
+| `log_last_token=paused` or Insta runtime file says paused | `degraded` | `paused` |
 | `log_last_token=reinit` | `degraded` | `restarting` |
 | `restart_events_15m >= 2` | `degraded` | `restarting` |
 | Position delta=0 for 30s | `degraded` | `stalled` |
@@ -149,7 +150,7 @@ Triggers when `broadcast_health` = `off_air_confirmed` or `off_air_likely`
 Examples:
 
 - `OFF AIR: NY Main - Admax 1 - output signal missing`
-- `OFF AIR LIKELY: NJ Optimum - Admax - process missing`
+- `OFF AIR LIKELY: NJ Optimum - Insta - process missing`
 
 ### Warning (DEGRADED / NETWORK ISSUE)
 

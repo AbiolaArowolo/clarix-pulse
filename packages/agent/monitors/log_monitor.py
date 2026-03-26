@@ -76,13 +76,20 @@ def _get_log_path_admax(paths: dict) -> str:
 def _read_new_lines(path: str, instance_id: str) -> list[str]:
     if not os.path.exists(path):
         _file_positions.pop(instance_id, None)
+        _last_log_path.pop(instance_id, None)
         return []
 
     file_size = os.path.getsize(path)
-    last_pos = _file_positions.get(instance_id, 0)
     if path != _last_log_path.get(instance_id):
-        last_pos = 0
         _last_log_path[instance_id] = path
+        _file_positions[instance_id] = file_size
+        return []
+
+    if instance_id not in _file_positions:
+        _file_positions[instance_id] = file_size
+        return []
+
+    last_pos = _file_positions.get(instance_id, 0)
 
     if file_size < last_pos:
         last_pos = 0

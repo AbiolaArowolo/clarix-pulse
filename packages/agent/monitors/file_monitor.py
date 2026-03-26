@@ -34,6 +34,51 @@ def _read_filebar(instance_root: str) -> Optional[float]:
         return None
 
 
+def _read_insta_runtime_status(instance_root: str) -> tuple[Optional[int], Optional[int], Optional[str]]:
+    """Read Insta runningstatus.txt and return inferred runtime flags."""
+    path = os.path.join(instance_root, "runningstatus.txt")
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            raw_value = f.read().strip()
+    except OSError:
+        return None, None, None
+
+    if not raw_value:
+        return None, None, None
+
+    parts = [part.strip() for part in raw_value.split("|")]
+    if len(parts) < 2:
+        return None, None, raw_value
+
+    try:
+        running_flag = int(parts[0])
+        pause_flag = int(parts[1])
+    except ValueError:
+        return None, None, raw_value
+
+    return running_flag, pause_flag, raw_value
+
+
+def _classify_insta_runtime_state(
+    running_flag: Optional[int], pause_flag: Optional[int]
+) -> Optional[str]:
+    """
+    Infer current Insta runtime state from runningstatus.txt.
+
+    This mapping is intentionally conservative:
+    - pause flag wins when asserted
+    - running flag 0 is treated as stopped
+    - running flag 1 with no pause is treated as healthy
+    """
+    if pause_flag == 1:
+        return "paused"
+    if running_flag == 0:
+        return "stopped"
+    if running_flag == 1:
+        return "healthy"
+    return None
+
+
 def _read_admax_frame(paths: dict) -> Optional[int]:
     """Read Admax Settings.ini and return Frame value."""
     candidates = []
@@ -135,6 +180,17 @@ def check(instance_id: str, playout_type: str, paths: dict) -> dict:
 
     if playout_type == "insta":
         instance_root = paths.get("instance_root", "")
+        running_flag, pause_flag, raw_status = _read_insta_runtime_status(instance_root)
+        runtime_state = _classify_insta_runtime_state(running_flag, pause_flag)
+        if runtime_state:
+            result["insta_runtime_state"] = runtime_state
+        if running_flag is not None:
+            result["insta_running_flag"] = running_flag
+        if pause_flag is not None:
+            result["insta_pause_flag"] = pause_flag
+        if raw_status:
+            result["insta_runningstatus_raw"] = raw_status
+
         position = _read_filebar(instance_root)
         if position is not None:
             d30, d60 = _compute_delta(instance_id, position)

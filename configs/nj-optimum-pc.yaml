@@ -9,25 +9,18 @@ agent_token: REPLACE_ME_NJ_OPTIMUM_PC_TOKEN
 poll_interval_seconds: 10
 
 players:
-  - player_id: nj-optimum-admax-1
-    playout_type: admax
+  - player_id: nj-optimum-insta-1
+    playout_type: insta
     paths:
-      admax_root_candidates:
-        - C:\Program Files (x86)\Unimedia\Admax One*\admax
-        - C:\Program Files\Unimedia\Admax One*\admax
-    process_selectors:
-      window_title_contains:
-        - Admax 1
-    log_selectors:
-      include_contains:
-        - Admax 1
+      shared_log_dir: C:\Program Files\Indytek\Insta log
+      instance_root: C:\Program Files\Indytek\Insta Playout\Settings
     udp_inputs:
       # Optional future UDP monitoring matrix for NJ Optimum.
-      - udp_input_id: nj-optimum-admax-1-udp-1
+      - udp_input_id: nj-optimum-insta-1-udp-1
         enabled: false
-        stream_url: "udp://REPLACE_ME_NJ_OPTIMUM_ADMAX_1_UDP_1"
+        stream_url: "udp://REPLACE_ME_NJ_OPTIMUM_INSTA_1_UDP_1"
         thumbnail_interval_s: 10
-      - udp_input_id: nj-optimum-admax-1-udp-2
+      - udp_input_id: nj-optimum-insta-1-udp-2
         enabled: false
-        stream_url: "udp://REPLACE_ME_NJ_OPTIMUM_ADMAX_1_UDP_2"
+        stream_url: "udp://REPLACE_ME_NJ_OPTIMUM_INSTA_1_UDP_2"
         thumbnail_interval_s: 10

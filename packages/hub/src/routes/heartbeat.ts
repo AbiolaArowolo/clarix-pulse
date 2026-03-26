@@ -3,7 +3,7 @@ import { Server as SocketServer } from 'socket.io';
 import { AGENT_INSTANCE_MAP, INSTANCE_MAP } from '../config/instances';
 import { computeHealth, Observations } from '../services/stateEngine';
 import { evaluateAlert } from '../services/alerting';
-import { updateState } from '../store/state';
+import { getState, updateState } from '../store/state';
 
 function parseAgentTokens(): Map<string, string> {
   const map = new Map<string, string>();
@@ -67,10 +67,16 @@ export function createHeartbeatRouter(io: SocketServer): Router {
       return res.status(404).json({ error: 'Unknown player' });
     }
 
+    const previousState = getState(resolvedPlayerId);
     const udpMonitoringEnabled = getUdpMonitoringEnabled(observations);
     const { broadcastHealth, runtimeHealth, connectivityHealth } = computeHealth(
       observations,
-      udpMonitoringEnabled
+      udpMonitoringEnabled,
+      {
+        currentTime: new Date(),
+        previousRuntimeHealth: previousState?.runtimeHealth,
+        previousRuntimeStartedAt: previousState?.runtimeStartedAt ?? null,
+      }
     );
 
     const { previous, current } = await updateState(

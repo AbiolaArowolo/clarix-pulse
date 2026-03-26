@@ -10,6 +10,18 @@ const DB_PATH = path.join(DATA_DIR, 'clarix.db');
 // Create libsql client pointing to a local SQLite file
 export const db: Client = createClient({ url: `file:${DB_PATH}` });
 
+async function ensureColumn(
+  tableName: string,
+  columnName: string,
+  definition: string
+): Promise<void> {
+  const result = await db.execute(`PRAGMA table_info(${tableName})`);
+  const hasColumn = result.rows.some((row) => row.name === columnName);
+  if (!hasColumn) {
+    await db.execute(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+  }
+}
+
 export async function initDb(): Promise<void> {
   await db.executeMultiple(`
     CREATE TABLE IF NOT EXISTS instance_state (
@@ -39,6 +51,13 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_events_instance_id ON events(instance_id);
     CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
   `);
+
+  await ensureColumn('instance_state', 'runtime_started_at', 'TEXT');
+  await db.execute(`
+    UPDATE instance_state
+    SET runtime_started_at = COALESCE(runtime_started_at, updated_at)
+    WHERE runtime_started_at IS NULL
+  `);
 }
 
 export type BroadcastHealth = 'healthy' | 'degraded' | 'off_air_likely' | 'off_air_confirmed' | 'unknown';
@@ -61,5 +80,6 @@ export interface InstanceState {
   lastObservations: Record<string, unknown> | null;
   thumbnailData: string | null; // base64 stored as TEXT in libsql
   thumbnailAt: string | null;
+  runtimeStartedAt: string;
   updatedAt: string;
 }

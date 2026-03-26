@@ -77,7 +77,7 @@ Each node authenticates by `node_id` + pre-shared Bearer token - never by IP add
 |---------|--------------|----------|-----|
 | `ny-main-pc` | `ny-main-insta-1`, `ny-main-insta-2`, `ny-main-admax-1` | Insta Playout + Admax | optional |
 | `ny-backup-pc` | `ny-backup-admax-1`, `ny-backup-admax-2` | Admax | enabled on both players |
-| `nj-optimum-pc` | `nj-optimum-admax-1` | Admax | optional |
+| `nj-optimum-pc` | `nj-optimum-insta-1` | Insta Playout | optional |
 | `digicel-pc` | `digicel-admax-1` | Admax | enabled |
 
 Each node may carry 2-5 UDP inputs where the site layout requires it. Inputs can be grouped under one player or spread across several players, and the player identifier remains the routing key for monitoring, alerting, and dashboard rendering.
@@ -342,3 +342,7 @@ so operators can launch Pulse like a native app on phones and tablets. The dashb
 persistent install bar with a QR code so a phone on the same LAN can open the current dashboard URL
 quickly. If the dashboard is opened as `localhost`, switch to the PC's LAN IP before scanning so the
 phone can reach it.
+
+When UDP confirmation is not available, Pulse shows `paused` / `stopped` immediately but waits about
+45 seconds before escalating that continuous runtime condition to a red OFF AIR alarm. The red alarm
+clears automatically on the next healthy heartbeat after playback resumes.
