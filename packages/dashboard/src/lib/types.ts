@@ -36,10 +36,10 @@ export interface SiteState {
 export type StatusColor = 'green' | 'yellow' | 'red' | 'orange' | 'gray';
 
 export function getStatusColor(inst: InstanceState): StatusColor {
-  if (inst.connectivityHealth === 'offline') return 'gray';
-  if (inst.connectivityHealth === 'stale') return 'orange';
   if (inst.broadcastHealth === 'off_air_confirmed' || inst.broadcastHealth === 'off_air_likely') return 'red';
   if (inst.runtimeHealth === 'stopped') return 'red';
+  if (inst.connectivityHealth === 'offline') return 'yellow';
+  if (inst.connectivityHealth === 'stale') return 'yellow';
   if (
     inst.broadcastHealth === 'degraded'
     || inst.runtimeHealth === 'paused'

@@ -122,6 +122,33 @@ def _coerce_text(value: Any, default: str) -> str:
     return text or default
 
 
+def normalize_stream_url(value: Any) -> str:
+    """
+    Normalize operator-entered UDP URLs into an ffmpeg-friendly form.
+
+    Accepted examples:
+    - udp://224.2.2.2:5004
+    - udp://@224.2.2.2:5004
+    - udp@://224.2.2.2:5004  -> normalized to udp://@224.2.2.2:5004
+    - @224.2.2.2:5004        -> normalized to udp://@224.2.2.2:5004
+    - 224.2.2.2:5004         -> normalized to udp://224.2.2.2:5004
+    """
+    text = _coerce_text(value, "")
+    if not text:
+        return ""
+
+    lowered = text.lower()
+    if lowered.startswith("udp@://"):
+        return f"udp://@{text[7:]}"
+    if lowered.startswith("udp://"):
+        return text
+    if text.startswith("@"):
+        return f"udp://{text}"
+    if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}:\d{1,5}", text):
+        return f"udp://{text}"
+    return text
+
+
 def _copy_metadata(source: Mapping[str, Any]) -> dict[str, Any]:
     return {
         key: value
@@ -138,7 +165,7 @@ def _resolve_source(
     defaults = dict(container_defaults or {})
 
     if isinstance(raw, str):
-        url = raw.strip()
+        url = normalize_stream_url(raw)
         if not url:
             return None
         source_id = _coerce_text(defaults.get("source_id"), f"udp-{index + 1}")
@@ -162,9 +189,8 @@ def _resolve_source(
     merged: dict[str, Any] = dict(defaults)
     merged.update(raw)
 
-    url = _coerce_text(
+    url = normalize_stream_url(
         merged.get("stream_url", merged.get("url", merged.get("uri"))),
-        "",
     )
     if not url:
         return None
@@ -616,9 +642,8 @@ def capture_thumbnail(
         return _capture_thumbnail_url(selected_source.source.url)
 
     if isinstance(selected_source, Mapping):
-        selected_url = _coerce_text(
-            selected_source.get("stream_url", selected_source.get("url", selected_source.get("uri"))),
-            "",
+        selected_url = normalize_stream_url(
+            selected_source.get("stream_url", selected_source.get("url", selected_source.get("uri")))
         )
         if selected_url:
             return _capture_thumbnail_url(selected_url)

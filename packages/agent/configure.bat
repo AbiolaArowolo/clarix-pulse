@@ -8,6 +8,7 @@ set "INSTALL_DIR=%ProgramData%\ClarixPulse\Agent"
 set "CONFIG_PATH=%INSTALL_DIR%\config.yaml"
 set "CONFIG_EXAMPLE_PATH=%INSTALL_DIR%\config.example.yaml"
 set "NSSM_PATH=%INSTALL_DIR%\nssm.exe"
+set "EXE_PATH=%INSTALL_DIR%\clarix-agent.exe"
 
 if not exist "%INSTALL_DIR%" (
     echo ERROR: %INSTALL_DIR% does not exist.
@@ -31,7 +32,25 @@ echo.
 echo You can enable or disable UDP per player by editing udp_inputs.
 echo hub_url can point to a local LAN hub or a remote hub.
 echo.
+echo UDP examples:
+echo   stream_url: "udp://224.2.2.2:5004"
+echo   stream_url: "udp://@224.2.2.2:5004" ^(multicast listen^)
+echo   stream_url: "udp@://224.2.2.2:5004" ^(accepted and normalized automatically^)
+echo Set enabled: true for each UDP input you want Pulse to probe.
+echo.
 notepad "%CONFIG_PATH%"
+
+if exist "%EXE_PATH%" (
+    echo.
+    echo Validating config...
+    "%EXE_PATH%" --validate-config
+    if not "%errorlevel%"=="0" (
+        echo.
+        echo Config validation failed. Fix the values above before restarting the service.
+        pause
+        exit /b 1
+    )
+)
 
 sc query %SERVICE_NAME% >nul 2>&1
 if not "%errorlevel%"=="0" (

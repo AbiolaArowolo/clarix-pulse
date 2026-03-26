@@ -269,3 +269,18 @@ missing-window warning on service-installed nodes. On the Optimum PC, the Window
 the real process but not a trustworthy interactive window handle, so Pulse now keeps the card
 healthy when `runningstatus.txt` says Insta is healthy instead of holding the site in a permanent
 yellow degraded state.
+
+**2026-03-26 12:13:36 America/New_York**: UDP setup was hardened for node operators. Pulse now
+accepts the common multicast convenience form `udp@://224.2.2.2:5004` and normalizes it to the
+ffmpeg-friendly listen form `udp://@224.2.2.2:5004`, while still accepting plain `udp://...`
+inputs. The node `configure.bat` helper now prints valid UDP examples and runs
+`clarix-agent.exe --validate-config` before offering a service restart so enabled UDP inputs with
+missing URLs or missing ffmpeg/ffprobe binaries are caught immediately.
+
+**2026-03-26 12:19:08 America/New_York**: Dashboard live updates were made resilient to transport
+problems so operators do not need to refresh the page to see heartbeat-driven state changes. The
+browser client now prefers Socket.IO polling before websocket upgrade, falls back to `/api/status`
+refreshes every 5 seconds, refreshes the on-card "Last heartbeat" age automatically, and treats
+network-offline/stale cards as yellow warning states instead of gray so `stopped` remains red,
+`paused` remains yellow, and connectivity loss is clearly shown as a warning rather than a dead
+card.

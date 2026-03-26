@@ -296,7 +296,7 @@ def _normalize_udp_input(player_id: str, udp_input: Any, index: int) -> dict[str
     return {
         "udp_input_id": udp_input_id,
         "enabled": _as_bool(udp_input.get("enabled"), False),
-        "stream_url": _as_str(udp_input.get("stream_url")),
+        "stream_url": udp_probe.normalize_stream_url(udp_input.get("stream_url")),
         "thumbnail_interval_s": _as_int(udp_input.get("thumbnail_interval_s"), 10),
     }
 
@@ -434,6 +434,54 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
 
 def load_config() -> dict[str, Any]:
     return normalize_config(_load_raw_config())
+
+
+def validate_config_command() -> int:
+    try:
+        config = load_config()
+    except SystemExit as exc:
+        return int(exc.code or 1)
+
+    print(f"Config OK for node_id={config['node_id']} ({config['node_name']})")
+    validation_failed = False
+    enabled_udp_count = 0
+
+    for player in config["players"]:
+        player_id = player["player_id"]
+        playout_type = player.get("playout_type", "insta")
+        udp_inputs = player.get("udp_inputs", [])
+        print(f"- {player_id} [{playout_type}]")
+
+        if not udp_inputs:
+            print("  UDP: none configured")
+            continue
+
+        for udp_input in udp_inputs:
+            udp_input_id = udp_input["udp_input_id"]
+            enabled = _as_bool(udp_input.get("enabled"), False)
+            stream_url = _as_str(udp_input.get("stream_url"))
+            status = "enabled" if enabled else "disabled"
+            print(f"  - {udp_input_id}: {status}")
+            print(f"    stream_url: {stream_url or '<empty>'}")
+
+            if enabled:
+                enabled_udp_count += 1
+                if not stream_url:
+                    print("    ERROR: enabled UDP input is missing stream_url")
+                    validation_failed = True
+
+    if enabled_udp_count > 0:
+        for binary_name, binary_path in (("ffmpeg.exe", udp_probe.FFMPEG), ("ffprobe.exe", udp_probe.FFPROBE)):
+            if not os.path.exists(binary_path):
+                print(f"ERROR: {binary_name} not found at {binary_path}")
+                validation_failed = True
+
+    if validation_failed:
+        print("Config validation failed.")
+        return 1
+
+    print("Config validation passed.")
+    return 0
 
 
 # --- Heartbeat ----------------------------------------------------------------
@@ -707,4 +755,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--validate-config":
+        sys.exit(validate_config_command())
     main()

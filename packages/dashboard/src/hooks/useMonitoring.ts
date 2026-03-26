@@ -17,12 +17,16 @@ export function useMonitoring() {
   const thumbnailsRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
-    fetch('/api/status')
+    const fetchStatus = () =>
+      fetch('/api/status')
       .then((response) => response.json())
       .then((data: { sites: SiteState[] }) => {
         setSites(data.sites ?? []);
       })
       .catch(console.error);
+
+    fetchStatus();
+    const fallbackRefresh = window.setInterval(fetchStatus, 5000);
 
     socket.on('connect', () => setConnectionStatus('connected'));
     socket.on('disconnect', () => setConnectionStatus('disconnected'));
@@ -80,6 +84,7 @@ export function useMonitoring() {
     });
 
     return () => {
+      window.clearInterval(fallbackRefresh);
       socket.off('connect');
       socket.off('disconnect');
       socket.off('connect_error');

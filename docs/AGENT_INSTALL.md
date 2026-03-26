@@ -107,6 +107,15 @@ For Admax players, the agent can resolve the installed layout from version-agnos
 so a move from `2.0` to `2.0.2` does not require a new config if the install stays under the usual
 `Unimedia\Admax*\admax` structure.
 
+For UDP URLs, Pulse accepts:
+
+- `udp://224.2.2.2:5004`
+- `udp://@224.2.2.2:5004` for multicast listen syntax
+- `udp@://224.2.2.2:5004` as a convenience form that Pulse normalizes automatically
+
+After editing the config, `configure.bat` now runs `clarix-agent.exe --validate-config` before it
+offers a service restart, so invalid enabled UDP inputs are caught early.
+
 Example:
 
 ```yaml

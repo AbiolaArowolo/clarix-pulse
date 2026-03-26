@@ -59,6 +59,10 @@ players:
         enabled: false
         stream_url: ""
         thumbnail_interval_s: 10
+        # Accepted examples:
+        # stream_url: "udp://224.2.2.2:5004"
+        # stream_url: "udp://@224.2.2.2:5004"   # multicast listen
+        # stream_url: "udp@://224.2.2.2:5004"   # Pulse normalizes this automatically
 
 # Example: a node with multiple UDP inputs on one player
 # players:
