@@ -263,3 +263,9 @@ fresh alarms after an agent restart. For local-runtime-only incidents without UD
 Pulse now shows `paused` / `stopped` immediately but waits about 45 seconds of continuous runtime
 failure before escalating to red OFF AIR, and it clears the red alarm automatically on the next
 healthy heartbeat after playback resumes.
+
+**2026-03-26 12:02:59 America/New_York**: Insta runtime health is now allowed to overrule the
+missing-window warning on service-installed nodes. On the Optimum PC, the Windows service can see
+the real process but not a trustworthy interactive window handle, so Pulse now keeps the card
+healthy when `runningstatus.txt` says Insta is healthy instead of holding the site in a permanent
+yellow degraded state.

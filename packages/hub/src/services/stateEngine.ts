@@ -162,7 +162,12 @@ function computeBroadcast(
   if (runtimeHealth === 'content_error') return 'degraded';
 
   // Window missing but process present.
-  if (obs.playout_process_up === 1 && obs.playout_window_up === 0) return 'degraded';
+  if (obs.playout_process_up === 1 && obs.playout_window_up === 0) {
+    if (obs.insta_runtime_state === 'healthy' || obs.insta_running_flag === 1) {
+      return 'healthy';
+    }
+    return 'degraded';
+  }
 
   // Stall warning threshold (30s, not yet critical at 60s).
   const positionDelta30 = obs.filebar_position_delta_30s ?? obs.frame_delta_30s;
