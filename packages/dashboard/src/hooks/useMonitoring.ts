@@ -15,22 +15,43 @@ export function useMonitoring() {
   const [sites, setSites] = useState<SiteState[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const thumbnailsRef = useRef<Map<string, string>>(new Map());
+  const lastApiSuccessRef = useRef(0);
 
   useEffect(() => {
+    const markConnected = () => setConnectionStatus('connected');
+    const markDisconnectedIfHubUnreachable = () => {
+      if (Date.now() - lastApiSuccessRef.current > 15_000) {
+        setConnectionStatus('disconnected');
+      }
+    };
+
     const fetchStatus = () =>
       fetch('/api/status')
       .then((response) => response.json())
       .then((data: { sites: SiteState[] }) => {
+        lastApiSuccessRef.current = Date.now();
         setSites(data.sites ?? []);
+        markConnected();
       })
-      .catch(console.error);
+      .catch((error) => {
+        console.error(error);
+        if (!socket.connected) {
+          setConnectionStatus('disconnected');
+        }
+      });
 
     fetchStatus();
     const fallbackRefresh = window.setInterval(fetchStatus, 5000);
 
-    socket.on('connect', () => setConnectionStatus('connected'));
-    socket.on('disconnect', () => setConnectionStatus('disconnected'));
-    socket.on('connect_error', () => setConnectionStatus('disconnected'));
+    if (socket.connected) {
+      markConnected();
+    } else {
+      socket.connect();
+    }
+
+    socket.on('connect', markConnected);
+    socket.on('disconnect', markDisconnectedIfHubUnreachable);
+    socket.on('connect_error', markDisconnectedIfHubUnreachable);
 
     socket.on('full_state', (data: { sites?: SiteState[] } | any[]) => {
       if (!Array.isArray(data) && data?.sites) {
@@ -85,9 +106,9 @@ export function useMonitoring() {
 
     return () => {
       window.clearInterval(fallbackRefresh);
-      socket.off('connect');
-      socket.off('disconnect');
-      socket.off('connect_error');
+      socket.off('connect', markConnected);
+      socket.off('disconnect', markDisconnectedIfHubUnreachable);
+      socket.off('connect_error', markDisconnectedIfHubUnreachable);
       socket.off('full_state');
       socket.off('state_update');
       socket.off('thumbnail_update');

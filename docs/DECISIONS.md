@@ -284,3 +284,9 @@ refreshes every 5 seconds, refreshes the on-card "Last heartbeat" age automatica
 network-offline/stale cards as yellow warning states instead of gray so `stopped` remains red,
 `paused` remains yellow, and connectivity loss is clearly shown as a warning rather than a dead
 card.
+
+**2026-03-26 12:23:18 America/New_York**: The mobile/PWA connection banner was tightened so it does
+not show `Disconnected` just because one Socket.IO transport path misbehaves while the app can still
+reach the hub. Successful `/api/status` refreshes now count as an active connection for the top-bar
+indicator, and the PWA now auto-applies updated service workers so phones are less likely to remain
+stuck on stale dashboard code after deployment.
