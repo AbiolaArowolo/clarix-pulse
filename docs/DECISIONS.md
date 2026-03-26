@@ -248,3 +248,9 @@ machine.
 carry `nssm.exe`, `ffmpeg.exe`, and `ffprobe.exe` together with the agent and scripts. The intent
 is that operators can install once, then turn UDP inputs on or off later from `configure.bat`
 without needing a second dependency install on the node.
+
+**2026-03-26 11:34:58 America/New_York**: NJ Optimum was elevated and installed locally as the
+persistent Windows service `ClarixPulseAgent` from `%ProgramData%\ClarixPulse\Agent` on the
+Optimum PC. Post-install verification confirmed the service is `RUNNING`, startup is `AUTO_START`,
+the live hub is receiving heartbeats from `nj-optimum-pc`, and the temporary direct-run test agent
+from the release folder was removed so only the service-owned runtime remains active.
