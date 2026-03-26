@@ -32,7 +32,7 @@ the local network.
 On the admin workstation, build the agent exe and then assemble the bundle:
 
 ```powershell
-pyinstaller packages/agent/clarix-agent.spec
+pyinstaller --distpath packages/agent/dist --workpath packages/agent/build packages/agent/clarix-agent.spec
 powershell -ExecutionPolicy Bypass -File packages/agent/build-node-bundle.ps1
 ```
 

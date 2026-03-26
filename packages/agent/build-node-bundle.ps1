@@ -11,7 +11,9 @@ $ProgressPreference = 'SilentlyContinue'
 
 $bundleDir = Join-Path $OutputRoot $BundleName
 $vendorDir = Join-Path $PSScriptRoot 'vendor'
+$repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $distDir = Join-Path $PSScriptRoot 'dist'
+$repoDistDir = Join-Path $repoRoot 'dist'
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'pulse-vendor'
 
 function Ensure-Directory {
@@ -44,6 +46,21 @@ function Get-FirstMatch {
         [string]$Filter
     )
     Get-ChildItem -Path $Root -Recurse -File -Filter $Filter | Select-Object -First 1
+}
+
+function Resolve-AgentBinary {
+    $candidates = @(
+        (Join-Path $distDir 'clarix-agent.exe'),
+        (Join-Path $repoDistDir 'clarix-agent.exe')
+    ) | Where-Object { Test-Path $_ }
+
+    if (-not $candidates) {
+        return $null
+    }
+
+    return $candidates |
+        Sort-Object { (Get-Item $_).LastWriteTimeUtc } -Descending |
+        Select-Object -First 1
 }
 
 function Ensure-NssmBinary {
@@ -104,12 +121,12 @@ function Ensure-FfmpegBinaries {
     Copy-Item -Path $ffprobe.FullName -Destination $ffprobeTarget -Force
 }
 
-if (-not (Test-Path (Join-Path $distDir 'clarix-agent.exe'))) {
-    throw "Missing required file: $(Join-Path $distDir 'clarix-agent.exe')"
+if (-not (Resolve-AgentBinary)) {
+    throw "Missing required file: $(Join-Path $distDir 'clarix-agent.exe') or $(Join-Path $repoDistDir 'clarix-agent.exe')"
 }
 
 $requiredRepoFiles = @(
-    @{ Source = (Join-Path $distDir 'clarix-agent.exe'); Target = 'clarix-agent.exe' }
+    @{ Source = (Resolve-AgentBinary); Target = 'clarix-agent.exe' }
     @{ Source = (Join-Path $PSScriptRoot 'install.bat'); Target = 'install.bat' }
     @{ Source = (Join-Path $PSScriptRoot 'uninstall.bat'); Target = 'uninstall.bat' }
     @{ Source = (Join-Path $PSScriptRoot 'configure.bat'); Target = 'configure.bat' }
