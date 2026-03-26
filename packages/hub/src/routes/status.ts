@@ -22,6 +22,7 @@ export function buildStatusPayload() {
         label: inst.label,
         siteId: inst.siteId,
         playoutType: inst.playoutType,
+        commissioned: inst.commissioned,
         monitoringMode: udpMonitoringEnabled ? 'hybrid' : 'local',
         udpMonitoringCapable: inst.udpMonitoringCapable,
         udpMonitoringEnabled,

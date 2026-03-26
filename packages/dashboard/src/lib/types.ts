@@ -10,6 +10,7 @@ export interface InstanceState {
   label: string;
   siteId: string;
   playoutType: 'insta' | 'admax';
+  commissioned: boolean;
   monitoringMode: MonitoringMode;
   udpMonitoringCapable: boolean;
   udpMonitoringEnabled: boolean;
@@ -35,11 +36,15 @@ export interface SiteState {
 
 export type StatusColor = 'green' | 'yellow' | 'red' | 'orange' | 'gray';
 
+export function isInactiveInstance(inst: InstanceState): boolean {
+  return !inst.commissioned && !inst.lastHeartbeatAt;
+}
+
 export function getStatusColor(inst: InstanceState): StatusColor {
+  if (isInactiveInstance(inst)) return 'gray';
   if (inst.broadcastHealth === 'off_air_confirmed' || inst.broadcastHealth === 'off_air_likely') return 'red';
   if (inst.runtimeHealth === 'stopped') return 'red';
-  if (inst.connectivityHealth === 'offline') return 'yellow';
-  if (inst.connectivityHealth === 'stale') return 'yellow';
+  if (inst.connectivityHealth === 'offline' || inst.connectivityHealth === 'stale') return 'yellow';
   if (
     inst.broadcastHealth === 'degraded'
     || inst.runtimeHealth === 'paused'
@@ -49,6 +54,12 @@ export function getStatusColor(inst: InstanceState): StatusColor {
   ) return 'yellow';
   if (inst.broadcastHealth === 'healthy' && inst.runtimeHealth === 'healthy') return 'green';
   return 'gray';
+}
+
+export function isConnectivityWarning(inst: InstanceState): boolean {
+  if (isInactiveInstance(inst)) return false;
+  if (getStatusColor(inst) === 'red') return false;
+  return inst.connectivityHealth === 'offline' || inst.connectivityHealth === 'stale';
 }
 
 export function isAlarmState(inst: InstanceState): boolean {

@@ -103,6 +103,9 @@ You can edit it later by running:
 ```
 
 Use `udp_inputs` on each player to turn UDP monitoring on or off without reinstalling the node.
+Every node bundle uses the same UDP-capable software path. When one or more UDP inputs are enabled
+for a player, Pulse routes that player through the bundled `ffmpeg.exe` / `ffprobe.exe` checks and
+reports the healthiest enabled source as the live UDP matrix result.
 For Admax players, the agent can resolve the installed layout from version-agnostic root candidates,
 so a move from `2.0` to `2.0.2` does not require a new config if the install stays under the usual
 `Unimedia\Admax*\admax` structure.
@@ -114,7 +117,9 @@ For UDP URLs, Pulse accepts:
 - `udp@://224.2.2.2:5004` as a convenience form that Pulse normalizes automatically
 
 After editing the config, `configure.bat` now runs `clarix-agent.exe --validate-config` before it
-offers a service restart, so invalid enabled UDP inputs are caught early.
+offers a service restart, so invalid enabled UDP inputs are caught early. The current templates
+ship with room for up to 5 UDP inputs on a player so operators do not need to hand-build the YAML
+structure from scratch.
 
 Example:
 

@@ -48,6 +48,7 @@ LOG_SELECTOR_KEYS = {
     "exclude_regexes",
     "paused_regex",
     "played_regex",
+    "skipped_regex",
     "exited_regex",
     "reinit_regex",
     "token_patterns",

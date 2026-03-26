@@ -22,6 +22,7 @@ function rowToState(row: Record<string, unknown>): InstanceState {
     lastObservations: row.last_observations ? JSON.parse(row.last_observations as string) : null,
     thumbnailData: (row.thumbnail_data as string) ?? null,
     thumbnailAt: (row.thumbnail_at as string) ?? null,
+    broadcastStartedAt: (row.broadcast_started_at as string) ?? updatedAt,
     runtimeStartedAt: (row.runtime_started_at as string) ?? updatedAt,
     updatedAt,
   };
@@ -40,9 +41,9 @@ export async function initState(): Promise<void> {
       await db.execute({
         sql: `INSERT OR IGNORE INTO instance_state
               (instance_id, agent_id, broadcast_health, runtime_health, connectivity_health,
-               last_heartbeat_at, last_observations, runtime_started_at, updated_at)
-              VALUES (?, '', 'unknown', 'unknown', 'offline', NULL, NULL, ?, ?)`,
-        args: [inst.id, timestamp, timestamp],
+               last_heartbeat_at, last_observations, broadcast_started_at, runtime_started_at, updated_at)
+              VALUES (?, '', 'unknown', 'unknown', 'offline', NULL, NULL, ?, ?, ?)`,
+        args: [inst.id, timestamp, timestamp, timestamp],
       });
     }
   }
@@ -73,6 +74,9 @@ export async function updateState(
 ): Promise<{ previous: InstanceState | undefined; current: InstanceState }> {
   const previous = cache.get(instanceId);
   const timestamp = now();
+  const broadcastStartedAt = previous?.broadcastHealth === broadcastHealth
+    ? previous.broadcastStartedAt
+    : timestamp;
   const runtimeStartedAt = previous?.runtimeHealth === runtimeHealth
     ? previous.runtimeStartedAt
     : timestamp;
@@ -80,8 +84,8 @@ export async function updateState(
   await db.execute({
     sql: `INSERT INTO instance_state
             (instance_id, agent_id, broadcast_health, runtime_health, connectivity_health,
-             last_heartbeat_at, last_observations, runtime_started_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             last_heartbeat_at, last_observations, broadcast_started_at, runtime_started_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(instance_id) DO UPDATE SET
             agent_id = excluded.agent_id,
             broadcast_health = excluded.broadcast_health,
@@ -89,11 +93,12 @@ export async function updateState(
             connectivity_health = excluded.connectivity_health,
             last_heartbeat_at = excluded.last_heartbeat_at,
             last_observations = excluded.last_observations,
+            broadcast_started_at = excluded.broadcast_started_at,
             runtime_started_at = excluded.runtime_started_at,
             updated_at = excluded.updated_at`,
     args: [
       instanceId, agentId, broadcastHealth, runtimeHealth, connectivityHealth,
-      timestamp, JSON.stringify(observations), runtimeStartedAt, timestamp,
+      timestamp, JSON.stringify(observations), broadcastStartedAt, runtimeStartedAt, timestamp,
     ],
   });
 
@@ -102,6 +107,7 @@ export async function updateState(
     lastHeartbeatAt: timestamp, lastObservations: observations,
     thumbnailData: previous?.thumbnailData ?? null,
     thumbnailAt: previous?.thumbnailAt ?? null,
+    broadcastStartedAt,
     runtimeStartedAt,
     updatedAt: timestamp,
   };
@@ -139,17 +145,22 @@ export async function setConnectivity(instanceId: string, connectivity: Connecti
 
 export async function markInstanceOffline(instanceId: string): Promise<InstanceState | undefined> {
   const timestamp = now();
+  const existing = cache.get(instanceId);
+  const broadcastStartedAt = existing?.broadcastHealth === 'unknown'
+    ? existing.broadcastStartedAt
+    : timestamp;
+
   await db.execute({
     sql: `UPDATE instance_state
-          SET broadcast_health = 'unknown', connectivity_health = 'offline', updated_at = ?
+          SET broadcast_health = 'unknown', connectivity_health = 'offline', broadcast_started_at = ?, updated_at = ?
           WHERE instance_id = ?`,
-    args: [timestamp, instanceId],
+    args: [broadcastStartedAt, timestamp, instanceId],
   });
 
-  const existing = cache.get(instanceId);
   if (existing) {
     existing.broadcastHealth = 'unknown';
     existing.connectivityHealth = 'offline';
+    existing.broadcastStartedAt = broadcastStartedAt;
     existing.updatedAt = timestamp;
   }
 

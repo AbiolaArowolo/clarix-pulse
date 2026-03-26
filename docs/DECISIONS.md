@@ -298,3 +298,25 @@ to red on a timer, and `stopped` now raises red/off-air immediately so a real pl
 hidden behind a grace window. The Optimum reference config was also tightened to a 5-second poll
 interval so heartbeat-driven updates feel closer to real time while the Insta package is being
 finished.
+
+**2026-03-26 13:10:59 America/New_York**: The dashboard now treats commissioned and inactive nodes
+as separate concepts. Uncommissioned instances are muted gray and hidden by default behind a header
+toggle instead of showing as live yellow warnings, while commissioned connectivity loss still shows
+as a visible yellow warning state without triggering the red off-air alarm path.
+
+**2026-03-26 13:10:59 America/New_York**: The operator-facing dashboard shell was upgraded so the
+top-left badge now uses the Pulse logo, the header carries live day/date/time, the install surface
+can collapse or hide itself, and the connection indicator stays green whenever Socket.IO or the
+status polling path is actively syncing. This was done to make the web app and PWA feel more like a
+finished monitoring console than a static status page.
+
+**2026-03-26 13:10:59 America/New_York**: UDP alerting is now a shared software rule across all
+node packages, not a site-specific exception. When UDP is enabled on any player, Pulse evaluates
+the configured UDP matrix through the bundled `ffmpeg.exe` / `ffprobe.exe` tools, shows a yellow
+warning immediately on a bad sample, escalates to red only after about 40 seconds of continuous UDP
+fault, and clears the red alarm on the first healthy UDP sample after recovery.
+
+**2026-03-26 13:10:59 America/New_York**: The Optimum reference package was tightened again for
+faster live feedback. The tracked Optimum node config now uses a 2-second poll interval, and the
+UDP scaffolding in the templates was expanded to 5 ready-to-fill inputs so all node bundles share
+the same UDP-capable software shape even when UDP is currently disabled.

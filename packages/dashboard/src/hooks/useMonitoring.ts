@@ -11,6 +11,9 @@ import {
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 
+const FALLBACK_REFRESH_MS = 2000;
+const DISCONNECT_THRESHOLD_MS = 8000;
+
 export function useMonitoring() {
   const [sites, setSites] = useState<SiteState[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
@@ -20,28 +23,28 @@ export function useMonitoring() {
   useEffect(() => {
     const markConnected = () => setConnectionStatus('connected');
     const markDisconnectedIfHubUnreachable = () => {
-      if (Date.now() - lastApiSuccessRef.current > 15_000) {
+      if (Date.now() - lastApiSuccessRef.current > DISCONNECT_THRESHOLD_MS && !socket.connected) {
         setConnectionStatus('disconnected');
       }
     };
 
     const fetchStatus = () =>
       fetch('/api/status')
-      .then((response) => response.json())
-      .then((data: { sites: SiteState[] }) => {
-        lastApiSuccessRef.current = Date.now();
-        setSites(data.sites ?? []);
-        markConnected();
-      })
-      .catch((error) => {
-        console.error(error);
-        if (!socket.connected) {
-          setConnectionStatus('disconnected');
-        }
-      });
+        .then((response) => response.json())
+        .then((data: { sites: SiteState[] }) => {
+          lastApiSuccessRef.current = Date.now();
+          setSites(data.sites ?? []);
+          markConnected();
+        })
+        .catch((error) => {
+          console.error(error);
+          if (!socket.connected) {
+            setConnectionStatus('disconnected');
+          }
+        });
 
     fetchStatus();
-    const fallbackRefresh = window.setInterval(fetchStatus, 5000);
+    const fallbackRefresh = window.setInterval(fetchStatus, FALLBACK_REFRESH_MS);
 
     if (socket.connected) {
       markConnected();
@@ -54,6 +57,8 @@ export function useMonitoring() {
     socket.on('connect_error', markDisconnectedIfHubUnreachable);
 
     socket.on('full_state', (data: { sites?: SiteState[] } | any[]) => {
+      markConnected();
+
       if (!Array.isArray(data) && data?.sites) {
         setSites(data.sites);
         return;
@@ -72,6 +77,7 @@ export function useMonitoring() {
     });
 
     socket.on('state_update', (update: any) => {
+      markConnected();
       setSites((prev) =>
         prev.map((site) => ({
           ...site,
@@ -83,6 +89,7 @@ export function useMonitoring() {
     });
 
     socket.on('thumbnail_update', (update: { instanceId?: string; playerId?: string; dataUrl: string; capturedAt?: string }) => {
+      markConnected();
       const targetId = update.playerId ?? update.instanceId;
       if (!targetId) return;
 
@@ -125,6 +132,7 @@ function mergeUpdate(inst: InstanceState, update: any): InstanceState {
     ...inst,
     nodeId: update.nodeId ?? inst.nodeId,
     playerId: update.playerId ?? inst.playerId,
+    commissioned: update.commissioned ?? inst.commissioned,
     monitoringMode: (update.monitoringMode ?? inst.monitoringMode) as MonitoringMode,
     udpMonitoringCapable: update.udpMonitoringCapable ?? inst.udpMonitoringCapable,
     udpMonitoringEnabled: update.udpMonitoringEnabled ?? inst.udpMonitoringEnabled,

@@ -53,10 +53,16 @@ export async function initDb(): Promise<void> {
   `);
 
   await ensureColumn('instance_state', 'runtime_started_at', 'TEXT');
+  await ensureColumn('instance_state', 'broadcast_started_at', 'TEXT');
   await db.execute(`
     UPDATE instance_state
     SET runtime_started_at = COALESCE(runtime_started_at, updated_at)
     WHERE runtime_started_at IS NULL
+  `);
+  await db.execute(`
+    UPDATE instance_state
+    SET broadcast_started_at = COALESCE(broadcast_started_at, updated_at)
+    WHERE broadcast_started_at IS NULL
   `);
 }
 
@@ -80,6 +86,7 @@ export interface InstanceState {
   lastObservations: Record<string, unknown> | null;
   thumbnailData: string | null; // base64 stored as TEXT in libsql
   thumbnailAt: string | null;
+  broadcastStartedAt: string;
   runtimeStartedAt: string;
   updatedAt: string;
 }

@@ -30,6 +30,8 @@ if not exist "%CONFIG_PATH%" (
 echo Opening %CONFIG_PATH%
 echo.
 echo You can enable or disable UDP per player by editing udp_inputs.
+echo Each player can carry 1-5 UDP inputs, and Pulse will use ffmpeg / ffprobe only for the inputs you enable.
+echo The dashboard only shows UDP status. Actual setup happens here in config.yaml on the node.
 echo hub_url can point to a local LAN hub or a remote hub.
 echo.
 echo UDP examples:

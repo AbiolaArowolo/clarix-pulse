@@ -10,6 +10,7 @@ export interface InstanceConfig {
   siteName: string;
   playoutType: 'insta' | 'admax';
   udpMonitoringCapable: boolean;
+  commissioned: boolean;
 }
 
 export interface SiteConfig {
@@ -23,10 +24,11 @@ export interface AgentConfig {
   allowedPlayerIds: string[];
 }
 
-function player(config: Omit<InstanceConfig, 'id'> & { id?: string }): InstanceConfig {
+function player(config: Omit<InstanceConfig, 'id' | 'commissioned'> & { id?: string; commissioned?: boolean }): InstanceConfig {
   return {
     ...config,
     id: config.id ?? config.playerId,
+    commissioned: config.commissioned ?? true,
   };
 }
 
@@ -39,6 +41,7 @@ export const INSTANCES: InstanceConfig[] = [
     siteName: 'NY Main',
     playoutType: 'insta',
     udpMonitoringCapable: true,
+    commissioned: false,
   }),
   player({
     playerId: 'ny-main-insta-2',
@@ -48,6 +51,7 @@ export const INSTANCES: InstanceConfig[] = [
     siteName: 'NY Main',
     playoutType: 'insta',
     udpMonitoringCapable: true,
+    commissioned: false,
   }),
   player({
     playerId: 'ny-main-admax-1',
@@ -57,6 +61,7 @@ export const INSTANCES: InstanceConfig[] = [
     siteName: 'NY Main',
     playoutType: 'admax',
     udpMonitoringCapable: true,
+    commissioned: false,
   }),
   player({
     playerId: 'ny-backup-admax-1',
@@ -66,6 +71,7 @@ export const INSTANCES: InstanceConfig[] = [
     siteName: 'NY Backup',
     playoutType: 'admax',
     udpMonitoringCapable: true,
+    commissioned: false,
   }),
   player({
     playerId: 'ny-backup-admax-2',
@@ -75,6 +81,7 @@ export const INSTANCES: InstanceConfig[] = [
     siteName: 'NY Backup',
     playoutType: 'admax',
     udpMonitoringCapable: true,
+    commissioned: false,
   }),
   player({
     playerId: 'nj-optimum-insta-1',
@@ -84,6 +91,7 @@ export const INSTANCES: InstanceConfig[] = [
     siteName: 'NJ Optimum',
     playoutType: 'insta',
     udpMonitoringCapable: true,
+    commissioned: true,
   }),
   player({
     playerId: 'digicel-admax-1',
@@ -93,6 +101,7 @@ export const INSTANCES: InstanceConfig[] = [
     siteName: 'FL Digicel',
     playoutType: 'admax',
     udpMonitoringCapable: true,
+    commissioned: false,
   }),
 ];
 

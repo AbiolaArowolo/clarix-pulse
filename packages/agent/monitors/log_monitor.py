@@ -12,6 +12,7 @@ from typing import Dict, Iterable, Optional
 
 _file_positions: Dict[str, int] = {}
 _last_log_path: Dict[str, str] = {}
+_last_tokens: Dict[str, Optional[str]] = {}
 
 DEFAULT_PATTERNS = {
     "admax_paused": re.compile(r"stopxxx2", re.IGNORECASE),
@@ -19,16 +20,17 @@ DEFAULT_PATTERNS = {
     "admax_reinit": re.compile(r"(initializ|starting up|application start)", re.IGNORECASE),
     "insta_paused": re.compile(r"\bPaused\b", re.IGNORECASE),
     "insta_played": re.compile(r"Fully Played", re.IGNORECASE),
+    "insta_skipped": re.compile(r"\bSkipped\b", re.IGNORECASE),
 }
 
 
 def _as_list(value: object) -> list[str]:
     if value is None:
-      return []
+        return []
     if isinstance(value, str):
-      return [value]
+        return [value]
     if isinstance(value, (list, tuple, set)):
-      return [str(item) for item in value if item]
+        return [str(item) for item in value if item]
     return []
 
 
@@ -77,12 +79,14 @@ def _read_new_lines(path: str, instance_id: str) -> list[str]:
     if not os.path.exists(path):
         _file_positions.pop(instance_id, None)
         _last_log_path.pop(instance_id, None)
+        _last_tokens.pop(instance_id, None)
         return []
 
     file_size = os.path.getsize(path)
     if path != _last_log_path.get(instance_id):
         _last_log_path[instance_id] = path
         _file_positions[instance_id] = file_size
+        _last_tokens.pop(instance_id, None)
         return []
 
     if instance_id not in _file_positions:
@@ -158,11 +162,14 @@ def _classify_admax_lines(lines: list[str], selectors: dict) -> Optional[str]:
 def _classify_insta_lines(lines: list[str], selectors: dict) -> Optional[str]:
     paused = _pattern(selectors, "paused", "insta_paused")
     played = _pattern(selectors, "played", "insta_played")
+    skipped = _pattern(selectors, "skipped", "insta_skipped")
 
     token = None
     for line in lines:
         if paused.search(line):
             token = "paused"
+        elif skipped.search(line) and token != "paused":
+            token = "skipped"
         elif played.search(line) and token != "paused":
             token = "fully_played"
     return token
@@ -183,6 +190,14 @@ def check(instance_id: str, playout_type: str, paths: dict, selectors: dict | No
         token = _classify_admax_lines(new_lines, selectors)
     else:
         token = _classify_insta_lines(new_lines, selectors)
+
+    latched_token = _last_tokens.get(instance_id)
+    if token in {"stopxxx2", "app_exited", "reinit", "paused"}:
+        _last_tokens[instance_id] = token
+    elif token in {"fully_played", "skipped"}:
+        _last_tokens.pop(instance_id, None)
+    elif token is None:
+        token = latched_token
 
     return {
         "log_last_token": token,

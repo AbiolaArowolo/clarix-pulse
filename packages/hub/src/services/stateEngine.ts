@@ -3,6 +3,10 @@
 
 import { BroadcastHealth, RuntimeHealth, ConnectivityHealth } from '../store/db';
 
+const UDP_RED_AFTER_SECONDS = 40;
+const UDP_FREEZE_WARNING_SECONDS = 2;
+const UDP_SILENCE_WARNING_SECONDS = 8;
+
 export interface Observations extends Record<string, unknown> {
   // Process
   playout_process_up?: number;
@@ -39,6 +43,8 @@ export interface Observations extends Record<string, unknown> {
 
 export interface HealthComputationContext {
   currentTime?: Date;
+  previousBroadcastHealth?: BroadcastHealth;
+  previousBroadcastStartedAt?: string | null;
   previousRuntimeHealth?: RuntimeHealth;
   previousRuntimeStartedAt?: string | null;
 }
@@ -47,6 +53,7 @@ export interface HealthResult {
   broadcastHealth: BroadcastHealth;
   runtimeHealth: RuntimeHealth;
   connectivityHealth: ConnectivityHealth;
+  broadcastStateAgeSeconds: number;
   runtimeStateAgeSeconds: number;
 }
 
@@ -56,23 +63,60 @@ export function computeHealth(
   context: HealthComputationContext = {}
 ): HealthResult {
   const runtimeHealth = computeRuntime(obs);
-  const runtimeStateAgeSeconds = computeRuntimeStateAgeSeconds(runtimeHealth, context);
-  const broadcastHealth = computeBroadcast(obs, runtimeHealth, udpProbeEnabled);
+  const runtimeStateAgeSeconds = computeStateAgeSeconds(
+    runtimeHealth,
+    context.previousRuntimeHealth,
+    context.previousRuntimeStartedAt,
+    context.currentTime
+  );
+  const broadcastHealth = computeBroadcast(obs, runtimeHealth, udpProbeEnabled, context);
+  const broadcastStateAgeSeconds = computeStateAgeSeconds(
+    broadcastHealth,
+    context.previousBroadcastHealth,
+    context.previousBroadcastStartedAt,
+    context.currentTime
+  );
   const connectivityHealth = computeConnectivity(obs);
 
-  return { broadcastHealth, runtimeHealth, connectivityHealth, runtimeStateAgeSeconds };
+  return {
+    broadcastHealth,
+    runtimeHealth,
+    connectivityHealth,
+    broadcastStateAgeSeconds,
+    runtimeStateAgeSeconds,
+  };
 }
 
-function computeRuntimeStateAgeSeconds(
-  runtimeHealth: RuntimeHealth,
-  context: HealthComputationContext
+function computeStateAgeSeconds<TState extends string>(
+  currentState: TState,
+  previousState?: TState,
+  previousStartedAt?: string | null,
+  currentTime?: Date
 ): number {
-  if (!context.previousRuntimeStartedAt || context.previousRuntimeHealth !== runtimeHealth) {
+  if (!previousStartedAt || previousState !== currentState) {
+    return 0;
+  }
+
+  const currentTimeMs = (currentTime ?? new Date()).getTime();
+  const previousStartMs = Date.parse(previousStartedAt);
+  if (Number.isNaN(previousStartMs)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.floor((currentTimeMs - previousStartMs) / 1000));
+}
+
+function computePersistedUdpFaultAgeSeconds(context: HealthComputationContext): number {
+  if (!context.previousBroadcastStartedAt) {
+    return 0;
+  }
+
+  if (context.previousBroadcastHealth !== 'degraded' && context.previousBroadcastHealth !== 'off_air_confirmed') {
     return 0;
   }
 
   const currentTimeMs = (context.currentTime ?? new Date()).getTime();
-  const previousStartMs = Date.parse(context.previousRuntimeStartedAt);
+  const previousStartMs = Date.parse(context.previousBroadcastStartedAt);
   if (Number.isNaN(previousStartMs)) {
     return 0;
   }
@@ -119,7 +163,6 @@ function computeRuntime(obs: Observations): RuntimeHealth {
   // Stall detection (critical threshold: 60s delta = 0)
   const positionDelta60 = obs.filebar_position_delta_60s ?? obs.frame_delta_60s;
   if (positionDelta60 !== undefined && positionDelta60 === 0 && obs.playout_process_up === 1) {
-    // If Insta exposes an explicit healthy runtime flag, trust it over a stale filebar.
     if (instaRuntimeState === 'healthy' || obs.insta_running_flag === 1) {
       return 'healthy';
     }
@@ -138,13 +181,25 @@ function computeRuntime(obs: Observations): RuntimeHealth {
 function computeBroadcast(
   obs: Observations,
   runtimeHealth: RuntimeHealth,
-  udpProbeEnabled: boolean
+  udpProbeEnabled: boolean,
+  context: HealthComputationContext
 ): BroadcastHealth {
-  // UDP output signals take priority when enabled and data is present.
+  // UDP output signals take priority when enabled.
   if (udpProbeEnabled && obs.output_signal_present !== undefined) {
-    if (obs.output_signal_present === 0) return 'off_air_confirmed';
-    if ((obs.output_freeze_seconds ?? 0) >= 20) return 'off_air_confirmed';
-    if ((obs.output_black_ratio ?? 0) >= 0.98) return 'off_air_confirmed';
+    const udpFaultDetected = obs.output_signal_present === 0
+      || (obs.output_freeze_seconds ?? 0) >= UDP_FREEZE_WARNING_SECONDS
+      || (obs.output_black_ratio ?? 0) >= 0.98
+      || (obs.output_audio_silence_seconds ?? 0) >= UDP_SILENCE_WARNING_SECONDS;
+
+    if (udpFaultDetected) {
+      const udpFaultAgeSeconds = computePersistedUdpFaultAgeSeconds(context);
+      if (udpFaultAgeSeconds >= UDP_RED_AFTER_SECONDS) {
+        return 'off_air_confirmed';
+      }
+      return 'degraded';
+    }
+
+    return 'healthy';
   }
 
   // Runtime-derived broadcast health.
@@ -177,11 +232,8 @@ function computeBroadcast(
 }
 
 function computeConnectivity(obs: Observations): ConnectivityHealth {
-  // Both gateway and internet must be healthy for 'online'
   if (obs.gateway_up === 1 && obs.internet_up === 1) return 'online';
-  // Gateway up but no internet - still connected locally
   if (obs.gateway_up === 1 && obs.internet_up === 0) return 'online';
-  // No gateway
   if (obs.gateway_up === 0) return 'offline';
   return 'online';
 }

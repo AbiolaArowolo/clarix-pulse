@@ -74,6 +74,8 @@ export function createHeartbeatRouter(io: SocketServer): Router {
       udpMonitoringEnabled,
       {
         currentTime: new Date(),
+        previousBroadcastHealth: previousState?.broadcastHealth,
+        previousBroadcastStartedAt: previousState?.broadcastStartedAt ?? null,
         previousRuntimeHealth: previousState?.runtimeHealth,
         previousRuntimeStartedAt: previousState?.runtimeStartedAt ?? null,
       }

@@ -36,7 +36,29 @@ players:
     # log_selectors:
     #   include_contains:
     #     - Insta 1
-    udp_inputs: []
+    udp_inputs:
+      # Fill any 1-5 inputs below. When one or more are enabled, Pulse treats them as a UDP matrix
+      # and automatically follows the healthiest source through ffmpeg / ffprobe.
+      - udp_input_id: ny-main-insta-1-udp-1
+        enabled: false
+        stream_url: ""
+        thumbnail_interval_s: 10
+      - udp_input_id: ny-main-insta-1-udp-2
+        enabled: false
+        stream_url: ""
+        thumbnail_interval_s: 10
+      - udp_input_id: ny-main-insta-1-udp-3
+        enabled: false
+        stream_url: ""
+        thumbnail_interval_s: 10
+      - udp_input_id: ny-main-insta-1-udp-4
+        enabled: false
+        stream_url: ""
+        thumbnail_interval_s: 10
+      - udp_input_id: ny-main-insta-1-udp-5
+        enabled: false
+        stream_url: ""
+        thumbnail_interval_s: 10
 
   - player_id: ny-main-insta-2
     playout_type: insta
@@ -56,6 +78,22 @@ players:
         - C:\Program Files\Unimedia\Admax One*\admax
     udp_inputs:
       - udp_input_id: ny-main-admax-1-udp-1
+        enabled: false
+        stream_url: ""
+        thumbnail_interval_s: 10
+      - udp_input_id: ny-main-admax-1-udp-2
+        enabled: false
+        stream_url: ""
+        thumbnail_interval_s: 10
+      - udp_input_id: ny-main-admax-1-udp-3
+        enabled: false
+        stream_url: ""
+        thumbnail_interval_s: 10
+      - udp_input_id: ny-main-admax-1-udp-4
+        enabled: false
+        stream_url: ""
+        thumbnail_interval_s: 10
+      - udp_input_id: ny-main-admax-1-udp-5
         enabled: false
         stream_url: ""
         thumbnail_interval_s: 10

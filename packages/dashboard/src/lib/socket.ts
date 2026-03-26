@@ -6,5 +6,6 @@ const HUB_URL = import.meta.env.VITE_HUB_URL ?? '';
 export const socket: Socket = io(HUB_URL, {
   transports: ['polling', 'websocket'],
   reconnectionAttempts: Infinity,
-  reconnectionDelay: 2000,
+  reconnectionDelay: 1000,
+  timeout: 5000,
 });

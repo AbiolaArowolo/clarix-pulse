@@ -62,7 +62,8 @@ Three independent domains - never mixed:
 
 ## Monitoring Protocol - All Players
 
-Every 10 seconds, the agent runs these checks in order for each player on the node:
+On every configured poll interval, the agent runs these checks in order for each player on the
+node. The Optimum reference node currently uses a 2-second poll interval for faster live feedback.
 
 ### Step 1: Process presence
 
@@ -105,12 +106,12 @@ Internet loss does NOT trigger OFF AIR - these are kept separate.
 
 ### Step 5: UDP output probe (optional per player)
 
-| Check | Tool | Parameter | Critical threshold |
+| Check | Tool | Parameter | Alert threshold |
 |---|---|---|---|
-| Stream present | ffprobe | `-show_entries format=duration` | `output_signal_present=0` |
-| Freeze | ffmpeg `freezedetect` | `noise=0.001:duration=2` | `output_freeze_seconds >= 20` |
-| Black | ffmpeg `blackdetect` | `d=2:pix_th=0.1` | `output_black_ratio >= 0.98` |
-| Audio silence | ffmpeg `silencedetect` | `noise=-50dB:d=5` | `output_audio_silence_seconds >= 30` (supporting only) |
+| Stream present | ffprobe | `-show_entries format=duration` | yellow immediately when missing, red after about 40s continuous fault |
+| Freeze | ffmpeg `freezedetect` | `noise=0.001:duration=2` | yellow immediately when frozen, red after about 40s continuous fault |
+| Black | ffmpeg `blackdetect` | `d=2:pix_th=0.1` | yellow immediately when black, red after about 40s continuous fault |
+| Audio silence | ffmpeg `silencedetect` | `noise=-50dB:d=5` | yellow immediately when silent, red after about 40s continuous fault |
 | Thumbnail | ffmpeg single frame | JPEG, max 50KB | sent to dashboard every 10s |
 
 If a node carries multiple UDP inputs on one player or across several players, each player is still
@@ -124,9 +125,7 @@ signal.
 
 | Observation | broadcast_health | runtime_health |
 |---|---|---|
-| `output_signal_present=0` (UDP enabled) | `off_air_confirmed` | - |
-| `output_freeze_seconds >= 20` (UDP enabled) | `off_air_confirmed` | - |
-| `output_black_ratio >= 0.98` (UDP enabled) | `off_air_confirmed` | - |
+| UDP fault detected (`output_signal_present=0`, freeze, black, or silence) | `degraded` first, then `off_air_confirmed` after about 40s continuous fault | - |
 | `playout_process_up=0` for about 45s continuous, without UDP confirmation | `off_air_likely` | `stopped` |
 | `log_last_token=app_exited` | `off_air_likely` | `stopped` |
 | `log_last_token=stopxxx2` | `degraded` | `paused` |
@@ -166,7 +165,8 @@ Examples:
 
 ### Recovery
 
-Triggers when `broadcast_health` returns to `healthy` after a critical state.
+Triggers when `broadcast_health` returns to `healthy` after a critical state. For UDP-enabled
+players, recovery is immediate on the first healthy sample after the fault clears.
 
 Example:
 
@@ -188,8 +188,6 @@ A new alert is sent only when the player recovers and re-enters a critical state
 | `playout_window_up=0` (process up) | immediate | 30s |
 | Position delta=0 | 30s | 60s |
 | `restart_events_15m` | - | >= 2 |
-| `output_signal_present=0` | - | 10s |
-| `output_freeze_seconds` | - | >= 20s |
-| `output_black_ratio` | - | >= 0.98 for 20s |
+| UDP missing / frozen / black / silent | immediate degrade | red after about 40s continuous fault |
 | `internet_up=0` | - | 60s |
 | `gateway_up=0` | - | 30s |
