@@ -3,8 +3,6 @@
 
 import { BroadcastHealth, RuntimeHealth, ConnectivityHealth } from '../store/db';
 
-const OFF_AIR_GRACE_SECONDS = 45;
-
 export interface Observations extends Record<string, unknown> {
   // Process
   playout_process_up?: number;
@@ -59,7 +57,7 @@ export function computeHealth(
 ): HealthResult {
   const runtimeHealth = computeRuntime(obs);
   const runtimeStateAgeSeconds = computeRuntimeStateAgeSeconds(runtimeHealth, context);
-  const broadcastHealth = computeBroadcast(obs, runtimeHealth, udpProbeEnabled, runtimeStateAgeSeconds);
+  const broadcastHealth = computeBroadcast(obs, runtimeHealth, udpProbeEnabled);
   const connectivityHealth = computeConnectivity(obs);
 
   return { broadcastHealth, runtimeHealth, connectivityHealth, runtimeStateAgeSeconds };
@@ -109,9 +107,9 @@ function computeRuntime(obs: Observations): RuntimeHealth {
     return 'stopped';
   }
 
-  // Admax pause token, or Insta pause fallback when no explicit runtime file is available.
+  // Log pause tokens should reflect in real time, even if the runtime file stays stale.
   if (obs.log_last_token === 'stopxxx2') return 'paused';
-  if (obs.log_last_token === 'paused' && !hasExplicitInstaState) return 'paused';
+  if (obs.log_last_token === 'paused') return 'paused';
 
   // Content error
   if ((obs.fnf_new_entries ?? 0) > 0 || (obs.playlistscan_new_entries ?? 0) > 0) {
@@ -140,8 +138,7 @@ function computeRuntime(obs: Observations): RuntimeHealth {
 function computeBroadcast(
   obs: Observations,
   runtimeHealth: RuntimeHealth,
-  udpProbeEnabled: boolean,
-  runtimeStateAgeSeconds: number
+  udpProbeEnabled: boolean
 ): BroadcastHealth {
   // UDP output signals take priority when enabled and data is present.
   if (udpProbeEnabled && obs.output_signal_present !== undefined) {
@@ -150,14 +147,10 @@ function computeBroadcast(
     if ((obs.output_black_ratio ?? 0) >= 0.98) return 'off_air_confirmed';
   }
 
-  // Runtime-derived broadcast health with a grace period for pause/stop before red alerting.
-  if (runtimeHealth === 'stopped') {
-    return runtimeStateAgeSeconds >= OFF_AIR_GRACE_SECONDS ? 'off_air_likely' : 'degraded';
-  }
+  // Runtime-derived broadcast health.
+  if (runtimeHealth === 'stopped') return 'off_air_likely';
   if (runtimeHealth === 'stalled') return 'off_air_likely';
-  if (runtimeHealth === 'paused') {
-    return runtimeStateAgeSeconds >= OFF_AIR_GRACE_SECONDS ? 'off_air_likely' : 'degraded';
-  }
+  if (runtimeHealth === 'paused') return 'degraded';
   if (runtimeHealth === 'restarting') return 'degraded';
   if (runtimeHealth === 'content_error') return 'degraded';
 

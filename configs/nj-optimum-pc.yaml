@@ -6,7 +6,7 @@ node_name: NJ OPTIMUM
 site_id: nj-optimum
 hub_url: https://pulse.clarixtech.com
 agent_token: REPLACE_ME_NJ_OPTIMUM_PC_TOKEN
-poll_interval_seconds: 10
+poll_interval_seconds: 5
 
 players:
   - player_id: nj-optimum-insta-1

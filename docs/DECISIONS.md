@@ -290,3 +290,11 @@ not show `Disconnected` just because one Socket.IO transport path misbehaves whi
 reach the hub. Successful `/api/status` refreshes now count as an active connection for the top-bar
 indicator, and the PWA now auto-applies updated service workers so phones are less likely to remain
 stuck on stale dashboard code after deployment.
+
+**2026-03-26 12:28:42 America/New_York**: The runtime color/alarm rules were realigned with live
+operations on the Insta reference node. A fresh Insta `Paused` log token now wins immediately even
+when `runningstatus.txt` looks stale, `paused` stays a yellow degraded state instead of escalating
+to red on a timer, and `stopped` now raises red/off-air immediately so a real playout stop is not
+hidden behind a grace window. The Optimum reference config was also tightened to a 5-second poll
+interval so heartbeat-driven updates feel closer to real time while the Insta package is being
+finished.
