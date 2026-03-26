@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer';
 import { BroadcastHealth, RuntimeHealth } from '../store/db';
 import { wasAlertSentForCurrentIncident, logEvent } from '../store/state';
 
+
 interface AlertContext {
   instanceId: string;
   instanceLabel: string;
@@ -79,7 +80,7 @@ export async function evaluateAlert(ctx: AlertContext): Promise<void> {
     console.log(`[alert] RECOVERY ${instanceId}`);
     await sendTelegram(msg);
     await sendEmail(`RECOVERED: ${instanceLabel}`, msg);
-    logEvent(instanceId, 'alert_recovered',
+    await logEvent(instanceId, 'alert_recovered',
       { broadcastHealth: previousBroadcast },
       { broadcastHealth, runtimeHealth },
       observations, true
@@ -89,14 +90,14 @@ export async function evaluateAlert(ctx: AlertContext): Promise<void> {
 
   // Critical alert — check dedup
   if (isCritical(broadcastHealth)) {
-    if (wasAlertSentForCurrentIncident(instanceId, stateJson)) return; // already alerted
+    if (await wasAlertSentForCurrentIncident(instanceId, broadcastHealth)) return; // already alerted
 
     const label = broadcastHealth === 'off_air_confirmed' ? '🔴 OFF AIR' : '🟠 OFF AIR LIKELY';
     const msg = `${label}: ${instanceLabel}\nBroadcast: ${broadcastHealth}\nRuntime: ${runtimeHealth}`;
     console.log(`[alert] CRITICAL ${instanceId} — ${broadcastHealth}`);
     await sendTelegram(msg);
     await sendEmail(`${label}: ${instanceLabel}`, msg);
-    logEvent(instanceId, 'state_change',
+    await logEvent(instanceId, 'state_change',
       { broadcastHealth: previousBroadcast ?? 'unknown' },
       { broadcastHealth, runtimeHealth },
       observations, true
@@ -105,7 +106,7 @@ export async function evaluateAlert(ctx: AlertContext): Promise<void> {
   }
 
   // Log state change without alert
-  logEvent(instanceId, 'state_change',
+  await logEvent(instanceId, 'state_change',
     { broadcastHealth: previousBroadcast ?? 'unknown' },
     { broadcastHealth, runtimeHealth },
     observations, false

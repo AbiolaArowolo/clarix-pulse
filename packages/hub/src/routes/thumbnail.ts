@@ -26,7 +26,7 @@ const lastThumbnailAt = new Map<string, number>();
 export function createThumbnailRouter(io: SocketServer): Router {
   const router = Router();
 
-  router.post('/', (req: Request, res: Response) => {
+  router.post('/', async (req: Request, res: Response) => {
     const agentId = validateToken(req);
     if (!agentId) return res.status(401).json({ error: 'Unauthorized' });
 
@@ -55,10 +55,7 @@ export function createThumbnailRouter(io: SocketServer): Router {
       return res.status(413).json({ error: 'Thumbnail too large (max 50KB JPEG)' });
     }
 
-    // Extract raw bytes and store
-    const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, '');
-    const buffer = Buffer.from(base64Data, 'base64');
-    updateThumbnail(instanceId, buffer);
+    await updateThumbnail(instanceId, dataUrl);
 
     // Push to dashboard
     io.emit('thumbnail_update', { instanceId, dataUrl, capturedAt: capturedAt ?? new Date().toISOString() });

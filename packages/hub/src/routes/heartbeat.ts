@@ -3,7 +3,7 @@ import { Server as SocketServer } from 'socket.io';
 import { AGENT_INSTANCE_MAP, INSTANCE_MAP } from '../config/instances';
 import { computeHealth, Observations } from '../services/stateEngine';
 import { evaluateAlert } from '../services/alerting';
-import { updateState, logEvent } from '../store/state';
+import { updateState } from '../store/state';
 
 // Parse AGENT_TOKENS env: "ny-main-pc:token1,ny-backup-pc:token2,..."
 function parseAgentTokens(): Map<string, string> {
@@ -62,7 +62,7 @@ export function createHeartbeatRouter(io: SocketServer): Router {
     );
 
     // Persist and get previous state
-    const { previous, current } = updateState(
+    const { previous, current } = await updateState(
       instanceId, agentId, broadcastHealth, runtimeHealth, connectivityHealth, observations
     );
 

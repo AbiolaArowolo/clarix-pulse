@@ -23,7 +23,7 @@ const io = new SocketServer(httpServer, {
 });
 
 // Initialise SQLite state on startup
-initState();
+initState().catch(console.error);
 
 // Routes
 app.use('/api/heartbeat', createHeartbeatRouter(io));
@@ -60,7 +60,7 @@ setInterval(() => {
 
     if (ageMs >= OFFLINE_THRESHOLD_MS && state.connectivityHealth !== 'offline') {
       newConnectivity = 'offline';
-      setConnectivity(state.instanceId, 'offline');
+      setConnectivity(state.instanceId, 'offline').catch(console.error);
       io.emit('state_update', {
         instanceId: state.instanceId,
         broadcastHealth: 'unknown',
@@ -79,7 +79,7 @@ setInterval(() => {
       }
     } else if (ageMs >= STALE_THRESHOLD_MS && state.connectivityHealth === 'online') {
       newConnectivity = 'stale';
-      setConnectivity(state.instanceId, 'stale');
+      setConnectivity(state.instanceId, 'stale').catch(console.error);
       io.emit('state_update', {
         instanceId: state.instanceId,
         broadcastHealth: state.broadcastHealth,

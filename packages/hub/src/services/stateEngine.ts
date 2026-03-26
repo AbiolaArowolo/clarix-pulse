@@ -3,7 +3,7 @@
 
 import { BroadcastHealth, RuntimeHealth, ConnectivityHealth } from '../store/db';
 
-export interface Observations {
+export interface Observations extends Record<string, unknown> {
   // Process
   playout_process_up?: number;       // 1 or 0
   playout_window_up?: number;        // 1 or 0
