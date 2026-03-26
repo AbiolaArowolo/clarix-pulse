@@ -1,4 +1,4 @@
-# Clarix Pulse — Tech Stack
+# Pulse — Tech Stack
 
 **Version**: 1.0.0
 **Date**: 2026-03-26
@@ -27,7 +27,7 @@
 | Language | TypeScript | 5.x |
 | Styling | TailwindCSS | 3.x |
 | WebSocket client | socket.io-client | 4.x |
-| Audio alarm | Web Audio API | native browser |
+| Audio and mobile alarm | Web Audio API + Vibration API + installable PWA shell | native browser |
 
 ## Local Agent
 
@@ -40,18 +40,18 @@
 | YAML config | PyYAML | 6.x |
 | Image compression | Pillow | 10.x |
 | Packaging | PyInstaller | 6.x |
-| Windows service | NSSM (bundled) | 2.24 |
+| Windows service | NSSM (staged with agent bundle) | 2.24 |
 
 ## Infrastructure
 
 | Layer | Choice |
 |---|---|
 | VPS | RackNerd 2.5GB KVM — 192.3.76.144 |
-| OS | Ubuntu 22.04 LTS |
+| OS | Ubuntu 24.04 LTS |
 | Reverse proxy | Caddy 2.x |
 | DNS / CDN | Cloudflare (proxied) |
 | TLS | Let's Encrypt via Caddy (origin) + Cloudflare SSL |
-| UDP media probe | ffmpeg / ffprobe (bundled in agent package) |
+| UDP media probe | ffmpeg / ffprobe (optional per player, staged on UDP-enabled nodes) |
 
 ## Repository
 

@@ -2,7 +2,7 @@
 // In-memory cache sits on top for fast Socket.io broadcasts.
 // SQLite is the source of truth.
 
-import { db, BroadcastHealth, RuntimeHealth, ConnectivityHealth, InstanceState } from './db';
+import { db, initDb, BroadcastHealth, RuntimeHealth, ConnectivityHealth, InstanceState } from './db';
 import { INSTANCES } from '../config/instances';
 
 // In-memory cache
@@ -26,6 +26,8 @@ function rowToState(row: Record<string, unknown>): InstanceState {
 }
 
 export async function initState(): Promise<void> {
+  await initDb();
+
   // Seed rows for all known instances (if not already present)
   const result = await db.execute('SELECT instance_id FROM instance_state');
   const existingIds = new Set(result.rows.map((r) => r.instance_id as string));
@@ -125,6 +127,25 @@ export async function setConnectivity(instanceId: string, connectivity: Connecti
     existing.connectivityHealth = connectivity;
     existing.updatedAt = timestamp;
   }
+}
+
+export async function markInstanceOffline(instanceId: string): Promise<InstanceState | undefined> {
+  const timestamp = now();
+  await db.execute({
+    sql: `UPDATE instance_state
+          SET broadcast_health = 'unknown', connectivity_health = 'offline', updated_at = ?
+          WHERE instance_id = ?`,
+    args: [timestamp, instanceId],
+  });
+
+  const existing = cache.get(instanceId);
+  if (existing) {
+    existing.broadcastHealth = 'unknown';
+    existing.connectivityHealth = 'offline';
+    existing.updatedAt = timestamp;
+  }
+
+  return existing;
 }
 
 export async function logEvent(

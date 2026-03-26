@@ -1,13 +1,15 @@
-// Instance registry — source of truth for all 7 monitored playout instances
-// Agents map to instances via agentId → allowedInstanceIds
+// Player registry — source of truth for all monitored playout players.
+// Nodes map to players via nodeId → allowedPlayerIds.
 
 export interface InstanceConfig {
   id: string;
+  playerId: string;
+  nodeId: string;
   label: string;
   siteId: string;
   siteName: string;
   playoutType: 'insta' | 'admax';
-  udpProbeEnabled: boolean;
+  udpMonitoringCapable: boolean;
 }
 
 export interface SiteConfig {
@@ -17,116 +19,124 @@ export interface SiteConfig {
 }
 
 export interface AgentConfig {
-  agentId: string;
-  allowedInstanceIds: string[];
+  nodeId: string;
+  allowedPlayerIds: string[];
+}
+
+function player(config: Omit<InstanceConfig, 'id'> & { id?: string }): InstanceConfig {
+  return {
+    ...config,
+    id: config.id ?? config.playerId,
+  };
 }
 
 export const INSTANCES: InstanceConfig[] = [
-  // NY Main PC — 3 instances
-  {
-    id: 'ny-main-insta-1',
+  player({
+    playerId: 'ny-main-insta-1',
+    nodeId: 'ny-main-pc',
     label: 'NY Main — Insta 1',
     siteId: 'ny-main',
     siteName: 'NY Main',
     playoutType: 'insta',
-    udpProbeEnabled: false,
-  },
-  {
-    id: 'ny-main-insta-2',
+    udpMonitoringCapable: true,
+  }),
+  player({
+    playerId: 'ny-main-insta-2',
+    nodeId: 'ny-main-pc',
     label: 'NY Main — Insta 2',
     siteId: 'ny-main',
     siteName: 'NY Main',
     playoutType: 'insta',
-    udpProbeEnabled: false,
-  },
-  {
-    id: 'ny-main-admax-1',
+    udpMonitoringCapable: true,
+  }),
+  player({
+    playerId: 'ny-main-admax-1',
+    nodeId: 'ny-main-pc',
     label: 'NY Main — Admax 1',
     siteId: 'ny-main',
     siteName: 'NY Main',
     playoutType: 'admax',
-    udpProbeEnabled: false,
-  },
-  // NY Backup PC — 2 instances (UDP probe via encoder)
-  {
-    id: 'ny-backup-admax-1',
+    udpMonitoringCapable: true,
+  }),
+  player({
+    playerId: 'ny-backup-admax-1',
+    nodeId: 'ny-backup-pc',
     label: 'NY Backup — Admax 1',
     siteId: 'ny-backup',
     siteName: 'NY Backup',
     playoutType: 'admax',
-    udpProbeEnabled: true,
-  },
-  {
-    id: 'ny-backup-admax-2',
+    udpMonitoringCapable: true,
+  }),
+  player({
+    playerId: 'ny-backup-admax-2',
+    nodeId: 'ny-backup-pc',
     label: 'NY Backup — Admax 2',
     siteId: 'ny-backup',
     siteName: 'NY Backup',
     playoutType: 'admax',
-    udpProbeEnabled: true,
-  },
-  // NJ Optimum PC — 1 instance (SDI only, no UDP)
-  {
-    id: 'nj-optimum-admax-1',
+    udpMonitoringCapable: true,
+  }),
+  player({
+    playerId: 'nj-optimum-admax-1',
+    nodeId: 'nj-optimum-pc',
     label: 'NJ Optimum — Admax',
     siteId: 'nj-optimum',
     siteName: 'NJ Optimum',
     playoutType: 'admax',
-    udpProbeEnabled: false,
-  },
-  // FL Digicel PC — 1 instance (UDP probe via encoder)
-  {
-    id: 'digicel-admax-1',
+    udpMonitoringCapable: true,
+  }),
+  player({
+    playerId: 'digicel-admax-1',
+    nodeId: 'digicel-pc',
     label: 'FL Digicel — Admax',
     siteId: 'digicel',
     siteName: 'FL Digicel',
     playoutType: 'admax',
-    udpProbeEnabled: true,
-  },
+    udpMonitoringCapable: true,
+  }),
 ];
 
-// Site grouping for dashboard
 export const SITES: SiteConfig[] = [
   {
     id: 'ny-main',
     name: 'NY Main',
-    instances: INSTANCES.filter((i) => i.siteId === 'ny-main'),
+    instances: INSTANCES.filter((instance) => instance.siteId === 'ny-main'),
   },
   {
     id: 'ny-backup',
     name: 'NY Backup',
-    instances: INSTANCES.filter((i) => i.siteId === 'ny-backup'),
+    instances: INSTANCES.filter((instance) => instance.siteId === 'ny-backup'),
   },
   {
     id: 'nj-optimum',
     name: 'NJ Optimum',
-    instances: INSTANCES.filter((i) => i.siteId === 'nj-optimum'),
+    instances: INSTANCES.filter((instance) => instance.siteId === 'nj-optimum'),
   },
   {
     id: 'digicel',
     name: 'FL Digicel',
-    instances: INSTANCES.filter((i) => i.siteId === 'digicel'),
+    instances: INSTANCES.filter((instance) => instance.siteId === 'digicel'),
   },
 ];
 
-// Agent-to-instance mapping — hub validates each heartbeat against this
 export const AGENT_MAP: AgentConfig[] = [
   {
-    agentId: 'ny-main-pc',
-    allowedInstanceIds: ['ny-main-insta-1', 'ny-main-insta-2', 'ny-main-admax-1'],
+    nodeId: 'ny-main-pc',
+    allowedPlayerIds: ['ny-main-insta-1', 'ny-main-insta-2', 'ny-main-admax-1'],
   },
   {
-    agentId: 'ny-backup-pc',
-    allowedInstanceIds: ['ny-backup-admax-1', 'ny-backup-admax-2'],
+    nodeId: 'ny-backup-pc',
+    allowedPlayerIds: ['ny-backup-admax-1', 'ny-backup-admax-2'],
   },
   {
-    agentId: 'nj-optimum-pc',
-    allowedInstanceIds: ['nj-optimum-admax-1'],
+    nodeId: 'nj-optimum-pc',
+    allowedPlayerIds: ['nj-optimum-admax-1'],
   },
   {
-    agentId: 'digicel-pc',
-    allowedInstanceIds: ['digicel-admax-1'],
+    nodeId: 'digicel-pc',
+    allowedPlayerIds: ['digicel-admax-1'],
   },
 ];
 
-export const INSTANCE_MAP = new Map(INSTANCES.map((i) => [i.id, i]));
-export const AGENT_INSTANCE_MAP = new Map(AGENT_MAP.map((a) => [a.agentId, a.allowedInstanceIds]));
+export const INSTANCE_MAP = new Map(INSTANCES.map((instance) => [instance.id, instance]));
+export const AGENT_INSTANCE_MAP = new Map(AGENT_MAP.map((agent) => [agent.nodeId, agent.allowedPlayerIds]));

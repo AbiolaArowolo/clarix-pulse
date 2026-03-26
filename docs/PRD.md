@@ -1,16 +1,16 @@
-# Clarix Pulse — Product Requirements Document
+# Pulse — Product Requirements Document
 
-**Project**: Clarix Pulse
+**Project**: Pulse
 **Version**: 1.0.0
 **Date**: 2026-03-26
-**Author**: NOIRE TV / Caspan Media
+**Author**: clarixtech
 **Status**: Approved — Implementation in progress
 
 ---
 
 ## 1. Problem Statement
 
-NOIRE TV operates broadcast playout across 4 physical sites with 7 independent playout instances.
+NOIRE TV operates broadcast playout across 4 physical nodes with 7 independent playout players.
 There is currently no unified monitoring system. Operators must manually check each PC to determine
 if a channel is on-air, which introduces unacceptable risk of undetected off-air events, slow incident
 response, and operational blind spots — especially during overnight and weekend hours.
@@ -19,13 +19,14 @@ response, and operational blind spots — especially during overnight and weeken
 
 ## 2. Goal
 
-Build **Clarix Pulse**: a production-grade broadcast monitoring system that provides:
+Build **Pulse**: a production-grade broadcast monitoring system that provides:
 
-- Real-time visibility of all 7 playout instances from a single web dashboard
+- Real-time visibility of all 7 playout players from a single web dashboard
 - Automatic alerting (Telegram + email) when a channel goes or is likely to go off-air
 - Clear separation of playout failure from network/connectivity failure
-- A lightweight agent deployable on all playout PCs with zero per-site Python dependency
-- A UDP stream confidence probe for sites with encoder/network access
+- A lightweight agent deployable on all playout nodes with zero per-site Python dependency
+- Core identifiers based on `node_id` and `player_id`
+- Optional UDP stream confidence probes per player, including nodes with multiple UDP inputs
 
 ---
 
@@ -35,20 +36,22 @@ Build **Clarix Pulse**: a production-grade broadcast monitoring system that prov
 |---|---|---|
 | Broadcast operator | On call, checking phone | Know immediately if a channel is off-air |
 | Technical director | Office or remote | Understand root cause (playout crash vs network loss) |
-| Support team (Caspan Media) | support@caspenmedia.com | Receive email alerts for escalation |
+| Support team (clarixtech) | support@clarixtech.com | Receive email alerts for escalation |
 
 ---
 
-## 4. Sites and Instances
+## 4. Nodes and Players
 
-| PC | Site ID | Location | Instances |
-|---|---|---|---|
-| NY Main | `ny-main` | New York, Main | insta-1, insta-2, admax-1 |
-| NY Backup | `ny-backup` | New York, Backup | admax-1, admax-2 |
-| NJ Optimum | `nj-optimum` | New Jersey | admax-1 |
-| FL Digicel | `digicel` | Florida | admax-1 |
+| Node ID | Site ID | Location | Players | UDP-capable players |
+|---|---|---|---|---|
+| `ny-main-pc` | `ny-main` | New York, Main | `ny-main-insta-1`, `ny-main-insta-2`, `ny-main-admax-1` | optional, per player |
+| `ny-backup-pc` | `ny-backup` | New York, Backup | `ny-backup-admax-1`, `ny-backup-admax-2` | both players |
+| `nj-optimum-pc` | `nj-optimum` | New Jersey | `nj-optimum-admax-1` | optional |
+| `digicel-pc` | `digicel` | Florida | `digicel-admax-1` | enabled |
 
-**Total**: 4 PCs, 7 playout instances across 2 software types (Insta Playout, Admax).
+**Total**: 4 nodes, 7 playout players across 2 software types (Insta Playout, Admax).
+
+Each node may carry multiple UDP inputs across its players. UDP monitoring is therefore a player-level capability, not a node-level blanket switch.
 
 ---
 
@@ -58,29 +61,29 @@ Build **Clarix Pulse**: a production-grade broadcast monitoring system that prov
 
 | # | Feature | Priority |
 |---|---|---|
-| F1 | Real-time dashboard grouped by site | P0 |
-| F2 | Per-instance colour-coded health status | P0 |
+| F1 | Real-time dashboard grouped by node | P0 |
+| F2 | Per-player colour-coded health status | P0 |
 | F3 | Separate broadcast_health, runtime_health, connectivity_health | P0 |
-| F4 | Loud audio alarm on OFF AIR state | P0 |
+| F4 | Loud audio and vibration alarm on OFF AIR state | P0 |
 | F5 | Telegram alert on state change (critical + recovery) | P0 |
-| F6 | Email alert to support@caspenmedia.com | P0 |
+| F6 | Email alert to support@clarixtech.com | P0 |
 | F7 | Local agent auto-starts as Windows service on boot | P0 |
 | F8 | Agent deploys as single .exe — no Python install required | P0 |
 | F9 | Deep log monitoring (Insta + Admax validated) | P0 |
 | F10 | Process presence + window presence monitoring | P0 |
 | F11 | Stall detection via file position delta (30s/60s threshold) | P0 |
 | F12 | Content error detection via FNF/playlistscan logs | P1 |
-| F13 | UDP stream confidence probe (NY Backup + Digicel) | P1 |
+| F13 | Optional UDP stream confidence probe per player | P1 |
 | F14 | Stream thumbnail snapshot in dashboard | P1 |
 | F15 | Heartbeat stale/offline indicator (orange/gray) | P0 |
-| F16 | Mobile-responsive dashboard | P1 |
+| F16 | Installable mobile-responsive PWA dashboard with persistent QR install surface | P1 |
 | F17 | SQLite-backed alert dedup (survives hub restart) | P0 |
 
 ### 5.2 Future (v1.x)
 
 - Auto-restart of crashed playout application after 180s (observation mode first)
 - Historical event log view in dashboard
-- Per-instance maintenance mode (suppress alerts)
+- Per-player maintenance mode (suppress alerts)
 - Multi-user authentication for dashboard
 
 ---
@@ -129,7 +132,7 @@ The hub is the sole state engine. Agents send raw observations only.
 
 ## 8. Agent Monitoring Protocol
 
-The same protocol applies to all 7 instances. UDP probe is optional per instance.
+The same protocol applies to all 7 players. UDP probe is optional per player.
 
 **Every 10 seconds, the agent**:
 1. Checks process presence and window presence
@@ -137,8 +140,8 @@ The same protocol applies to all 7 instances. UDP probe is optional per instance
 3. Reads file state indicators (filebar/Settings.ini for stall detection)
 4. Checks FNF and playlistscan logs for content errors
 5. Pings gateway IP and public internet
-6. If `udp_probe.enabled`: runs ffprobe/ffmpeg against encoder stream
-7. POSTs one raw observation heartbeat per instance to hub
+6. If one or more `udp_inputs` are enabled for that player: runs ffprobe/ffmpeg against the player's UDP matrix and uses the best active input as the primary stream signal
+7. POSTs one raw observation heartbeat per player to hub
 
 ---
 
@@ -146,7 +149,7 @@ The same protocol applies to all 7 instances. UDP probe is optional per instance
 
 - Hub must remain reachable even if one or more playout PCs lose internet
 - Internet loss on a playout PC must NOT automatically trigger OFF AIR — must be separated
-- NJ Optimum: SDI-only output — no UDP probe available
+- NJ Optimum: SDI-only output for the current primary player, but the model still allows UDP if a player is later assigned one
 - Agent package must work without Python, ffmpeg, or any other pre-install on playout PCs
 - All communication is outbound agent → hub (no hub callback to agents — NAT compatible)
 

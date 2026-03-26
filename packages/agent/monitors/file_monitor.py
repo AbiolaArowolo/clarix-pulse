@@ -34,23 +34,50 @@ def _read_filebar(instance_root: str) -> Optional[float]:
         return None
 
 
-def _read_admax_frame(admax_root: str) -> Optional[int]:
+def _read_admax_frame(paths: dict) -> Optional[int]:
     """Read Admax Settings.ini and return Frame value."""
-    path = os.path.join(admax_root, "Settings.ini")
-    try:
-        config = configparser.ConfigParser()
-        config.read(path, encoding="utf-8")
-        # Frame is usually under [Playback] or top-level
-        for section in config.sections():
-            if config.has_option(section, "Frame"):
-                return int(config.get(section, "Frame"))
-        return None
-    except (OSError, configparser.Error, ValueError):
-        return None
+    candidates = []
+    direct_path = str(paths.get("admax_state_path", "")).strip()
+    if direct_path:
+        candidates.append(direct_path)
+
+    admax_root = str(paths.get("admax_root", "")).strip()
+    if admax_root:
+        candidates.extend(
+            [
+                os.path.join(admax_root, "Settings.ini"),
+                os.path.join(admax_root, "bin", "Settings.ini"),
+                os.path.join(admax_root, "bin", "64bit", "Settings.ini"),
+            ]
+        )
+
+    for path in candidates:
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            config = configparser.ConfigParser()
+            config.read(path, encoding="utf-8")
+            for section in config.sections():
+                if config.has_option(section, "Frame"):
+                    return int(config.get(section, "Frame"))
+        except (OSError, configparser.Error, ValueError):
+            continue
+
+    return None
+
+
+def _resolve_daily_log_path(path_hint: str) -> str:
+    if not path_hint:
+        return ""
+    if os.path.isdir(path_hint):
+        today = date.today().strftime("%d-%m-%Y")
+        return os.path.join(path_hint, f"{today}.txt")
+    return path_hint
 
 
 def _new_log_entries(path: str, instance_key: str, cache: Dict[str, int]) -> int:
     """Return number of new lines since last check."""
+    path = _resolve_daily_log_path(path)
     if not path or not os.path.exists(path):
         return 0
     try:
@@ -114,8 +141,7 @@ def check(instance_id: str, playout_type: str, paths: dict) -> dict:
             result["filebar_position_delta_30s"] = round(d30, 3)
             result["filebar_position_delta_60s"] = round(d60, 3)
     else:
-        admax_root = paths.get("admax_root", "")
-        frame = _read_admax_frame(admax_root)
+        frame = _read_admax_frame(paths)
         if frame is not None:
             d30, d60 = _compute_delta(instance_id, float(frame))
             result["frame_delta_30s"] = round(d30, 3)

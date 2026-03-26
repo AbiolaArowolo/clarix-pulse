@@ -49,7 +49,7 @@ async function sendEmail(subject: string, body: string): Promise<void> {
   try {
     await getTransporter().sendMail({
       from: process.env.SMTP_FROM ?? 'alerts@clarixtech.com',
-      to: process.env.SMTP_TO ?? 'support@caspenmedia.com',
+      to: process.env.SMTP_TO ?? 'support@clarixtech.com',
       subject,
       text: body,
     });

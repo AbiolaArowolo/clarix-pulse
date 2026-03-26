@@ -1,4 +1,4 @@
-# Clarix Pulse — VPS Deployment Guide
+# Pulse — VPS Deployment Guide
 
 **Version**: 1.0.0
 **Date**: 2026-03-26
@@ -11,7 +11,7 @@
 |---|---|
 | VPS | RackNerd 2.5GB KVM |
 | IP | 192.3.76.144 |
-| OS | Ubuntu 22.04 LTS |
+| OS | Ubuntu 24.04 LTS |
 | Domain | pulse.clarixtech.com |
 | DNS | Cloudflare (proxied, Full strict SSL) |
 
@@ -45,8 +45,8 @@ apt update && apt install -y caddy
 # Install git
 apt install -y git
 
-# Install ffmpeg (for potential future hub-side use)
-apt install -y ffmpeg
+# ffmpeg is not required on the hub
+# UDP probing runs on the Windows agent side only
 ```
 
 ---
@@ -63,6 +63,7 @@ cd clarix-pulse
 cp .env.example .env.local
 nano .env.local
 # Fill in: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, SMTP_*, AGENT_TOKENS
+# The hub also reads .env if present, but this guide standardizes on .env.local
 
 # Install dependencies
 npm install
@@ -149,15 +150,25 @@ curl http://localhost:3001/api/health
 
 # Dashboard (from browser)
 # https://pulse.clarixtech.com/
-# Expected: Clarix Pulse dashboard loads, shows 7 instances in gray (no agents yet)
+# Expected: Pulse dashboard loads, shows 7 players in gray (no nodes yet)
 
 # Test heartbeat (from VPS)
 curl -X POST https://pulse.clarixtech.com/api/heartbeat \
   -H "Authorization: Bearer <ny-main-pc-token>" \
   -H "Content-Type: application/json" \
-  -d '{"agentId":"ny-main-pc","instanceId":"ny-main-insta-1","timestamp":"2026-03-26T10:00:00Z","observations":{"playout_process_up":1,"playout_window_up":1,"internet_up":1,"gateway_up":1}}'
+  -d '{"nodeId":"ny-main-pc","playerId":"ny-main-insta-1","timestamp":"2026-03-26T10:00:00Z","observations":{"playout_process_up":1,"playout_window_up":1,"internet_up":1,"gateway_up":1}}'
 # Expected: {"ok":true,"broadcastHealth":"healthy","runtimeHealth":"healthy","connectivityHealth":"online"}
 ```
+
+---
+
+## 7.1 Mobile / PWA Install
+
+The dashboard is mobile-responsive and installable as a PWA. When the browser offers an install
+prompt, use `Install app` or `Add to Home Screen` on phones and tablets so operators can launch
+Pulse as a standalone app. The dashboard also exposes a persistent QR install bar so a phone on the
+same LAN can open the current dashboard URL quickly. If the site is running on `localhost`, use the
+machine's LAN IP instead before scanning.
 
 ---
 

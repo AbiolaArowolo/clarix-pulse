@@ -1,27 +1,32 @@
-# Clarix Pulse — Monitoring Specification
+# Pulse - Monitoring Specification
 
 **Version**: 1.0.0
 **Date**: 2026-03-26
 
 ---
 
-## Instance Registry
+## Node / Player Registry
 
-| Instance ID | Site | Software | Agent PC | UDP Probe |
+| Node ID | Player ID | Site | Software | UDP |
 |---|---|---|---|---|
-| `ny-main-insta-1` | NY Main | Insta Playout | `ny-main-pc` | No |
-| `ny-main-insta-2` | NY Main | Insta Playout | `ny-main-pc` | No |
-| `ny-main-admax-1` | NY Main | Admax | `ny-main-pc` | No |
-| `ny-backup-admax-1` | NY Backup | Admax | `ny-backup-pc` | Yes (encoder LAN) |
-| `ny-backup-admax-2` | NY Backup | Admax | `ny-backup-pc` | Yes (encoder LAN) |
-| `nj-optimum-admax-1` | NJ Optimum | Admax | `nj-optimum-pc` | No (SDI only) |
-| `digicel-admax-1` | FL Digicel | Admax | `digicel-pc` | Yes (encoder LAN) |
+| `ny-main-pc` | `ny-main-insta-1` | NY Main | Insta Playout | Optional |
+| `ny-main-pc` | `ny-main-insta-2` | NY Main | Insta Playout | Optional |
+| `ny-main-pc` | `ny-main-admax-1` | NY Main | Admax | Optional |
+| `ny-backup-pc` | `ny-backup-admax-1` | NY Backup | Admax | Enabled |
+| `ny-backup-pc` | `ny-backup-admax-2` | NY Backup | Admax | Enabled |
+| `nj-optimum-pc` | `nj-optimum-admax-1` | NJ Optimum | Admax | Optional |
+| `digicel-pc` | `digicel-admax-1` | FL Digicel | Admax | Enabled |
+
+A node can carry 2-5 UDP inputs across one or more players. UDP is never a node-wide assumption; it
+is enabled or disabled on each player independently. A player may define multiple enabled inputs, and
+the agent evaluates those inputs as a UDP matrix before choosing the best active source for headline
+broadcast metrics and thumbnails.
 
 ---
 
 ## Health State Model
 
-Three independent domains — never mixed:
+Three independent domains - never mixed:
 
 ### broadcast_health
 
@@ -31,7 +36,7 @@ Three independent domains — never mixed:
 | `degraded` | Playback active but with warnings | Yellow |
 | `off_air_likely` | Strong signal of playout failure | Red |
 | `off_air_confirmed` | UDP output confirmed absent/frozen/black | Red |
-| `unknown` | Agent offline — state indeterminate | Gray |
+| `unknown` | Agent offline - state indeterminate | Gray |
 
 ### runtime_health
 
@@ -50,33 +55,33 @@ Three independent domains — never mixed:
 | Value | Meaning | Trigger |
 |---|---|---|
 | `online` | Heartbeats arriving normally | Last heartbeat <45s ago |
-| `stale` | Heartbeats delayed | Last heartbeat 45–90s ago |
+| `stale` | Heartbeats delayed | Last heartbeat 45-90s ago |
 | `offline` | No heartbeats | Last heartbeat >90s ago |
 
 ---
 
-## Monitoring Protocol — All Instances
+## Monitoring Protocol - All Players
 
-Every 10 seconds, the agent runs these checks in order:
+Every 10 seconds, the agent runs these checks in order for each player on the node:
 
 ### Step 1: Process presence
 
 | Parameter | Insta Playout | Admax |
 |---|---|---|
 | Allowed processes | `Insta Playout.exe`, `Insta Playout 2.exe` | `Admax-One Playout2.0.exe`, `Admax-One Playout2.0.2.exe` |
-| Blocked processes | — | `admaxter.exe` (NOT a valid playout signal) |
+| Blocked processes | - | `admaxter.exe` (NOT a valid playout signal) |
 | Window check | via `pywin32 EnumWindows` | same |
 
-### Step 2: Deep log monitoring (validated primary signal)
+### Step 2: Deep log monitoring
 
 | Software | Log path | Tokens detected |
 |---|---|---|
 | Insta Playout | `C:\Program Files\Indytek\Insta log\DD-MM-YYYY.txt` | "Paused", "Fully Played", playlist transitions |
-| Admax | `<admax_root>\logs\logs\Playout\YYYY-MM-DD.txt` | `stopxxx2` → paused; "Application Exited by client!" → stopped; re-init pattern → restarting |
+| Admax | `<admax_root>\logs\logs\Playout\YYYY-MM-DD.txt` | `stopxxx2` -> paused; "Application Exited by client!" -> stopped; re-init pattern -> restarting |
 
 Log file is tailed (new lines only) every poll. File rotation at midnight is handled.
 
-### Step 3: File state indicators (stall detection)
+### Step 3: File state indicators
 
 | Software | File | Metric | Stall warning | Stall critical |
 |---|---|---|---|---|
@@ -84,8 +89,9 @@ Log file is tailed (new lines only) every poll. File rotation at midnight is han
 | Admax | `Settings.ini` | `Frame` value | delta=0 for 30s | delta=0 for 60s |
 
 Content error detection (both software types):
-- New entries in `FNF` log → `content_error`
-- New entries in `playlistscan` log → `content_error`
+
+- New entries in `FNF` log -> `content_error`
+- New entries in `playlistscan` log -> `content_error`
 
 ### Step 4: Connectivity
 
@@ -94,9 +100,9 @@ Content error detection (both software types):
 | `gateway_up` | Ping default gateway IP | Local LAN reachability |
 | `internet_up` | Ping 1.1.1.1 and 8.8.8.8 | Public internet reachability |
 
-Internet loss does NOT trigger OFF AIR — these are kept separate.
+Internet loss does NOT trigger OFF AIR - these are kept separate.
 
-### Step 5: UDP output probe (NY Backup and Digicel only)
+### Step 5: UDP output probe (optional per player)
 
 | Check | Tool | Parameter | Critical threshold |
 |---|---|---|---|
@@ -106,15 +112,20 @@ Internet loss does NOT trigger OFF AIR — these are kept separate.
 | Audio silence | ffmpeg `silencedetect` | `noise=-50dB:d=5` | `output_audio_silence_seconds >= 30` (supporting only) |
 | Thumbnail | ffmpeg single frame | JPEG, max 50KB | sent to dashboard every 10s |
 
+If a node carries multiple UDP inputs on one player or across several players, each player is still
+monitored independently and keyed by its `player_id`. When a single player has several enabled
+inputs, the agent probes them as a matrix and reports the best active input as the primary output
+signal.
+
 ---
 
 ## State Decision Matrix
 
 | Observation | broadcast_health | runtime_health |
 |---|---|---|
-| `output_signal_present=0` (UDP enabled) | `off_air_confirmed` | — |
-| `output_freeze_seconds >= 20` (UDP enabled) | `off_air_confirmed` | — |
-| `output_black_ratio >= 0.98` (UDP enabled) | `off_air_confirmed` | — |
+| `output_signal_present=0` (UDP enabled) | `off_air_confirmed` | - |
+| `output_freeze_seconds >= 20` (UDP enabled) | `off_air_confirmed` | - |
+| `output_black_ratio >= 0.98` (UDP enabled) | `off_air_confirmed` | - |
 | `playout_process_up=0` | `off_air_likely` | `stopped` |
 | `log_last_token=app_exited` | `off_air_likely` | `stopped` |
 | `log_last_token=stopxxx2` | `degraded` | `paused` |
@@ -136,30 +147,34 @@ Internet loss does NOT trigger OFF AIR — these are kept separate.
 Triggers when `broadcast_health` = `off_air_confirmed` or `off_air_likely`
 
 Examples:
-- `🔴 OFF AIR: NY Main — Admax 1 — output signal missing`
-- `🟠 OFF AIR LIKELY: NJ Optimum — Admax — process missing`
+
+- `OFF AIR: NY Main - Admax 1 - output signal missing`
+- `OFF AIR LIKELY: NJ Optimum - Admax - process missing`
 
 ### Warning (DEGRADED / NETWORK ISSUE)
 
 Triggers when:
+
 - `runtime_health` = `paused`, `stalled`, `content_error`, `restarting`
 - `connectivity_health` = `offline` (heartbeat lost)
 
 Examples:
-- `⚠️ NETWORK ISSUE: NY Main — Insta 1 — heartbeat missing`
-- `⚠️ DEGRADED: FL Digicel — Admax — restart loop detected`
+
+- `NETWORK ISSUE: NY Main - Insta 1 - heartbeat missing`
+- `DEGRADED: FL Digicel - Admax - restart loop detected`
 
 ### Recovery
 
 Triggers when `broadcast_health` returns to `healthy` after a critical state.
 
 Example:
-- `✅ RECOVERED: NY Main — Admax 1 — broadcast health restored`
+
+- `RECOVERED: NY Main - Admax 1 - broadcast health restored`
 
 ### Dedup
 
 Alerts are deduplicated via SQLite `events` table. One alert per incident.
-A new alert is sent only when the instance recovers and re-enters a critical state.
+A new alert is sent only when the player recovers and re-enters a critical state.
 
 ---
 
@@ -171,9 +186,9 @@ A new alert is sent only when the instance recovers and re-enters a critical sta
 | `playout_process_up=0` | immediate | 15s |
 | `playout_window_up=0` (process up) | immediate | 30s |
 | Position delta=0 | 30s | 60s |
-| `restart_events_15m` | — | ≥ 2 |
-| `output_signal_present=0` | — | 10s |
-| `output_freeze_seconds` | — | ≥ 20s |
-| `output_black_ratio` | — | ≥ 0.98 for 20s |
-| `internet_up=0` | — | 60s |
-| `gateway_up=0` | — | 30s |
+| `restart_events_15m` | - | >= 2 |
+| `output_signal_present=0` | - | 10s |
+| `output_freeze_seconds` | - | >= 20s |
+| `output_black_ratio` | - | >= 0.98 for 20s |
+| `internet_up=0` | - | 60s |
+| `gateway_up=0` | - | 30s |

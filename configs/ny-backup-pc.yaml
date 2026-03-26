@@ -1,0 +1,56 @@
+# Pulse node config for NY Backup.
+# Replace agent_token and any UDP stream URLs before deployment.
+
+node_id: ny-backup-pc
+node_name: NY BACKUP
+site_id: ny-backup
+hub_url: https://pulse.clarixtech.com
+agent_token: REPLACE_ME_NY_BACKUP_PC_TOKEN
+poll_interval_seconds: 10
+
+players:
+  - player_id: ny-backup-admax-1
+    playout_type: admax
+    paths:
+      admax_root_candidates:
+        - C:\Program Files (x86)\Unimedia\Admax One*\admax
+        - C:\Program Files\Unimedia\Admax One*\admax
+    process_selectors:
+      window_title_contains:
+        - Admax 1
+    log_selectors:
+      include_contains:
+        - Admax 1
+    udp_inputs:
+      # Keep these disabled until the site provides the real UDP inputs.
+      - udp_input_id: ny-backup-admax-1-udp-1
+        enabled: false
+        stream_url: "udp://REPLACE_ME_NY_BACKUP_ADMAX_1_UDP_1"
+        thumbnail_interval_s: 10
+      - udp_input_id: ny-backup-admax-1-udp-2
+        enabled: false
+        stream_url: "udp://REPLACE_ME_NY_BACKUP_ADMAX_1_UDP_2"
+        thumbnail_interval_s: 10
+
+  - player_id: ny-backup-admax-2
+    playout_type: admax
+    paths:
+      admax_root_candidates:
+        - C:\Program Files (x86)\Unimedia\Admax One*\admax
+        - C:\Program Files\Unimedia\Admax One*\admax
+    process_selectors:
+      window_title_contains:
+        - Admax 2
+    log_selectors:
+      include_contains:
+        - Admax 2
+    udp_inputs:
+      # Keep these disabled until the site provides the real UDP inputs.
+      - udp_input_id: ny-backup-admax-2-udp-1
+        enabled: false
+        stream_url: "udp://REPLACE_ME_NY_BACKUP_ADMAX_2_UDP_1"
+        thumbnail_interval_s: 10
+      - udp_input_id: ny-backup-admax-2-udp-2
+        enabled: false
+        stream_url: "udp://REPLACE_ME_NY_BACKUP_ADMAX_2_UDP_2"
+        thumbnail_interval_s: 10

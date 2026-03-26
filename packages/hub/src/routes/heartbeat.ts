@@ -5,82 +5,102 @@ import { computeHealth, Observations } from '../services/stateEngine';
 import { evaluateAlert } from '../services/alerting';
 import { updateState } from '../store/state';
 
-// Parse AGENT_TOKENS env: "ny-main-pc:token1,ny-backup-pc:token2,..."
 function parseAgentTokens(): Map<string, string> {
   const map = new Map<string, string>();
   const raw = process.env.AGENT_TOKENS ?? '';
   for (const pair of raw.split(',')) {
-    const [agentId, token] = pair.trim().split(':');
-    if (agentId && token) map.set(token, agentId);
+    const [nodeId, token] = pair.trim().split(':');
+    if (nodeId && token) map.set(token, nodeId);
   }
   return map;
 }
 
-const TOKEN_TO_AGENT = parseAgentTokens();
-
-function validateToken(req: Request): string | null {
+function validateToken(req: Request, tokenToNode: Map<string, string>): string | null {
   const auth = req.headers.authorization ?? '';
   if (!auth.startsWith('Bearer ')) return null;
   const token = auth.slice(7).trim();
-  return TOKEN_TO_AGENT.get(token) ?? null;
+  return tokenToNode.get(token) ?? null;
+}
+
+function getUdpMonitoringEnabled(observations: Observations): boolean {
+  return observations.output_signal_present !== undefined
+    || (observations.udp_enabled ?? 0) === 1
+    || (observations.udp_input_count ?? 0) > 0;
 }
 
 export function createHeartbeatRouter(io: SocketServer): Router {
   const router = Router();
+  const tokenToNode = parseAgentTokens();
 
   router.post('/', async (req: Request, res: Response) => {
-    const agentId = validateToken(req);
-    if (!agentId) {
+    const nodeId = validateToken(req, tokenToNode);
+    if (!nodeId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { instanceId, timestamp, observations } = req.body as {
-      instanceId: string;
-      timestamp: string;
+    const { instanceId, playerId, agentId, nodeId: reportedNodeId, observations } = req.body as {
+      instanceId?: string;
+      playerId?: string;
+      agentId?: string;
+      nodeId?: string;
       observations: Observations;
     };
 
-    if (!instanceId || !observations) {
-      return res.status(400).json({ error: 'Missing instanceId or observations' });
+    const resolvedPlayerId = playerId ?? instanceId;
+    const claimedNodeId = reportedNodeId ?? agentId ?? nodeId;
+
+    if (!resolvedPlayerId || !observations) {
+      return res.status(400).json({ error: 'Missing playerId/instanceId or observations' });
     }
 
-    // Validate agent is allowed to report this instance
-    const allowedInstances = AGENT_INSTANCE_MAP.get(agentId) ?? [];
-    if (!allowedInstances.includes(instanceId)) {
-      return res.status(403).json({ error: 'Instance not allowed for this agent' });
+    if (claimedNodeId !== nodeId) {
+      return res.status(403).json({ error: 'Node ID does not match token' });
     }
 
-    const instanceConfig = INSTANCE_MAP.get(instanceId);
+    const allowedPlayers = AGENT_INSTANCE_MAP.get(nodeId) ?? [];
+    if (!allowedPlayers.includes(resolvedPlayerId)) {
+      return res.status(403).json({ error: 'Player not allowed for this node' });
+    }
+
+    const instanceConfig = INSTANCE_MAP.get(resolvedPlayerId);
     if (!instanceConfig) {
-      return res.status(404).json({ error: 'Unknown instance' });
+      return res.status(404).json({ error: 'Unknown player' });
     }
 
-    // Compute health state from raw observations
+    const udpMonitoringEnabled = getUdpMonitoringEnabled(observations);
     const { broadcastHealth, runtimeHealth, connectivityHealth } = computeHealth(
       observations,
-      instanceConfig.udpProbeEnabled
+      udpMonitoringEnabled
     );
 
-    // Persist and get previous state
     const { previous, current } = await updateState(
-      instanceId, agentId, broadcastHealth, runtimeHealth, connectivityHealth, observations
-    );
-
-    // Broadcast to dashboard via Socket.io
-    const payload = {
-      instanceId,
+      resolvedPlayerId,
+      nodeId,
       broadcastHealth,
       runtimeHealth,
       connectivityHealth,
+      observations
+    );
+
+    io.emit('state_update', {
+      instanceId: resolvedPlayerId,
+      playerId: resolvedPlayerId,
+      nodeId,
+      broadcastHealth,
+      runtimeHealth,
+      connectivityHealth,
+      monitoringMode: udpMonitoringEnabled ? 'hybrid' : 'local',
+      udpMonitoringEnabled,
+      udpInputCount: Number(observations.udp_input_count ?? 0),
+      udpHealthyInputCount: Number(observations.udp_healthy_input_count ?? 0),
+      udpSelectedInputId: (observations.udp_selected_input_id as string | null | undefined) ?? null,
       lastHeartbeatAt: current.lastHeartbeatAt,
       updatedAt: current.updatedAt,
       observations,
-    };
-    io.emit('state_update', payload);
+    });
 
-    // Evaluate alerting (async — don't block response)
     evaluateAlert({
-      instanceId,
+      instanceId: resolvedPlayerId,
       instanceLabel: instanceConfig.label,
       broadcastHealth,
       runtimeHealth,
@@ -88,7 +108,14 @@ export function createHeartbeatRouter(io: SocketServer): Router {
       observations: observations as Record<string, unknown>,
     }).catch(console.error);
 
-    return res.json({ ok: true, broadcastHealth, runtimeHealth, connectivityHealth });
+    return res.json({
+      ok: true,
+      nodeId,
+      playerId: resolvedPlayerId,
+      broadcastHealth,
+      runtimeHealth,
+      connectivityHealth,
+    });
   });
 
   return router;

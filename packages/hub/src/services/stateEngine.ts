@@ -23,6 +23,10 @@ export interface Observations extends Record<string, unknown> {
   output_freeze_seconds?: number;
   output_black_ratio?: number;       // 0.0 to 1.0
   output_audio_silence_seconds?: number;
+  udp_enabled?: number;              // 1 or 0
+  udp_input_count?: number;
+  udp_healthy_input_count?: number;
+  udp_selected_input_id?: string | null;
   // Connectivity
   internet_up?: number;              // 1 or 0
   gateway_up?: number;               // 1 or 0

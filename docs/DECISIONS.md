@@ -1,4 +1,4 @@
-# Clarix Pulse — Architecture Decision Records
+# Pulse — Architecture Decision Records
 
 This log records every significant technical decision made during design and implementation.
 Format: Date | Decision | Alternatives considered | Rationale | Consequences
@@ -146,3 +146,105 @@ WebSocket support. Full (strict) means Cloudflare validates Caddy's origin certi
 end-to-end encryption. WebSockets (Socket.io) work natively through Cloudflare on proxied subdomains.
 **Consequences**: Caddy must have a valid origin certificate (handled automatically by Caddy's
 Let's Encrypt ACME). Cloudflare's 100s HTTP timeout does not affect WebSocket connections.
+
+---
+
+## ADR-012 — Identity by node_id + player_id, with optional UDP per player
+**Date**: 2026-03-26
+**Decision**: Use `node_id` as the canonical identifier for each physical playout PC and `player_id`
+for each playout source running on that node. UDP monitoring is optional per player, and one node
+may carry multiple UDP inputs across one or more players.
+**Alternatives**: Keep `agent_id` + `instanceId`, make UDP a node-wide switch, or limit each node to
+one UDP input.
+**Rationale**: The new product direction needs player-level routing, alerting, and dashboard grouping.
+A single node can host several distinct players, and those players can have different software types,
+log sources, and UDP states. Player-level identity keeps monitoring precise without losing the node
+relationship.
+**Consequences**: Docs, config examples, and deployment guidance should treat `node_id` and
+`player_id` as the core identifiers. This supersedes the older agent/instance-only framing in
+ADR-007 and ADR-008 for the purposes of the current product direction.
+
+---
+
+## Review Log
+
+**2026-03-26 09:13 America/New_York**: Documentation review confirmed `docs/DECISIONS.md` is the correct
+single source for timestamped accountability notes because it already serves as the project's decision
+ledger. Future review findings and implementation choices should be appended here when they affect the
+project record.
+
+**2026-03-26 09:22 America/New_York**: Code review found three verified implementation gaps that change
+the project's finishability assessment: deployment docs and `.env.example` direct operators to `.env.local`
+while the hub runtime loads `.env`; the documented warning alert policy is not implemented in
+`packages/hub/src/services/alerting.ts`; and persisted thumbnail state is not rehydrated into the dashboard
+on load because `/api/status` omits image data and the `full_state` merge path does not apply thumbnail
+payloads.
+
+**2026-03-26 09:21 America/New_York**: Repository verification found the codebase is buildable but not
+yet deployment-complete. `npm run build` passed for the hub and dashboard, and `python -m compileall
+packages/agent` passed for the agent. Blocking gaps confirmed during review: the hub never calls
+`initDb()` before `initState()`, runtime configuration is inconsistent between `.env` and `.env.local`,
+alert dedup/recovery behavior does not match the documented guarantees, the Windows agent package in
+repo is incomplete for deployment (`nssm.exe`, `ffmpeg.exe`, and `ffprobe.exe` are not bundled by the
+current PyInstaller spec), and multi-instance monitoring is not fully instance-scoped in the current
+process/log monitors. Finishing the code/doc hardening is feasible from this workspace; full production
+cutover still requires Cloudflare access, real alerting credentials, and access to the four playout PCs.
+
+**2026-03-26 09:27 America/New_York**: Implemented three repo-side hardening fixes after verification:
+the hub now initializes the SQLite schema before state seeding on first boot; the runtime now supports
+both `.env` and `.env.local` consistently, with `.env.local` overriding `.env`; and persisted thumbnail
+data is rehydrated back into the dashboard on reload through `/api/status` and the dashboard merge path.
+Documentation was updated to match the runtime contract and to clarify that Windows agent bundles still
+require staged external binaries (`nssm.exe`, and `ffmpeg.exe`/`ffprobe.exe` for UDP-enabled sites).
+
+**2026-03-26 09:33:06 America/New_York**: Verification confirmed the hardening pass works as intended:
+`npm run build` passed for the hub and dashboard, `python -m compileall packages/agent` passed, and a
+clean-start smoke test from an isolated hub copy completed with `init_ok` and `state_count=7`.
+
+**2026-03-26 09:48:57 America/New_York**: Documentation was updated to reflect the new product
+direction: `node_id` and `player_id` are the primary identifiers, UDP monitoring is optional per
+player, and a single node may carry multiple UDP inputs across its players. This note records the
+doc-level decision so the README and supporting docs remain aligned with the intended monitoring
+model.
+
+**2026-03-26 09:59:57 America/New_York**: Requirement and runtime contract were tightened for the
+agent rollout: each node is keyed by `node_id`, each playout source is keyed by `player_id`, UDP
+monitoring is switchable per player, and a node may carry 2-5 UDP inputs across one or more
+players. The agent runtime was updated to preserve per-player selector blocks for same-type
+multi-instance PCs and to emit `udp_enabled`, `udp_input_count`, `udp_healthy_input_count`, and
+`udp_selected_input_id` so the hub and dashboard can treat enabled UDP inputs as a player-level
+monitoring matrix with clear accountability.
+
+**2026-03-26 10:06:50 America/New_York**: Verification completed after the node/player identity and
+UDP matrix wiring pass. `npm run build` succeeded for the hub and dashboard, and
+`python -m compileall packages/agent` succeeded for the updated agent runtime, including the new
+selector-preserving config loader and UDP matrix heartbeat fields.
+
+**2026-03-26 10:25:27 America/New_York**: Node deployment moved to a one-click bundle model. The
+agent package now includes a bundle builder, an install flow that copies itself into
+`%ProgramData%\ClarixPulse\Agent`, a post-install `configure.bat` helper, and explicit support for
+LAN-local hub URLs as well as remote hub URLs. This keeps each node configurable after install,
+lets UDP remain optional per player, and makes internet necessary only when the hub is remote or
+when Telegram/email alerts must leave the local network.
+
+**2026-03-26 11:06:45 America/New_York**: Product branding and operator-facing contact details were
+normalized across the repo. The product name is now `Pulse`, operator support email defaults now
+point to `support@clarixtech.com`, and older clarixtech / Caspan wording was removed from the
+current docs and UI where it would confuse deployment or ownership.
+
+**2026-03-26 11:06:45 America/New_York**: Mobile monitoring direction was extended beyond a desktop
+browser tab. The dashboard now targets an installable PWA flow with a persistent QR install bar for
+phone onboarding, and the mobile alarm path now includes browser vibration support in addition to
+the existing Web Audio alarm. This keeps phone-based operators viable even when they are not seated
+at a workstation.
+
+**2026-03-26 11:06:45 America/New_York**: Admax path handling was changed from version-specific root
+strings to layout discovery by candidate roots and marker folders. This allows the same node config
+to survive expected install differences such as `Admax One 2.0`, `Admax One2.0`, or later vendor
+variants, while still resolving the real playout, FNF, and playlistscan directories on the local
+machine.
+
+**2026-03-26 11:06:45 America/New_York**: Node bundle packaging was hardened so each bundle can
+carry `nssm.exe`, `ffmpeg.exe`, and `ffprobe.exe` together with the agent and scripts. The intent
+is that operators can install once, then turn UDP inputs on or off later from `configure.bat`
+without needing a second dependency install on the node.

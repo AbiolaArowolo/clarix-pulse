@@ -5,7 +5,7 @@ Date: 2026-03-22
 ## Scope
 
 This document defines the recommended monitoring matrix for the `NJ optimum`
-Admax playout instance.
+Admax playout player.
 
 It intentionally supersedes the older handover assumption that `Optimum` was
 an Insta site. For this site, the current playout to monitor is `Admax`.
@@ -119,7 +119,7 @@ Recommended starting point:
 Suggested restart trigger:
 
 - only after `180s` of persistent `off_air_likely` or `off_air_confirmed`
-- restart the Admax application instance, not the whole PC
+- restart the Admax application player, not the whole PC
 - suppress restart during maintenance windows
 
 ## Current Confidence Assessment

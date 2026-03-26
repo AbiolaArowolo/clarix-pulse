@@ -2,7 +2,7 @@
   "name": "clarix-pulse",
   "version": "1.0.0",
   "private": true,
-  "description": "Clarix Pulse — Broadcast monitoring system for NOIRE TV",
+  "description": "Pulse — Broadcast monitoring system for NOIRE TV",
   "workspaces": [
     "packages/hub",
     "packages/dashboard"

@@ -1,0 +1,33 @@
+# Pulse node config for FL Digicel.
+# Replace agent_token and any UDP stream URLs before deployment.
+
+node_id: digicel-pc
+node_name: FL DIGICEL
+site_id: digicel
+hub_url: https://pulse.clarixtech.com
+agent_token: REPLACE_ME_DIGICEL_PC_TOKEN
+poll_interval_seconds: 10
+
+players:
+  - player_id: digicel-admax-1
+    playout_type: admax
+    paths:
+      admax_root_candidates:
+        - C:\Program Files (x86)\Unimedia\Admax One*\admax
+        - C:\Program Files\Unimedia\Admax One*\admax
+    process_selectors:
+      window_title_contains:
+        - Admax 1
+    log_selectors:
+      include_contains:
+        - Admax 1
+    udp_inputs:
+      # Keep these disabled until the site provides the real UDP inputs.
+      - udp_input_id: digicel-admax-1-udp-1
+        enabled: false
+        stream_url: "udp://REPLACE_ME_DIGICEL_ADMAX_1_UDP_1"
+        thumbnail_interval_s: 10
+      - udp_input_id: digicel-admax-1-udp-2
+        enabled: false
+        stream_url: "udp://REPLACE_ME_DIGICEL_ADMAX_1_UDP_2"
+        thumbnail_interval_s: 10

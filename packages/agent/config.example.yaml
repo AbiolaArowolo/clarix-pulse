@@ -1,56 +1,79 @@
-# Clarix Pulse — Agent Configuration
-# Copy this file to config.yaml and fill in values for each PC
-# config.yaml is gitignored — never commit it
+# Pulse - Node / Player Configuration
+# Preferred shape:
+# - node_id: unique node/service ID reported to the hub
+# - players: list of playout players on this node
+# - player_id: unique player ID reported to the hub
+# - udp_inputs: zero or more optional UDP monitoring inputs per player
+# - if one or more udp_inputs are enabled, the agent evaluates them as a UDP matrix
+# - one player can carry multiple udp_inputs, and one node can carry 2-5 UDP inputs overall
+#
+# Backward compatibility:
+# - agent_id still works as a legacy alias for node_id
+# - instances still works as a legacy alias for players
+# - id still works as a legacy alias for player_id
+# - udp_probe still works as a legacy alias for a single udp_inputs entry
 
-agent_id: ny-main-pc          # unique per PC (must match hub AGENT_TOKENS)
-pc_name: NY-MAIN              # human-readable label
-site_id: ny-main              # site grouping
+node_id: ny-main-node
+node_name: NY-MAIN
+site_id: ny-main
+# hub_url may point to a local LAN hub or a remote internet-facing hub
 hub_url: https://pulse.clarixtech.com
-agent_token: REPLACE_ME       # pre-shared secret — get from hub admin
+agent_token: REPLACE_ME
 poll_interval_seconds: 10
 
-instances:
-  - id: ny-main-insta-1
+players:
+  - player_id: ny-main-insta-1
     playout_type: insta
     paths:
       shared_log_dir: C:\Program Files\Indytek\Insta log
       instance_root: C:\Program Files\Indytek\Insta Playout\Settings
       fnf_log: C:\Program Files\Indytek\Insta Playout\logs\FNF
       playlistscan_log: C:\Program Files\Indytek\Insta Playout\logs\playlistscan
-    udp_probe:
-      enabled: false
-      stream_url: ""
-      thumbnail_interval_s: 10
+    # Optional selectors for same-type players on one PC:
+    # process_selectors:
+    #   window_title_contains:
+    #     - Insta 1
+    # log_selectors:
+    #   include_contains:
+    #     - Insta 1
+    udp_inputs: []
 
-  - id: ny-main-insta-2
+  - player_id: ny-main-insta-2
     playout_type: insta
     paths:
       shared_log_dir: C:\Program Files\Indytek\Insta log
       instance_root: C:\Program Files\Indytek\Insta Playout 2\Settings
       fnf_log: C:\Program Files\Indytek\Insta Playout 2\logs\FNF
       playlistscan_log: C:\Program Files\Indytek\Insta Playout 2\logs\playlistscan
-    udp_probe:
-      enabled: false
-      stream_url: ""
-      thumbnail_interval_s: 10
+    udp_inputs: []
 
-  - id: ny-main-admax-1
+  - player_id: ny-main-admax-1
     playout_type: admax
     paths:
-      admax_root: C:\Program Files (x86)\Unimedia\Admax One 2.0.2\admax
-    udp_probe:
-      enabled: false
-      stream_url: ""
-      thumbnail_interval_s: 10
+      # Version-agnostic candidates. The agent resolves the first real Admax layout it finds.
+      admax_root_candidates:
+        - C:\Program Files (x86)\Unimedia\Admax One*\admax
+        - C:\Program Files\Unimedia\Admax One*\admax
+    udp_inputs:
+      - udp_input_id: ny-main-admax-1-udp-1
+        enabled: false
+        stream_url: ""
+        thumbnail_interval_s: 10
 
-# --- NY Backup example (with UDP probe) ---
-# agent_id: ny-backup-pc
-# instances:
-#   - id: ny-backup-admax-1
+# Example: a node with multiple UDP inputs on one player
+# players:
+#   - player_id: ny-backup-admax-1
 #     playout_type: admax
 #     paths:
-#       admax_root: C:\Program Files (x86)\Unimedia\Admax One 2.0.2\admax
-#     udp_probe:
-#       enabled: true
-#       stream_url: udp://192.168.1.50:5000
-#       thumbnail_interval_s: 10
+#       admax_root_candidates:
+#         - C:\Program Files (x86)\Unimedia\Admax One*\admax
+#         - C:\Program Files\Unimedia\Admax One*\admax
+#     udp_inputs:
+#       - udp_input_id: ny-backup-admax-1-udp-a
+#         enabled: true
+#         stream_url: udp://192.168.1.50:5000
+#         thumbnail_interval_s: 10
+#       - udp_input_id: ny-backup-admax-1-udp-b
+#         enabled: false
+#         stream_url: udp://192.168.1.51:5000
+#         thumbnail_interval_s: 10

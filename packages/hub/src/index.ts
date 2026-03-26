@@ -1,15 +1,20 @@
-import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
+import dotenv from 'dotenv';
+import path from 'path';
 
-import { initState, getAllStates, setConnectivity } from './store/state';
+import { initState, getAllStates, setConnectivity, markInstanceOffline } from './store/state';
 import { createHeartbeatRouter } from './routes/heartbeat';
 import { createThumbnailRouter } from './routes/thumbnail';
-import { createStatusRouter } from './routes/status';
+import { createStatusRouter, buildStatusPayload } from './routes/status';
 import { sendNetworkIssueAlert } from './services/alerting';
 import { INSTANCE_MAP } from './config/instances';
+
+const repoRoot = path.resolve(__dirname, '../../..');
+dotenv.config({ path: path.join(repoRoot, '.env') });
+dotenv.config({ path: path.join(repoRoot, '.env.local'), override: true });
 
 const PORT = Number(process.env.HUB_PORT ?? 3001);
 
@@ -22,9 +27,6 @@ const io = new SocketServer(httpServer, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
 });
 
-// Initialise SQLite state on startup
-initState().catch(console.error);
-
 // Routes
 app.use('/api/heartbeat', createHeartbeatRouter(io));
 app.use('/api/thumbnail', createThumbnailRouter(io));
@@ -35,8 +37,8 @@ app.get('/api/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOS
 // WebSocket connection
 io.on('connection', (socket) => {
   console.log(`[ws] client connected: ${socket.id}`);
-  // Send full current state on connect
-  socket.emit('full_state', getAllStates());
+  // Send full current state on connect.
+  socket.emit('full_state', buildStatusPayload());
   socket.on('disconnect', () => console.log(`[ws] client disconnected: ${socket.id}`));
 });
 
@@ -48,7 +50,7 @@ const OFFLINE_THRESHOLD_MS = 90_000; // 90s → offline (gray)
 
 const networkIssueSentAt = new Map<string, number>();
 
-setInterval(() => {
+setInterval(async () => {
   const states = getAllStates();
   const now = Date.now();
 
@@ -56,18 +58,18 @@ setInterval(() => {
     if (!state.lastHeartbeatAt) continue;
 
     const ageMs = now - new Date(state.lastHeartbeatAt).getTime();
-    let newConnectivity = state.connectivityHealth;
-
     if (ageMs >= OFFLINE_THRESHOLD_MS && state.connectivityHealth !== 'offline') {
-      newConnectivity = 'offline';
-      setConnectivity(state.instanceId, 'offline').catch(console.error);
+      const updated = await markInstanceOffline(state.instanceId).catch((err) => {
+        console.error(err);
+        return undefined;
+      });
       io.emit('state_update', {
         instanceId: state.instanceId,
         broadcastHealth: 'unknown',
-        runtimeHealth: state.runtimeHealth,
+        runtimeHealth: updated?.runtimeHealth ?? state.runtimeHealth,
         connectivityHealth: 'offline',
         lastHeartbeatAt: state.lastHeartbeatAt,
-        updatedAt: new Date().toISOString(),
+        updatedAt: updated?.updatedAt ?? new Date().toISOString(),
       });
 
       // Send network issue alert (once per incident, debounced 5 min)
@@ -78,7 +80,6 @@ setInterval(() => {
         if (inst) sendNetworkIssueAlert(state.instanceId, inst.label).catch(console.error);
       }
     } else if (ageMs >= STALE_THRESHOLD_MS && state.connectivityHealth === 'online') {
-      newConnectivity = 'stale';
       setConnectivity(state.instanceId, 'stale').catch(console.error);
       io.emit('state_update', {
         instanceId: state.instanceId,
@@ -92,7 +93,16 @@ setInterval(() => {
   }
 }, 5_000);
 
-httpServer.listen(PORT, () => {
-  console.log(`[hub] Clarix Pulse hub running on port ${PORT}`);
-  console.log(`[hub] SQLite state initialised for ${getAllStates().length} instances`);
+async function start() {
+  await initState();
+
+  httpServer.listen(PORT, () => {
+    console.log(`[hub] Pulse hub running on port ${PORT}`);
+    console.log(`[hub] SQLite state initialised for ${getAllStates().length} instances`);
+  });
+}
+
+start().catch((err) => {
+  console.error('[hub] startup failed', err);
+  process.exitCode = 1;
 });

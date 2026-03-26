@@ -11,9 +11,13 @@ packages/hub/dist/
 packages/dashboard/dist/
 packages/agent/dist/
 packages/agent/build/
+packages/agent/release/
+packages/agent/release-test/
 *.spec
 
 # Environment / secrets — NEVER commit these
+.env
+**/.env
 .env.local
 *.env.local
 **/.env.local
@@ -28,6 +32,10 @@ packages/agent/.venv/
 
 # PyInstaller output
 packages/agent/clarix-agent-*.zip
+
+# Node bundle vendor/runtime binaries
+packages/agent/vendor/*.exe
+!packages/agent/vendor/README.md
 
 # OS
 .DS_Store

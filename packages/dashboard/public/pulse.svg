@@ -1,0 +1,30 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="pulseBg" x1="64" y1="64" x2="448" y2="448" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f766e" />
+      <stop offset="1" stop-color="#14b8a6" />
+    </linearGradient>
+    <linearGradient id="pulseGlow" x1="120" y1="120" x2="392" y2="392" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ecfeff" stop-opacity="0.9" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.65" />
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#pulseBg)" />
+  <rect x="56" y="56" width="400" height="400" rx="88" stroke="white" stroke-opacity="0.14" stroke-width="10" />
+  <path
+    d="M128 278H188L216 218L252 306L286 250L312 278H384"
+    stroke="url(#pulseGlow)"
+    stroke-width="28"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <circle cx="172" cy="278" r="12" fill="#ecfeff" fill-opacity="0.95" />
+  <circle cx="384" cy="278" r="12" fill="#ecfeff" fill-opacity="0.95" />
+  <path
+    d="M162 146C204 118 257 104 316 108C360 111 399 126 430 152"
+    stroke="#ecfeff"
+    stroke-opacity="0.28"
+    stroke-width="18"
+    stroke-linecap="round"
+  />
+</svg>
