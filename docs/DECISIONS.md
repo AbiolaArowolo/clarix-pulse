@@ -327,3 +327,9 @@ agent and hub layers. The Insta monitor now treats positive `runningstatus.txt` 
 visible Insta window rather than the first helper/background process it sees, and heartbeat timeout
 handling now clears stale runtime red before marking a node offline so network loss stays a yellow
 connectivity incident instead of being misreported as OFF AIR.
+
+**2026-03-26 20:23:59 America/New_York**: The Windows node installer was corrected so hotfix
+reinstalls can actually replace a running agent service. `install.bat` now stops and removes the
+existing `ClarixPulseAgent` service before copying the new bundle files into `%ProgramData%`,
+instead of attempting to overwrite `clarix-agent.exe` while the old service still has the binary
+locked.

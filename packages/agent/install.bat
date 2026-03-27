@@ -10,6 +10,7 @@ if "%SOURCE_DIR:~-1%"=="\" set "SOURCE_DIR=%SOURCE_DIR:~0,-1%"
 set "INSTALL_DIR=%ProgramData%\ClarixPulse\Agent"
 set "SERVICE_NAME=ClarixPulseAgent"
 set "DISPLAY_NAME=Pulse Agent"
+set "BUNDLE_NSSM_PATH=%SOURCE_DIR%\nssm.exe"
 set "EXE_PATH=%INSTALL_DIR%\clarix-agent.exe"
 set "CONFIG_PATH=%INSTALL_DIR%\config.yaml"
 set "CONFIG_EXAMPLE_PATH=%INSTALL_DIR%\config.example.yaml"
@@ -21,6 +22,7 @@ set "FFPROBE_PATH=%INSTALL_DIR%\ffprobe.exe"
 call :require_admin || goto :fail
 call :banner
 call :validate_bundle || goto :fail
+call :stop_existing_service || goto :fail
 call :stage_bundle || goto :fail
 call :ensure_config || goto :fail
 call :validate_udp_tools || goto :fail
@@ -64,6 +66,17 @@ if not exist "%SOURCE_DIR%\nssm.exe" (
     echo Build the node bundle with the required vendor files first.
     exit /b 1
 )
+exit /b 0
+
+:stop_existing_service
+sc query %SERVICE_NAME% >nul 2>&1
+if not "%errorlevel%"=="0" exit /b 0
+
+echo Stopping existing service before updating files...
+"%BUNDLE_NSSM_PATH%" stop %SERVICE_NAME% >nul 2>&1
+"%BUNDLE_NSSM_PATH%" remove %SERVICE_NAME% confirm >nul 2>&1
+taskkill /IM clarix-agent.exe /F >nul 2>&1
+timeout /t 2 /nobreak >nul
 exit /b 0
 
 :stage_bundle
@@ -160,13 +173,6 @@ exit /b 0
 :install_service
 echo.
 echo Installing Windows service: %SERVICE_NAME%
-
-"%NSSM_PATH%" status %SERVICE_NAME% >nul 2>&1
-if "%errorlevel%"=="0" (
-    echo Updating existing service...
-    "%NSSM_PATH%" stop %SERVICE_NAME% >nul 2>&1
-    "%NSSM_PATH%" remove %SERVICE_NAME% confirm >nul 2>&1
-)
 
 "%NSSM_PATH%" install %SERVICE_NAME% "%EXE_PATH%" || exit /b 1
 "%NSSM_PATH%" set %SERVICE_NAME% DisplayName "%DISPLAY_NAME%" >nul 2>&1
