@@ -31,6 +31,18 @@ players:
         enabled: false
         stream_url: "udp://REPLACE_ME_NY_BACKUP_ADMAX_1_UDP_2"
         thumbnail_interval_s: 10
+      - udp_input_id: ny-backup-admax-1-udp-3
+        enabled: false
+        stream_url: "udp://REPLACE_ME_NY_BACKUP_ADMAX_1_UDP_3"
+        thumbnail_interval_s: 10
+      - udp_input_id: ny-backup-admax-1-udp-4
+        enabled: false
+        stream_url: "udp://REPLACE_ME_NY_BACKUP_ADMAX_1_UDP_4"
+        thumbnail_interval_s: 10
+      - udp_input_id: ny-backup-admax-1-udp-5
+        enabled: false
+        stream_url: "udp://REPLACE_ME_NY_BACKUP_ADMAX_1_UDP_5"
+        thumbnail_interval_s: 10
 
   - player_id: ny-backup-admax-2
     playout_type: admax
@@ -45,7 +57,6 @@ players:
       include_contains:
         - Admax 2
     udp_inputs:
-      # Keep these disabled until the site provides the real UDP inputs.
       - udp_input_id: ny-backup-admax-2-udp-1
         enabled: false
         stream_url: "udp://REPLACE_ME_NY_BACKUP_ADMAX_2_UDP_1"
@@ -53,4 +64,16 @@ players:
       - udp_input_id: ny-backup-admax-2-udp-2
         enabled: false
         stream_url: "udp://REPLACE_ME_NY_BACKUP_ADMAX_2_UDP_2"
+        thumbnail_interval_s: 10
+      - udp_input_id: ny-backup-admax-2-udp-3
+        enabled: false
+        stream_url: "udp://REPLACE_ME_NY_BACKUP_ADMAX_2_UDP_3"
+        thumbnail_interval_s: 10
+      - udp_input_id: ny-backup-admax-2-udp-4
+        enabled: false
+        stream_url: "udp://REPLACE_ME_NY_BACKUP_ADMAX_2_UDP_4"
+        thumbnail_interval_s: 10
+      - udp_input_id: ny-backup-admax-2-udp-5
+        enabled: false
+        stream_url: "udp://REPLACE_ME_NY_BACKUP_ADMAX_2_UDP_5"
         thumbnail_interval_s: 10

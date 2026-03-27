@@ -187,19 +187,22 @@ def check(instance_id: str, playout_type: str, paths: dict, selectors: dict | No
     new_lines = _select_lines(_read_new_lines(log_path, instance_id), selectors)
 
     if playout_type == "admax":
-        token = _classify_admax_lines(new_lines, selectors)
+        classified_token = _classify_admax_lines(new_lines, selectors)
     else:
-        token = _classify_insta_lines(new_lines, selectors)
+        classified_token = _classify_insta_lines(new_lines, selectors)
 
+    token = classified_token
+    token_fresh = 1 if classified_token is not None else 0
     latched_token = _last_tokens.get(instance_id)
-    if token in {"stopxxx2", "app_exited", "reinit", "paused"}:
-        _last_tokens[instance_id] = token
-    elif token in {"fully_played", "skipped"}:
+    if classified_token in {"stopxxx2", "app_exited", "reinit", "paused"}:
+        _last_tokens[instance_id] = classified_token
+    elif classified_token in {"fully_played", "skipped"}:
         _last_tokens.pop(instance_id, None)
-    elif token is None:
+    elif classified_token is None:
         token = latched_token
 
     return {
         "log_last_token": token,
+        "log_last_token_fresh": token_fresh,
         "log_path_exists": 1 if log_exists else 0,
     }

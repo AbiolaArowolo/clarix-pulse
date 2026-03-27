@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { Server as SocketServer } from 'socket.io';
 import { AGENT_INSTANCE_MAP, INSTANCE_MAP } from '../config/instances';
+import { getNodeDesiredConfig } from '../config/nodeConfigs';
 import { computeHealth, Observations } from '../services/stateEngine';
 import { evaluateAlert } from '../services/alerting';
 import { getState, updateState } from '../store/state';
@@ -123,6 +124,7 @@ export function createHeartbeatRouter(io: SocketServer): Router {
       broadcastHealth,
       runtimeHealth,
       connectivityHealth,
+      desiredNodeConfig: getNodeDesiredConfig(nodeId),
     });
   });
 

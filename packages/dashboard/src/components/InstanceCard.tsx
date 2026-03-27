@@ -10,6 +10,7 @@ import {
 } from '../lib/types';
 import { StatusBadge } from './StatusBadge';
 import { StreamThumbnail } from './StreamThumbnail';
+import { UdpConfigEditor } from './UdpConfigEditor';
 
 interface Props {
   instance: InstanceState;
@@ -128,6 +129,10 @@ export function InstanceCard({ instance }: Props) {
       <div className="mt-3 text-xs text-slate-500">
         Last heartbeat: <span className="text-slate-300">{heartbeatLabel}</span>
       </div>
+
+      {instance.udpMonitoringCapable && (
+        <UdpConfigEditor playerId={instance.playerId} />
+      )}
 
       {(instance.udpMonitoringEnabled || instance.hasThumbnail) && (
         <StreamThumbnail

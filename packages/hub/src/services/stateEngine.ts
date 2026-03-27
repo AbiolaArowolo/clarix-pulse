@@ -6,6 +6,9 @@ import { BroadcastHealth, RuntimeHealth, ConnectivityHealth } from '../store/db'
 const UDP_RED_AFTER_SECONDS = 40;
 const UDP_FREEZE_WARNING_SECONDS = 2;
 const UDP_SILENCE_WARNING_SECONDS = 8;
+const RUNTIME_STOPPED_RED_AFTER_SECONDS = 45;
+const RUNTIME_STALLED_RED_AFTER_SECONDS = 45;
+const RUNTIME_PAUSED_RED_AFTER_SECONDS = 60;
 
 export interface Observations extends Record<string, unknown> {
   // Process
@@ -14,6 +17,7 @@ export interface Observations extends Record<string, unknown> {
   restart_events_15m?: number;
   // Log tokens (from agent deep log monitoring)
   log_last_token?: string | null;
+  log_last_token_fresh?: number;
   // File state (stall detection)
   filebar_position_delta_30s?: number;
   frame_delta_30s?: number;
@@ -69,7 +73,7 @@ export function computeHealth(
     context.previousRuntimeStartedAt,
     context.currentTime
   );
-  const broadcastHealth = computeBroadcast(obs, runtimeHealth, udpProbeEnabled, context);
+  const broadcastHealth = computeBroadcast(obs, runtimeHealth, runtimeStateAgeSeconds, udpProbeEnabled, context);
   const broadcastStateAgeSeconds = computeStateAgeSeconds(
     broadcastHealth,
     context.previousBroadcastHealth,
@@ -125,12 +129,17 @@ function computePersistedUdpFaultAgeSeconds(context: HealthComputationContext): 
 }
 
 function computeRuntime(obs: Observations): RuntimeHealth {
+  const logToken = typeof obs.log_last_token === 'string'
+    ? obs.log_last_token
+    : null;
+  const logTokenFresh = (obs.log_last_token_fresh ?? 0) === 1;
+
   // Stopped: process gone
   if (obs.playout_process_up === 0) return 'stopped';
 
   // Explicit log tokens that are still authoritative
-  if (obs.log_last_token === 'app_exited') return 'stopped';
-  if (obs.log_last_token === 'reinit') return 'restarting';
+  if (logToken === 'app_exited' && logTokenFresh) return 'stopped';
+  if (logToken === 'reinit' && logTokenFresh) return 'restarting';
 
   const instaRuntimeState = typeof obs.insta_runtime_state === 'string'
     ? obs.insta_runtime_state
@@ -138,6 +147,13 @@ function computeRuntime(obs: Observations): RuntimeHealth {
   const hasExplicitInstaState = instaRuntimeState !== undefined
     || obs.insta_running_flag !== undefined
     || obs.insta_pause_flag !== undefined;
+  const explicitHealthyInsta = instaRuntimeState === 'healthy'
+    || (
+      hasExplicitInstaState
+      && obs.insta_running_flag !== undefined
+      && obs.insta_running_flag > 0
+      && obs.insta_pause_flag !== 1
+    );
 
   if (instaRuntimeState === 'paused' || obs.insta_pause_flag === 1) {
     return 'paused';
@@ -151,9 +167,19 @@ function computeRuntime(obs: Observations): RuntimeHealth {
     return 'stopped';
   }
 
-  // Log pause tokens should reflect in real time, even if the runtime file stays stale.
-  if (obs.log_last_token === 'stopxxx2') return 'paused';
-  if (obs.log_last_token === 'paused') return 'paused';
+  // Fresh log tokens should reflect immediately. Once Insta reports healthy again,
+  // a stale latched pause/restart token must not keep the card stuck in yellow.
+  if (logToken === 'app_exited') {
+    return explicitHealthyInsta ? 'healthy' : 'stopped';
+  }
+  if (logToken === 'reinit') {
+    return explicitHealthyInsta ? 'healthy' : 'restarting';
+  }
+  if (logToken === 'stopxxx2' || logToken === 'paused') {
+    if (logTokenFresh || !explicitHealthyInsta) {
+      return 'paused';
+    }
+  }
 
   // Content error
   if ((obs.fnf_new_entries ?? 0) > 0 || (obs.playlistscan_new_entries ?? 0) > 0) {
@@ -172,6 +198,8 @@ function computeRuntime(obs: Observations): RuntimeHealth {
   // Restart loop
   if ((obs.restart_events_15m ?? 0) >= 2) return 'restarting';
 
+  if (explicitHealthyInsta) return 'healthy';
+
   // If process is up and no negative signals
   if (obs.playout_process_up === 1) return 'healthy';
 
@@ -181,6 +209,7 @@ function computeRuntime(obs: Observations): RuntimeHealth {
 function computeBroadcast(
   obs: Observations,
   runtimeHealth: RuntimeHealth,
+  runtimeStateAgeSeconds: number,
   udpProbeEnabled: boolean,
   context: HealthComputationContext
 ): BroadcastHealth {
@@ -203,9 +232,15 @@ function computeBroadcast(
   }
 
   // Runtime-derived broadcast health.
-  if (runtimeHealth === 'stopped') return 'off_air_likely';
-  if (runtimeHealth === 'stalled') return 'off_air_likely';
-  if (runtimeHealth === 'paused') return 'degraded';
+  if (runtimeHealth === 'stopped') {
+    return runtimeStateAgeSeconds >= RUNTIME_STOPPED_RED_AFTER_SECONDS ? 'off_air_likely' : 'degraded';
+  }
+  if (runtimeHealth === 'stalled') {
+    return runtimeStateAgeSeconds >= RUNTIME_STALLED_RED_AFTER_SECONDS ? 'off_air_likely' : 'degraded';
+  }
+  if (runtimeHealth === 'paused') {
+    return runtimeStateAgeSeconds >= RUNTIME_PAUSED_RED_AFTER_SECONDS ? 'off_air_likely' : 'degraded';
+  }
   if (runtimeHealth === 'restarting') return 'degraded';
   if (runtimeHealth === 'content_error') return 'degraded';
 

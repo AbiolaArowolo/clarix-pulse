@@ -1,32 +1,32 @@
-# Pulse — Product Requirements Document
+# Pulse - Product Requirements Document
 
-**Project**: Pulse
-**Version**: 1.0.0
-**Date**: 2026-03-26
-**Author**: clarixtech
-**Status**: Approved — Implementation in progress
+**Project**: Pulse  
+**Version**: 1.0.0  
+**Date**: 2026-03-27  
+**Author**: Pulse Team  
+**Status**: Approved - implementation in progress
 
 ---
 
 ## 1. Problem Statement
 
-NOIRE TV operates broadcast playout across 4 physical nodes with 7 independent playout players.
-There is currently no unified monitoring system. Operators must manually check each PC to determine
-if a channel is on-air, which introduces unacceptable risk of undetected off-air events, slow incident
-response, and operational blind spots — especially during overnight and weekend hours.
+Broadcast operations teams often run multiple playout nodes across one or more sites without a single reliable monitoring plane. That creates blind spots around off-air events, software stalls, node outages, and delayed incident response.
+
+Pulse solves this by providing a shared monitoring platform for playout environments, whether they belong to one broadcaster, one managed services provider, or multiple businesses operating in different regions.
 
 ---
 
-## 2. Goal
+## 2. Goals
 
-Build **Pulse**: a production-grade broadcast monitoring system that provides:
+Build **Pulse** as a production-grade monitoring platform that provides:
 
-- Real-time visibility of all 7 playout players from a single web dashboard
-- Automatic alerting (Telegram + email) when a channel goes or is likely to go off-air
-- Clear separation of playout failure from network/connectivity failure
-- A lightweight agent deployable on all playout nodes with zero per-site Python dependency
-- Core identifiers based on `node_id` and `player_id`
-- Optional UDP stream confidence probes per player, including nodes with multiple UDP inputs
+- real-time visibility of all monitored playout players from a single dashboard
+- automatic alerting when a player goes or is likely to go off-air
+- clean separation of playout failure from network failure
+- a lightweight Windows agent deployable without a separate Python install
+- core identity based on `node_id` and `player_id`
+- optional UDP stream confidence probes per player
+- a deployment model that scales across customers, sites, and regions
 
 ---
 
@@ -34,124 +34,124 @@ Build **Pulse**: a production-grade broadcast monitoring system that provides:
 
 | User | Context | Primary Need |
 |---|---|---|
-| Broadcast operator | On call, checking phone | Know immediately if a channel is off-air |
-| Technical director | Office or remote | Understand root cause (playout crash vs network loss) |
-| Support team (clarixtech) | support@clarixtech.com | Receive email alerts for escalation |
+| Broadcast operator | On call, checking phone or desktop | Know immediately when a player is off-air |
+| Technical director | Office, NOC, or remote | Understand root cause and scope quickly |
+| Support engineer | Managed service or internal ops | Receive reliable alerting and recovery signals |
+| Platform administrator | Deployment and maintenance | Roll out node bundles consistently across environments |
 
 ---
 
-## 4. Nodes and Players
+## 4. Deployment Model
 
-| Node ID | Site ID | Location | Players | UDP-capable players |
+Pulse supports:
+
+- single-player, single-node installations
+- multi-node sites with mixed playout software
+- multi-site regional deployments
+- one platform serving many businesses with separate configs and tokens
+
+### Example Reference Topology
+
+| Node ID | Site ID | Players | Software Mix | UDP |
 |---|---|---|---|---|
-| `ny-main-pc` | `ny-main` | New York, Main | `ny-main-insta-1`, `ny-main-insta-2`, `ny-main-admax-1` | optional, per player |
-| `ny-backup-pc` | `ny-backup` | New York, Backup | `ny-backup-admax-1`, `ny-backup-admax-2` | both players |
-| `nj-optimum-pc` | `nj-optimum` | New Jersey | `nj-optimum-insta-1` | optional |
-| `digicel-pc` | `digicel` | Florida | `digicel-admax-1` | enabled |
+| `site-a-node-1` | `site-a` | `site-a-insta-1`, `site-a-insta-2` | Insta | optional |
+| `site-a-node-2` | `site-a` | `site-a-admax-1` | Admax | optional |
+| `site-b-node-1` | `site-b` | `site-b-admax-1`, `site-b-admax-2` | Admax | enabled on selected players |
+| `site-c-node-1` | `site-c` | `site-c-insta-1` | Insta | optional |
 
-**Total**: 4 nodes, 7 playout players across 2 software types (Insta Playout, Admax).
-
-Each node may carry multiple UDP inputs across its players. UDP monitoring is therefore a player-level capability, not a node-level blanket switch.
+Each node may carry multiple players, and each player may have zero to five UDP inputs.
 
 ---
 
 ## 5. Features
 
-### 5.1 Core (v1.0)
+### 5.1 Core
 
 | # | Feature | Priority |
 |---|---|---|
-| F1 | Real-time dashboard grouped by node | P0 |
-| F2 | Per-player colour-coded health status | P0 |
-| F3 | Separate broadcast_health, runtime_health, connectivity_health | P0 |
-| F4 | Loud audio and vibration alarm on OFF AIR state | P0 |
-| F5 | Telegram alert on state change (critical + recovery) | P0 |
-| F6 | Email alert to support@clarixtech.com | P0 |
-| F7 | Local agent auto-starts as Windows service on boot | P0 |
-| F8 | Agent deploys as single .exe — no Python install required | P0 |
-| F9 | Deep log monitoring (Insta + Admax validated) | P0 |
-| F10 | Process presence + window presence monitoring | P0 |
-| F11 | Stall detection via file position delta (30s/60s threshold) | P0 |
-| F12 | Content error detection via FNF/playlistscan logs | P1 |
-| F13 | Optional UDP stream confidence probe per player | P1 |
-| F14 | Stream thumbnail snapshot in dashboard | P1 |
-| F15 | Heartbeat stale/offline indicator (orange/gray) | P0 |
-| F16 | Installable mobile-responsive PWA dashboard with persistent QR install surface | P1 |
-| F17 | SQLite-backed alert dedup (survives hub restart) | P0 |
+| F1 | Real-time dashboard grouped by site and node | P0 |
+| F2 | Per-player health cards | P0 |
+| F3 | Separate `broadcast_health`, `runtime_health`, and `connectivity_health` | P0 |
+| F4 | Audio and vibration alarm for critical states | P0 |
+| F5 | Telegram alerting for critical and recovery events | P0 |
+| F6 | Email alerting for critical and recovery events | P0 |
+| F7 | Windows agent auto-start as a service | P0 |
+| F8 | Agent packaged as a standalone `.exe` | P0 |
+| F9 | Deep log monitoring for supported playout software | P0 |
+| F10 | Process presence and window presence checks | P0 |
+| F11 | Stall detection from local runtime files | P0 |
+| F12 | Content error detection from error logs | P1 |
+| F13 | Optional UDP stream confidence probing | P1 |
+| F14 | Thumbnail snapshots for UDP-enabled players | P1 |
+| F15 | Heartbeat stale/offline indicator | P0 |
+| F16 | Installable mobile-responsive PWA dashboard | P1 |
+| F17 | SQLite-backed alert dedup across hub restarts | P0 |
+| F18 | Hub-managed UDP configuration sync back to the node | P1 |
 
-### 5.2 Future (v1.x)
+### 5.2 Future
 
-- Auto-restart of crashed playout application after 180s (observation mode first)
-- Historical event log view in dashboard
-- Per-player maintenance mode (suppress alerts)
-- Multi-user authentication for dashboard
+- maintenance mode per player
+- user authentication and role-based access
+- historical event views and reporting
+- controlled recovery automation after prolonged failure
+- multi-tenant dashboard segmentation
 
 ---
 
-## 6. Non-Goals (v1.0)
+## 6. Non-Goals
 
-- No video preview / live stream in browser (thumbnails only)
-- No user login / authentication for dashboard (internal tool)
-- No automatic playout restart (alert-only mode at launch)
-- No support for platforms other than Windows on playout PCs
-- No public-facing status page
+- full browser video playback of monitored channels
+- automatic restart or remediation by default
+- support for non-Windows playout nodes in v1
+- public-facing consumer status pages
 
 ---
 
 ## 7. Health State Model
 
-### 7.1 Three independent health domains
+Pulse tracks three independent health domains:
 
-```
-broadcast_health:   healthy | degraded | off_air_likely | off_air_confirmed | unknown
-runtime_health:     healthy | paused | restarting | stalled | stopped | content_error | unknown
+```text
+broadcast_health:    healthy | degraded | off_air_likely | off_air_confirmed | unknown
+runtime_health:      healthy | paused | restarting | stalled | stopped | content_error | unknown
 connectivity_health: online | stale | offline
 ```
 
-The hub is the sole state engine. Agents send raw observations only.
+The hub is the only state engine. Agents send observations, not final state labels.
 
-### 7.2 Colour mapping for dashboard
+### Dashboard Color Mapping
 
-| Colour | Condition |
+| Color | Condition |
 |---|---|
-| Green  | broadcast=healthy AND runtime=healthy |
-| Yellow | broadcast=degraded OR runtime in {paused, restarting, stalled, content_error} |
-| Red    | broadcast in {off_air_likely, off_air_confirmed} OR runtime=stopped |
-| Orange | connectivity=stale (heartbeat delayed, last state valid) |
-| Gray   | connectivity=offline (heartbeat lost, state unknown) |
-
-### 7.3 Alert severity
-
-| Severity | Trigger |
-|---|---|
-| Critical | off_air_likely, off_air_confirmed, runtime=stopped |
-| Warning  | degraded, stalled, content_error, connectivity=stale |
-| Recovery | Return to broadcast=healthy + runtime=healthy |
+| Green | broadcast healthy and runtime healthy |
+| Yellow | broadcast degraded or runtime warning state |
+| Red | off-air likely or off-air confirmed |
+| Orange | connectivity stale |
+| Gray | connectivity offline or node not commissioned |
 
 ---
 
-## 8. Agent Monitoring Protocol
+## 8. Monitoring Protocol
 
-The same protocol applies to all 7 players. UDP probe is optional per player.
+On each poll interval, the agent can:
 
-**Every 10 seconds, the agent**:
-1. Checks process presence and window presence
-2. Tails new log lines (Insta or Admax, per playout_type)
-3. Reads file state indicators (filebar/Settings.ini for stall detection)
-4. Checks FNF and playlistscan logs for content errors
-5. Pings gateway IP and public internet
-6. If one or more `udp_inputs` are enabled for that player: runs ffprobe/ffmpeg against the player's UDP matrix and uses the best active input as the primary stream signal
-7. POSTs one raw observation heartbeat per player to hub
+1. check process and window presence
+2. tail new log lines for runtime tokens
+3. inspect local runtime files for stall or pause signals
+4. check content error logs
+5. probe local network and internet reachability
+6. run UDP confidence checks when UDP inputs are enabled
+7. POST one heartbeat per player to the hub
 
 ---
 
-## 9. Key Constraints
+## 9. Constraints
 
-- Hub must remain reachable even if one or more playout PCs lose internet
-- Internet loss on a playout PC must NOT automatically trigger OFF AIR — must be separated
-- NJ Optimum: SDI-only output for the current primary player, but the model still allows UDP if a player is later assigned one
-- Agent package must work without Python, ffmpeg, or any other pre-install on playout PCs
-- All communication is outbound agent → hub (no hub callback to agents — NAT compatible)
+- internet loss must not be treated as off-air by itself
+- all normal communication is outbound from agent to hub
+- the same product must work for one node or many nodes
+- deployment-specific labels, domains, and tokens must live in config, not product docs
+- node bundles must be rebuildable from a shared baseline
 
 ---
 
@@ -159,21 +159,22 @@ The same protocol applies to all 7 players. UDP probe is optional per player.
 
 | Metric | Target |
 |---|---|
-| Time from off-air event to alert | < 30 seconds |
-| False positive rate (alert when actually on-air) | < 1 per week |
-| Agent uptime (as Windows service) | > 99.9% |
-| Dashboard uptime | > 99.9% (VPS SLA) |
-| Alert dedup correctness (no duplicate alerts) | 100% |
+| Time from off-air event to critical alert | < 30 seconds |
+| False critical alerts | < 1 per week per deployment |
+| Agent uptime | > 99.9% |
+| Hub availability | > 99.9% |
+| Alert dedup correctness | 100% |
 
 ---
 
 ## 11. Deployment
 
-| Component | Where | How |
+| Component | Typical Placement | Runtime |
 |---|---|---|
-| Hub + Dashboard | RackNerd VPS 2.5GB (192.3.76.144) | PM2 + Caddy |
-| DNS | Cloudflare (pulse.clarixtech.com) | A record → VPS IP, proxied |
-| Agent | Each playout PC | clarix-agent.exe as Windows service via NSSM |
+| Hub + Dashboard | Linux VPS, VM, or on-prem server | Node.js + PM2 + reverse proxy |
+| Database | Same host as hub | SQLite |
+| Agent | Each Windows playout node | Windows service |
+| DNS / CDN | Operator choice | optional |
 
 ---
 
@@ -181,4 +182,4 @@ The same protocol applies to all 7 players. UDP probe is optional per player.
 
 | Date | Version | Change |
 |---|---|---|
-| 2026-03-26 | 1.0.0 | Initial PRD — approved for implementation |
+| 2026-03-27 | 1.0.0 | Generic product PRD aligned to multi-site, multi-business use |

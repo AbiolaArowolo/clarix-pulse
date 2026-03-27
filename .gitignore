@@ -14,6 +14,7 @@ packages/agent/build/
 packages/agent/release/
 packages/agent/release-test/
 *.spec
+!packages/agent/clarix-agent.spec
 
 # Environment / secrets — NEVER commit these
 .env
@@ -51,6 +52,9 @@ desktop.ini
 # Logs
 *.log
 npm-debug.log*
+
+# Local helper screenshots
+scripts/screenshots/
 
 # Test outputs
 coverage/

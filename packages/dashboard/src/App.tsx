@@ -145,8 +145,8 @@ export default function App() {
       </main>
 
       <footer className="relative max-w-7xl mx-auto mt-8 flex flex-col items-start gap-2 border-t border-slate-800/80 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-        <span className="text-xs text-slate-500">Pulse v1.0.0 | pulse.clarixtech.com</span>
-        <span className="text-xs text-slate-500">{new Date().getFullYear()} clarixtech</span>
+        <span className="text-xs text-slate-500">Pulse | Broadcast Monitoring Platform</span>
+        <span className="text-xs text-slate-500">{new Date().getFullYear()} Multi-site monitoring</span>
       </footer>
 
       <InstallBar onModeChange={setInstallBarMode} />

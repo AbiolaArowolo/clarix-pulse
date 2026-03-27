@@ -1,7 +1,7 @@
-# Pulse — Tech Stack
+# Pulse - Tech Stack
 
-**Version**: 1.0.0
-**Date**: 2026-03-26
+**Version**: 1.0.0  
+**Date**: 2026-03-27
 
 ---
 
@@ -12,10 +12,9 @@
 | Runtime | Node.js | 20 LTS |
 | Language | TypeScript | 5.x |
 | HTTP framework | Express | 4.x |
-| WebSocket | Socket.io | 4.x |
-| Database | SQLite via better-sqlite3 | 9.x |
+| Realtime transport | Socket.IO | 4.x |
+| Database client | `@libsql/client` | 0.14.x |
 | Email | Nodemailer | 6.x |
-| HTTP client (Telegram) | node-fetch / built-in fetch | Node 20 native |
 | Process manager | PM2 | 5.x |
 
 ## Dashboard
@@ -25,9 +24,9 @@
 | Build tool | Vite | 5.x |
 | Framework | React | 18.x |
 | Language | TypeScript | 5.x |
-| Styling | TailwindCSS | 3.x |
-| WebSocket client | socket.io-client | 4.x |
-| Audio and mobile alarm | Web Audio API + Vibration API + installable PWA shell | native browser |
+| Styling | Tailwind CSS | 3.x |
+| Realtime client | `socket.io-client` | 4.x |
+| Mobile install | PWA support | browser-native |
 
 ## Local Agent
 
@@ -36,27 +35,30 @@
 | Language | Python | 3.11 |
 | HTTP client | requests | 2.x |
 | Process inspection | psutil | 5.x |
-| Windows window check | pywin32 | latest |
+| Windows window inspection | pywin32 | latest |
 | YAML config | PyYAML | 6.x |
-| Image compression | Pillow | 10.x |
+| Image handling | Pillow | 10.x |
 | Packaging | PyInstaller | 6.x |
-| Windows service | NSSM (staged with agent bundle) | 2.24 |
+| Windows service wrapper | NSSM | staged in bundle |
 
 ## Infrastructure
 
-| Layer | Choice |
+| Layer | Typical Choice |
 |---|---|
-| VPS | RackNerd 2.5GB KVM — 192.3.76.144 |
-| OS | Ubuntu 24.04 LTS |
+| Hub host | Linux VPS, VM, or on-prem server |
+| OS | Ubuntu 24.04 LTS or similar |
 | Reverse proxy | Caddy 2.x |
-| DNS / CDN | Cloudflare (proxied) |
-| TLS | Let's Encrypt via Caddy (origin) + Cloudflare SSL |
-| UDP media probe | ffmpeg / ffprobe (optional per player, staged on UDP-enabled nodes) |
+| Database | SQLite |
+| Optional DNS / CDN | provider of choice |
+| UDP media probe | ffmpeg / ffprobe on node |
 
-## Repository
+## Repository Shape
 
 | Item | Value |
 |---|---|
-| Repo | https://github.com/AbiolaArowolo/clarix-pulse.git |
 | Structure | npm workspaces monorepo |
-| Packages | packages/dashboard, packages/hub, packages/agent |
+| Hub package | `packages/hub` |
+| Dashboard package | `packages/dashboard` |
+| Agent package | `packages/agent` |
+| Deployment configs | `configs/` |
+| Automation scripts | `scripts/` |

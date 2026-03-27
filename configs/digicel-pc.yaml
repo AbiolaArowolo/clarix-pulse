@@ -31,3 +31,15 @@ players:
         enabled: false
         stream_url: "udp://REPLACE_ME_DIGICEL_ADMAX_1_UDP_2"
         thumbnail_interval_s: 10
+      - udp_input_id: digicel-admax-1-udp-3
+        enabled: false
+        stream_url: "udp://REPLACE_ME_DIGICEL_ADMAX_1_UDP_3"
+        thumbnail_interval_s: 10
+      - udp_input_id: digicel-admax-1-udp-4
+        enabled: false
+        stream_url: "udp://REPLACE_ME_DIGICEL_ADMAX_1_UDP_4"
+        thumbnail_interval_s: 10
+      - udp_input_id: digicel-admax-1-udp-5
+        enabled: false
+        stream_url: "udp://REPLACE_ME_DIGICEL_ADMAX_1_UDP_5"
+        thumbnail_interval_s: 10

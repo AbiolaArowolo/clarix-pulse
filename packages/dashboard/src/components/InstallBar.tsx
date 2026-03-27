@@ -351,7 +351,7 @@ export function InstallBar({ onModeChange }: Props) {
             <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-3 shadow-[0_10px_30px_rgba(2,6,23,0.3)]">
               <div className="rounded-2xl bg-white p-3">
                 <QRCodeSVG
-                  value={shareUrl || 'https://pulse.clarixtech.com'}
+                  value={shareUrl || 'https://monitor.example.com'}
                   size={120}
                   marginSize={1}
                   bgColor="#ffffff"

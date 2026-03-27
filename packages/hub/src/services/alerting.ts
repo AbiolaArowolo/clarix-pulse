@@ -48,8 +48,8 @@ async function sendEmail(subject: string, body: string): Promise<void> {
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER) return;
   try {
     await getTransporter().sendMail({
-      from: process.env.SMTP_FROM ?? 'alerts@clarixtech.com',
-      to: process.env.SMTP_TO ?? 'support@clarixtech.com',
+      from: process.env.SMTP_FROM ?? 'alerts@example.com',
+      to: process.env.SMTP_TO ?? 'operations@example.com',
       subject,
       text: body,
     });

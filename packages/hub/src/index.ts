@@ -7,6 +7,7 @@ import path from 'path';
 
 import { initState, getAllStates, setConnectivity, markInstanceOffline } from './store/state';
 import { createHeartbeatRouter } from './routes/heartbeat';
+import { createConfigRouter } from './routes/config';
 import { createThumbnailRouter } from './routes/thumbnail';
 import { createStatusRouter, buildStatusPayload } from './routes/status';
 import { sendNetworkIssueAlert } from './services/alerting';
@@ -29,6 +30,7 @@ const io = new SocketServer(httpServer, {
 
 // Routes
 app.use('/api/heartbeat', createHeartbeatRouter(io));
+app.use('/api/config', createConfigRouter());
 app.use('/api/thumbnail', createThumbnailRouter(io));
 app.use('/api/status', createStatusRouter());
 

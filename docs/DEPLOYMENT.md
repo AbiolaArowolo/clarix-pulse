@@ -1,52 +1,40 @@
-# Pulse — VPS Deployment Guide
+# Pulse - Deployment Guide
 
-**Version**: 1.0.0
-**Date**: 2026-03-26
+**Version**: 1.0.0  
+**Date**: 2026-03-27
 
 ---
 
-## Infrastructure
+## Infrastructure Requirements
 
-| Component | Value |
+Typical deployment:
+
+| Component | Example |
 |---|---|
-| VPS | RackNerd 2.5GB KVM |
-| IP | 192.3.76.144 |
+| Hub host | Linux VPS, VM, or on-prem server |
 | OS | Ubuntu 24.04 LTS |
-| Domain | pulse.clarixtech.com |
-| DNS | Cloudflare (proxied, Full strict SSL) |
+| Domain | `monitor.example.com` |
+| Reverse proxy | Caddy |
+| Process manager | PM2 |
+| DNS / CDN | optional |
 
 ---
 
-## 1. Initial VPS Setup
+## 1. Initial Server Setup
 
 ```bash
-ssh root@192.3.76.144
+ssh root@your-server-ip
 
-# Update system
 apt update && apt upgrade -y
 
-# Install Node.js 20 LTS
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-apt install -y nodejs
-
-# Verify
-node --version   # v20.x.x
-npm --version
-
-# Install PM2
+apt install -y nodejs git
 npm install -g pm2
 
-# Install Caddy
 apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
 apt update && apt install -y caddy
-
-# Install git
-apt install -y git
-
-# ffmpeg is not required on the hub
-# UDP probing runs on the Windows agent side only
 ```
 
 ---
@@ -54,39 +42,33 @@ apt install -y git
 ## 2. Clone and Build
 
 ```bash
-# Clone repo
 cd /var/www
-git clone https://github.com/AbiolaArowolo/clarix-pulse.git
+git clone <your-repo-url> clarix-pulse
 cd clarix-pulse
 
-# Create .env.local with secrets (NEVER commit this file)
 cp .env.example .env.local
 nano .env.local
-# Fill in: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, SMTP_*, AGENT_TOKENS
-# The hub also reads .env if present, but this guide standardizes on .env.local
 
-# Install dependencies
 npm install
-
-# Build hub TypeScript
 npm run build --workspace=packages/hub
-
-# Build dashboard (static files)
 npm run build --workspace=packages/dashboard
 ```
 
+Fill in:
+
+- `TELEGRAM_*`
+- `SMTP_*`
+- `AGENT_TOKENS`
+- `CONFIG_WRITE_KEY` if dashboard-side UDP editing is desired
+
 ---
 
-## 3. Configure Caddy
+## 3. Configure the Reverse Proxy
 
-```bash
-nano /etc/caddy/Caddyfile
-```
+Example Caddy configuration:
 
-Replace contents with:
-
-```
-pulse.clarixtech.com {
+```caddy
+monitor.example.com {
     reverse_proxy /api/* localhost:3001
     reverse_proxy /socket.io/* localhost:3001 {
         header_up Connection {http.upgrade}
@@ -97,44 +79,39 @@ pulse.clarixtech.com {
 }
 ```
 
+Then:
+
 ```bash
-# Reload Caddy
 systemctl reload caddy
 systemctl enable caddy
 ```
 
 ---
 
-## 4. Cloudflare DNS Setup
+## 4. Optional DNS / CDN
 
-In Cloudflare dashboard (clarixtech.com zone):
+If using a DNS provider or CDN:
 
-1. Add DNS record:
-   - Type: `A`
-   - Name: `pulse`
-   - Value: `192.3.76.144`
-   - Proxy: **Proxied** (orange cloud ☁️)
+1. create an `A` or `CNAME` record for the dashboard domain
+2. point it to the hub host
+3. enable HTTPS according to your provider and proxy model
 
-2. SSL/TLS settings:
-   - Mode: **Full (strict)**
-
-3. WebSockets: enabled by default on proxied subdomains (no action needed)
+Pulse does not require a specific DNS provider.
 
 ---
 
-## 5. Start Hub with PM2
+## 5. Start the Hub
 
 ```bash
 cd /var/www/clarix-pulse
-
-# Start hub
 pm2 start packages/hub/dist/index.js --name clarix-hub --env production
-
-# Set to auto-start on server reboot
-pm2 startup
 pm2 save
+pm2 startup
+```
 
-# Check status
+Check:
+
+```bash
 pm2 status
 pm2 logs clarix-hub
 ```
@@ -144,35 +121,48 @@ pm2 logs clarix-hub
 ## 6. Verify Deployment
 
 ```bash
-# Hub health check (from VPS)
 curl http://localhost:3001/api/health
-# Expected: {"ok":true,"ts":"..."}
+```
 
-# Dashboard (from browser)
-# https://pulse.clarixtech.com/
-# Expected: Pulse dashboard loads, shows 7 players in gray (no nodes yet)
+Expected:
 
-# Test heartbeat (from VPS)
-curl -X POST https://pulse.clarixtech.com/api/heartbeat \
-  -H "Authorization: Bearer <ny-main-pc-token>" \
+```json
+{"ok":true,"ts":"..."}
+```
+
+From a browser:
+
+- open `https://monitor.example.com`
+- confirm the dashboard loads
+
+Example heartbeat test:
+
+```bash
+curl -X POST https://monitor.example.com/api/heartbeat \
+  -H "Authorization: Bearer <site-a-node-1-token>" \
   -H "Content-Type: application/json" \
-  -d '{"nodeId":"ny-main-pc","playerId":"ny-main-insta-1","timestamp":"2026-03-26T10:00:00Z","observations":{"playout_process_up":1,"playout_window_up":1,"internet_up":1,"gateway_up":1}}'
-# Expected: {"ok":true,"broadcastHealth":"healthy","runtimeHealth":"healthy","connectivityHealth":"online"}
+  -d '{
+    "nodeId":"site-a-node-1",
+    "playerId":"site-a-insta-1",
+    "timestamp":"2026-03-27T12:00:00Z",
+    "observations":{
+      "playout_process_up":1,
+      "playout_window_up":1,
+      "internet_up":1,
+      "gateway_up":1
+    }
+  }'
 ```
 
 ---
 
-## 7.1 Mobile / PWA Install
+## 7. Mobile / PWA Install
 
-The dashboard is mobile-responsive and installable as a PWA. When the browser offers an install
-prompt, use `Install app` or `Add to Home Screen` on phones and tablets so operators can launch
-Pulse as a standalone app. The dashboard also exposes a persistent QR install bar so a phone on the
-same LAN can open the current dashboard URL quickly. If the site is running on `localhost`, use the
-machine's LAN IP instead before scanning.
+The dashboard is installable as a PWA. Operators can use browser install prompts or add it to the home screen on mobile devices for faster access during monitoring and alert response.
 
 ---
 
-## 7. Updates (Rolling Deploy)
+## 8. Updates
 
 ```bash
 cd /var/www/clarix-pulse
@@ -186,15 +176,12 @@ systemctl reload caddy
 
 ---
 
-## 8. Backup
+## 9. Backups
 
-The only stateful file is the SQLite database:
+The main stateful artifact is the SQLite database:
 
 ```bash
-# Manual backup
 cp packages/hub/data/clarix.db packages/hub/data/clarix.db.bak
-
-# Add to crontab for daily backup
-crontab -e
-# 0 3 * * * cp /var/www/clarix-pulse/packages/hub/data/clarix.db /var/backups/clarix-$(date +\%Y\%m\%d).db
 ```
+
+Automate backups with your preferred scheduler or host tooling.

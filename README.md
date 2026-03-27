@@ -1,157 +1,153 @@
 # Pulse
 
-Real-time broadcast monitoring for NOIRE TV playout infrastructure across 4 nodes and 7 playout players.
+Multi-site broadcast monitoring for playout operations across regions, channels, and customers.
 
 ---
 
 ## Overview
 
-Pulse is a self-hosted monitoring system that detects off-air events, distinguishes playout software failure from network loss, and alerts operators via Telegram and email - all within seconds.
+Pulse is a self-hosted monitoring platform for broadcast and playout environments. It detects off-air events, distinguishes runtime failure from connectivity loss, and gives operators a live dashboard with alerting and optional UDP stream confirmation.
 
-It replaces manual checking across multiple playout nodes running Insta Playout and Admax software, where each node may carry multiple players and optional UDP inputs.
+The system is designed to scale across multiple businesses, multiple sites, and multiple node layouts. Customer-specific node names, tokens, domains, and stream URLs belong in local configuration and deployment assets, not in the product model itself.
 
-```
-[Playout Nodes] ──  Python Agent  ──►  [Hub: VPS Node.js + SQLite]
-  NY Main                                      │ Socket.io
-  NY Backup       POST /api/heartbeat          ▼
-  NJ Optimum      POST /api/thumbnail    [React Dashboard]
-  FL Digicel                              pulse.clarixtech.com
+```text
+[Playout Nodes]  -->  [Local Agent]  -->  [Hub API + State Engine]  -->  [Web Dashboard / PWA]
+   Site A                  Windows              Node.js + SQLite              Browser / Mobile
+   Site B                  Service              Alerts + Socket updates        Live operations view
+   Site C
 ```
 
 ---
 
-## Features
+## Core Capabilities
 
-- **Live dashboard** - colour-coded health cards per player, grouped by node
-- **Three independent health domains** — broadcast, runtime, and connectivity tracked separately
-- **Deep log monitoring** - validated primary signal for both Insta Playout and Admax
-- **UDP stream probing** - optional agent-side ffprobe/ffmpeg per player, with multiple UDP inputs allowed on one node
-- **Thumbnail snapshots** - live frame preview per UDP-enabled player on the dashboard
-- **Alerts** — Telegram Bot + email (SMTP) with SQLite-backed dedup (no duplicate alerts on hub restart)
-- **Recovery alerts** — notifies when a previously off-air player returns to healthy
-- **Heartbeat timeouts** — stale after 45s (orange), offline after 90s (gray)
-- **One-click node bundle** - build a single node package with install/configure scripts, NSSM, and optional UDP tools so operators only click `install.bat`
+- Live dashboard with health cards per player and per site
+- Three separate health domains: broadcast, runtime, and connectivity
+- Deep monitoring for supported playout software such as Insta and Admax
+- Optional UDP stream probing with `ffprobe` and `ffmpeg`
+- One-click node installation with bundled runtime dependencies
+- Managed per-node configuration bundles built from a shared baseline
+- Hub-managed UDP stream settings that sync back down to the node
+- Alerting through Telegram and email with persisted state and dedup
+- Mobile-friendly PWA interface for on-call monitoring
+
+---
+
+## Health Model
+
+Pulse keeps three health domains separate instead of collapsing everything into one status.
+
+| Domain | Values |
+|--------|--------|
+| `broadcast_health` | `healthy`, `degraded`, `off_air_likely`, `off_air_confirmed`, `unknown` |
+| `runtime_health` | `healthy`, `paused`, `restarting`, `stalled`, `stopped`, `content_error`, `unknown` |
+| `connectivity_health` | `online`, `stale`, `offline` |
+
+### Dashboard Color Rules
+
+| Color | Meaning |
+|------|---------|
+| Green | Broadcast and runtime are healthy |
+| Yellow | Degraded runtime or degraded broadcast, but not confirmed off-air |
+| Red | Off-air likely or confirmed |
+| Orange | Heartbeats are stale, last known state is still shown |
+| Gray | Node is offline or not yet commissioned |
+
+### Runtime Escalation Rules
+
+When UDP confirmation is not available:
+
+- `paused` shows immediately and escalates to red after about 60 seconds of continuous pause
+- `stopped` and `stalled` escalate to red after about 45 seconds
+- a healthy runtime heartbeat clears the alarm automatically
+
+---
+
+## Node and Player Model
+
+- `node_id` identifies a physical playout PC or server
+- `player_id` identifies one playout source running on that node
+- one node can host multiple players
+- each player can have zero to five UDP inputs
+- UDP monitoring is optional and can be enabled per player
+
+This makes the same platform usable for:
+
+- single-site operations with one player
+- regional deployments with several playout nodes
+- multi-customer service providers managing many tenants
+
+### Example Topology
+
+| Node ID | Player IDs | Software | UDP |
+|--------|------------|----------|-----|
+| `site-a-node-1` | `site-a-insta-1`, `site-a-insta-2` | Insta | optional |
+| `site-a-node-2` | `site-a-admax-1` | Admax | optional |
+| `site-b-node-1` | `site-b-admax-1`, `site-b-admax-2` | Admax | enabled on selected players |
+| `site-c-node-1` | `site-c-insta-1` | Insta | optional |
 
 ---
 
 ## Architecture
 
-### Health Domains
+### Hub
 
-Three domains are always tracked separately — never merged into a single status:
+- Node.js + Express API
+- Socket-driven live updates
+- SQLite-backed state store
+- Alert evaluation and delivery
+- Optional central config editing for UDP inputs
 
-| Domain | Values |
-|--------|--------|
-| `broadcast_health` | `healthy` · `degraded` · `off_air_likely` · `off_air_confirmed` · `unknown` |
-| `runtime_health` | `healthy` · `paused` · `restarting` · `stalled` · `stopped` · `content_error` · `unknown` |
-| `connectivity_health` | `online` · `stale` · `offline` |
+### Agent
 
-### Dashboard Colour Logic
+- Python-based Windows agent packaged as a standalone `.exe`
+- Runs as a Windows service
+- Polls local process, log, file, connectivity, and optional UDP signals
+- Sends raw observations to the hub
 
-| Colour | Condition |
-|--------|-----------|
-| 🟢 Green | `broadcast=healthy` + `runtime=healthy` |
-| 🟡 Yellow | `broadcast=degraded` OR `runtime` in `{paused, restarting, stalled, content_error}` |
-| 🔴 Red | `broadcast` in `{off_air_likely, off_air_confirmed}` OR `runtime=stopped` |
-| 🟠 Orange | `connectivity=stale` — heartbeat delayed, last known state shown |
-| ⚫ Gray | `connectivity=offline` — heartbeat lost, state unknown |
+### Dashboard
 
-### Identity Model
-
-Each node authenticates by `node_id` + pre-shared Bearer token - never by IP address. Each player is identified by `player_id` inside the heartbeat payload. All traffic is outbound HTTPS from agent to hub. No port forwarding required on any site.
-
-`hub_url` can point to a local LAN hub or a remote internet-facing hub. The node can keep running local checks without internet; internet is only needed when the hub is remote or when Telegram/email alerts must leave the LAN.
-
-### Node and Player Model
-
-- `node_id` identifies the physical Windows PC
-- `player_id` identifies each playout player running on that node
-- A node can carry 2-5 UDP inputs across one or more players
-- UDP monitoring is optional per player and can be switched on or off independently
-
----
-
-## Monitored Nodes and Players
-
-| Node ID | Player ID(s) | Software | UDP |
-|---------|--------------|----------|-----|
-| `ny-main-pc` | `ny-main-insta-1`, `ny-main-insta-2`, `ny-main-admax-1` | Insta Playout + Admax | optional |
-| `ny-backup-pc` | `ny-backup-admax-1`, `ny-backup-admax-2` | Admax | enabled on both players |
-| `nj-optimum-pc` | `nj-optimum-insta-1` | Insta Playout | optional |
-| `digicel-pc` | `digicel-admax-1` | Admax | enabled |
-
-Each node may carry 2-5 UDP inputs where the site layout requires it. Inputs can be grouped under one player or spread across several players, and the player identifier remains the routing key for monitoring, alerting, and dashboard rendering.
+- React + Vite frontend
+- Real-time updates over Socket.IO with polling fallback
+- PWA install support for desktop and mobile
 
 ---
 
 ## Project Structure
 
-```
+```text
 clarix-pulse/
-├── packages/
-│   ├── hub/                    # Node.js + Express + Socket.io hub
-│   │   └── src/
-│   │       ├── config/         # Node registry + node/player mapping
-│   │       ├── routes/         # heartbeat, thumbnail, status endpoints
-│   │       ├── services/       # state engine, alerting
-│   │       └── store/          # SQLite (libsql) + in-memory cache
-│   ├── dashboard/              # Vite + React + TypeScript + Tailwind
-│   │   └── src/
-│   │       ├── components/     # AlarmBanner, SiteGroup, InstanceCard, StatusBadge
-│   │       └── hooks/          # useMonitoring, useAlarm
-│   └── agent/                  # Python 3 → PyInstaller .exe
-│       ├── agent.py            # Main loop
-│       ├── monitors/           # process, log, file, connectivity, udp_probe
-│       ├── config.example.yaml # Per-PC config template
-│       └── install.bat         # NSSM Windows service installer
-├── configs/                    # Site-specific agent configs
-├── docs/                       # Full documentation
-│   ├── PRD.md
-│   ├── ARCHITECTURE.md
-│   ├── TECH_STACK.md
-│   ├── DECISIONS.md            # Architecture Decision Records
-│   ├── DEPLOYMENT.md
-│   ├── AGENT_INSTALL.md
-│   └── MONITORING_SPEC.md
-└── .env.example                # Environment variable template
+|-- packages/
+|   |-- hub/                    # Hub API and state engine
+|   |-- dashboard/              # Web UI / PWA
+|   `-- agent/                  # Windows agent and bundle tooling
+|-- configs/                    # Deployment-specific node configs
+|-- docs/                       # Product, architecture, and deployment docs
+|-- scripts/                    # Rebuild, verification, and deployment helpers
+`-- .env.example                # Environment template
 ```
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Hub runtime | Node.js 20, TypeScript, Express, Socket.io |
-| Database | SQLite via `@libsql/client` (WASM — zero native deps) |
-| Dashboard | Vite, React 18, TypeScript, TailwindCSS |
-| Agent | Python 3.11, PyInstaller standalone `.exe` |
-| Stream probing | ffprobe + ffmpeg (must be staged with UDP-enabled agent bundles) |
-| Alerts | Telegram Bot API + Nodemailer SMTP |
-| Reverse proxy | Caddy (auto TLS) |
-| Process manager | PM2 |
-| Hosting | RackNerd VPS, Ubuntu 24.04 |
-| DNS / CDN | Cloudflare (proxied, Full strict SSL) |
 
 ---
 
 ## Hub API
 
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| `POST` | `/api/heartbeat` | Bearer token | Agent reports observations |
-| `POST` | `/api/thumbnail` | Bearer token | Agent uploads frame snapshot |
-| `GET` | `/api/status` | — | All player states (dashboard load) |
-| `GET` | `/api/health` | — | Hub liveness check |
-| WS | `/socket.io` | — | Real-time state updates |
+| Method | Endpoint | Auth | Purpose |
+|--------|----------|------|---------|
+| `POST` | `/api/heartbeat` | Bearer token | Node reports raw observations |
+| `POST` | `/api/thumbnail` | Bearer token | Node uploads UDP thumbnail preview |
+| `GET` | `/api/status` | none | Dashboard snapshot |
+| `GET` | `/api/health` | none | Hub liveness |
+| `GET` | `/api/config/player/:playerId` | `x-config-write-key` | Read editable UDP config |
+| `POST` | `/api/config/player/:playerId` | `x-config-write-key` | Save editable UDP config |
+| `WS` | `/socket.io` | none | Real-time dashboard updates |
 
-### Heartbeat Payload
+### Example Heartbeat
 
 ```json
 {
-  "nodeId": "ny-backup-pc",
-  "playerId": "ny-backup-admax-1",
-  "timestamp": "2026-03-26T10:00:00Z",
+  "nodeId": "site-a-node-2",
+  "playerId": "site-a-admax-1",
+  "timestamp": "2026-03-27T12:00:00Z",
   "observations": {
     "playout_process_up": 1,
     "playout_window_up": 1,
@@ -168,52 +164,82 @@ clarix-pulse/
 }
 ```
 
-The agent sends **raw observations only**. The hub is the sole state engine - it derives all three health domains.
+The hub is the only place that computes health. Agents send observations, not final status labels.
 
 ---
 
-## Agent Monitoring Protocol
+## One-Click Node Installation
 
-Every node agent runs these monitors on each poll cycle (default: 10s):
+Each node bundle is built as a self-contained install package with:
 
-1. **Process monitor** — checks playout process and window presence via `psutil` + `pywin32`
-2. **Log monitor** — tails new lines since last poll; detects Admax `stopxxx2`, `app_exited`, `reinit` tokens and Insta `Paused`, `Fully Played` tokens
-3. **File monitor** — tracks `FilePosition`/`Frame` delta for stall detection; monitors FNF and playlist scan logs for content errors
-4. **Connectivity monitor** — pings default gateway (local reachability) and `1.1.1.1` / `8.8.8.8` (internet reachability) independently
-5. **UDP probe** *(players with UDP enabled)* - ffprobe stream presence check; ffmpeg freeze/black/silence detection; thumbnail capture compressed to <=50KB; when multiple inputs are enabled for one player, the agent evaluates them as a matrix and selects the best active source
+- `clarix-agent.exe`
+- `install.bat`
+- `configure.bat`
+- `uninstall.bat`
+- `config.yaml`
+- `config.example.yaml`
+- `nssm.exe`
+- `ffmpeg.exe`
+- `ffprobe.exe`
+
+`clarix-agent.exe` is included as part of the bundle, but the operator install action is to run `install.bat`. The batch installer uses the EXE automatically.
+
+### Install Flow
+
+1. Build or select the correct node bundle.
+2. Copy the bundle to the target node.
+3. Run `install.bat` as Administrator.
+
+That is the only install step for the node. No separate Python, NSSM, ffmpeg, ffprobe, or manual `clarix-agent.exe` launch is required.
+
+### After Install
+
+- the agent service is installed and started
+- the bundled `config.yaml` is used for that node
+- later UDP stream changes can be made from the dashboard or with `configure.bat`
+- no rebuild is needed just to change stream URLs
+
+---
+
+## Bundle Management
+
+Use the shared bundle tooling to keep every node package aligned from the same software baseline.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\rebuild-node-bundles.ps1 -PruneReleaseRoot
+powershell -ExecutionPolicy Bypass -File scripts\verify-bundle-parity.ps1
+```
+
+Or:
+
+```powershell
+npm run agent:refresh-bundles
+```
+
+The goal is:
+
+- same installer/runtime shape across all nodes
+- only node-specific `config.yaml` differences per deployment
+- easier rollout to many customers and regions without drift
 
 ---
 
 ## Deployment
 
-### Hub (VPS)
+### Hub
 
 ```bash
-# Clone
-git clone https://github.com/AbiolaArowolo/clarix-pulse.git /var/www/clarix-pulse
+git clone <your-repo-url> /var/www/clarix-pulse
 cd /var/www/clarix-pulse
-
-# Install + build
 npm install
-cd packages/hub && npm run build
-
-# Install dashboard deps + build
-cd ../dashboard && npm install && npm run build
-
-# Configure environment
-cp .env.example .env.local
-nano .env.local   # fill in tokens and SMTP credentials
-# Optional: place shared defaults in .env; .env.local overrides .env
-
-# Start with PM2
-pm2 start packages/hub/dist/index.js --name clarix-hub
-pm2 save && pm2 startup
+npm run build --workspace=packages/hub
+npm run build --workspace=packages/dashboard
 ```
 
-### Caddyfile
+Use your own domain, for example:
 
 ```caddy
-pulse.clarixtech.com {
+monitor.example.com {
     reverse_proxy /api/* localhost:3001
     reverse_proxy /socket.io/* localhost:3001 {
         header_up Connection {http.upgrade}
@@ -224,33 +250,15 @@ pulse.clarixtech.com {
 }
 ```
 
-### Agent (Playout Node)
+### Agent Bundles
 
-1. Build the one-click node bundle on the admin workstation:
-   ```
-   powershell -ExecutionPolicy Bypass -File packages/agent/build-node-bundle.ps1
-   ```
+Build deployment-ready bundles from the checked-in config set:
 
-   ```
-   clarix-node-bundle/
-   ├── clarix-agent.exe
-   ├── ffmpeg.exe          (include in the bundle when UDP may be enabled)
-   ├── ffprobe.exe         (include in the bundle when UDP may be enabled)
-   ├── nssm.exe            (include in the bundle)
-   ├── config.yaml         ← created or injected per node
-   ├── config.example.yaml
-   ├── install.bat
-   ├── configure.bat
-   └── uninstall.bat
-   ```
+```powershell
+powershell -ExecutionPolicy Bypass -File packages/agent/build-node-bundle.ps1
+```
 
-2. Copy the generated bundle to the target PC and double-click `install.bat` as Administrator.
-
-3. On first install, the script opens `config.yaml` so the node can be customized. Later changes can be made with `configure.bat`, which lets you enable or disable UDP per player and restart the service.
-
-`packages/agent/dist/` contains the built `clarix-agent.exe`, and `packages/agent/build-node-bundle.ps1` can package it into a one-click node bundle together with `install.bat`, `configure.bat`, `uninstall.bat`, `nssm.exe`, and any optional UDP tools staged in `packages/agent/vendor/`.
-
-See [docs/AGENT_INSTALL.md](docs/AGENT_INSTALL.md) for full per-site instructions.
+Reference configs under `configs/` should be treated as deployment-specific assets. Replace node IDs, tokens, hub URLs, and stream URLs for each business or tenant.
 
 ---
 
@@ -259,90 +267,56 @@ See [docs/AGENT_INSTALL.md](docs/AGENT_INSTALL.md) for full per-site instruction
 ```env
 HUB_PORT=3001
 
-# Telegram alerts
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 
-# Email alerts (SMTP)
 SMTP_HOST=
 SMTP_PORT=587
 SMTP_SECURE=false
 SMTP_USER=
 SMTP_PASS=
-SMTP_FROM=alerts@clarixtech.com
-SMTP_TO=support@clarixtech.com
+SMTP_FROM=alerts@yourdomain.com
+SMTP_TO=ops@yourcompany.com
 
-# One token per node - maps node identity to allowed players
-AGENT_TOKENS=ny-main-pc:token1,ny-backup-pc:token2,nj-optimum-pc:token3,digicel-pc:token4
+AGENT_TOKENS=site-a-node-1:token1,site-a-node-2:token2,site-b-node-1:token3
+
+CONFIG_WRITE_KEY=replace-with-a-random-secret
 ```
 
-Copy `.env.example` to `.env.local` for local secrets. The hub loads `.env` first and then `.env.local`, so `.env.local` can override shared defaults. Never commit either file — both are gitignored.
+`CONFIG_WRITE_KEY` protects dashboard-side UDP config editing. It is not a stream URL.
 
 ---
 
-## Local Development
+## Scalability Notes
 
-```bash
-# Install all workspace dependencies
-npm install
+Pulse is intended to support:
 
-# Run hub (localhost:3001)
-cd packages/hub && npm run dev
+- one customer with one site
+- one customer with many sites
+- one service provider supporting many customers
+- different software mixes across different regions
 
-# Run dashboard (localhost:5173)
-cd packages/dashboard && npm run dev
+To keep it reusable:
 
-# Simulate a heartbeat
-curl -X POST http://localhost:3001/api/heartbeat \
-  -H "Authorization: Bearer token1" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "nodeId": "ny-main-pc",
-    "playerId": "ny-main-insta-1",
-    "timestamp": "2026-03-26T10:00:00Z",
-    "observations": {
-      "playout_process_up": 1,
-      "playout_window_up": 1,
-      "frame_delta_30s": 10,
-      "internet_up": 1,
-      "gateway_up": 1
-    }
-  }'
-
-# Simulate off-air
-# Set playout_process_up: 0 -> dashboard goes red within 15s
-```
+- keep customer names out of the product-facing README and UI shell
+- keep deployment-specific details in config files, env files, and private operations docs
+- rebuild all node bundles from a shared baseline
 
 ---
 
 ## Documentation
 
-Full documentation is in the [`docs/`](docs/) directory:
+See `docs/` for deeper implementation and deployment material:
 
-| File | Description |
-|------|-------------|
-| [PRD.md](docs/PRD.md) | Product requirements, goals, success metrics |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, data flows, component responsibilities |
-| [TECH_STACK.md](docs/TECH_STACK.md) | Technology choices with rationale |
-| [DECISIONS.md](docs/DECISIONS.md) | Architecture Decision Records (ADRs) |
-| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | VPS + Cloudflare + Caddy setup guide |
-| [AGENT_INSTALL.md](docs/AGENT_INSTALL.md) | Per-PC agent deployment instructions |
-| [MONITORING_SPEC.md](docs/MONITORING_SPEC.md) | Full state decision matrix for all 7 players |
+- `docs/ARCHITECTURE.md`
+- `docs/TECH_STACK.md`
+- `docs/DEPLOYMENT.md`
+- `docs/AGENT_INSTALL.md`
+- `docs/MONITORING_SPEC.md`
+- `docs/DECISIONS.md`
 
 ---
 
-## Live Dashboard
+## PWA / Mobile
 
-**[pulse.clarixtech.com](https://pulse.clarixtech.com)**
-
-## Mobile / PWA Install
-
-The dashboard is mobile-responsive and installable as a PWA. Use `Install app` or `Add to Home Screen`
-so operators can launch Pulse like a native app on phones and tablets. The dashboard also keeps a
-persistent install bar with a QR code so a phone on the same LAN can open the current dashboard URL
-quickly. If the dashboard is opened as `localhost`, switch to the PC's LAN IP before scanning so the
-phone can reach it.
-
-When UDP confirmation is not available, Pulse shows `paused` / `stopped` immediately but waits about
-45 seconds before escalating that continuous runtime condition to a red OFF AIR alarm. The red alarm
-clears automatically on the next healthy heartbeat after playback resumes.
+The dashboard is installable as a PWA for phones, tablets, and desktops. This makes it suitable for remote operations teams, on-call engineering, and distributed monitoring workflows.

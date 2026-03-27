@@ -1,256 +1,242 @@
 # Pulse - Agent Installation Guide
 
-**Version**: 1.1.0
-**Date**: 2026-03-26
+**Version**: 1.1.0  
+**Date**: 2026-03-27
 
 ---
 
 ## Overview
 
-Each playout node should receive one prepared node bundle.
-The bundle can contain the agent, config templates, install/configure scripts, NSSM, and the UDP
-tools so the operator only needs to copy one folder and click `install.bat`.
+Each Windows playout node should receive one prepared node bundle. The bundle can contain:
+
+- `clarix-agent.exe`
+- `install.bat`
+- `configure.bat`
+- `uninstall.bat`
+- `config.yaml`
+- `config.example.yaml`
+- `nssm.exe`
+- `ffmpeg.exe`
+- `ffprobe.exe`
+
+The intended operator experience is one-click installation with no separate Python, NSSM, ffmpeg, or ffprobe install.
+The operator action is to run `install.bat` as Administrator. `clarix-agent.exe` is bundled because the installer uses it to register and run the Windows service.
 
 ---
 
-## Pre-requisites
+## Pre-Requisites
 
 - Windows 10 or later (x64)
-- Administrator account for install/uninstall
-- Network reachability to the configured `hub_url` (LAN or internet)
-- Hub URL and the node's agent token
+- Administrator access for install and uninstall
+- Network reachability to the configured `hub_url`
+- A valid `node_id`, `agent_token`, and player config for the target node
 
-Internet is only required when the configured hub is remote or when Telegram/email alerts must leave
-the local network.
+Internet is only required when the hub is remote or when alerting must leave the local network.
 
 ---
 
 ## Deployment Steps
 
-### 1. Build the node bundle
+### 1. Build the agent bundle
 
-On the admin workstation, build the agent exe and then assemble the bundle:
+On the admin workstation:
 
 ```powershell
 pyinstaller --distpath packages/agent/dist --workpath packages/agent/build packages/agent/clarix-agent.spec
 powershell -ExecutionPolicy Bypass -File packages/agent/build-node-bundle.ps1
 ```
 
-If you already have a node-specific config file, you can inject it into the bundle:
+To inject a specific config:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File packages/agent/build-node-bundle.ps1 `
-  -BundleName ny-main-node `
+  -BundleName site-a-node-1 `
   -ConfigPath C:\path\to\config.yaml
 ```
 
-The build script expects helper binaries in `packages/agent/vendor/`:
+For consistent multi-node rollouts, rebuild all bundles from the same workspace baseline:
 
-- `nssm.exe` is required
-- `ffmpeg.exe` and `ffprobe.exe` should be bundled on every node so UDP can be switched on later
-
-### 2. Copy the bundle to the node
-
-Copy the generated bundle folder to the playout PC. Suggested destination:
-
-```text
-C:\clarix-node-bundle\
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\rebuild-node-bundles.ps1 -PruneReleaseRoot
+powershell -ExecutionPolicy Bypass -File scripts\verify-bundle-parity.ps1
 ```
 
-Example contents:
+Or:
 
-```text
-C:\clarix-node-bundle\
-|-- clarix-agent.exe
-|-- install.bat
-|-- configure.bat
-|-- uninstall.bat
-|-- config.example.yaml
-|-- config.yaml
-|-- nssm.exe
-|-- ffmpeg.exe
-|-- ffprobe.exe
-`-- BUNDLE-INFO.txt
+```powershell
+npm run agent:refresh-bundles
 ```
 
-### 3. Run install.bat as Administrator
+---
+
+## 2. Copy the bundle to the node
+
+Copy the bundle folder or zip to the target Windows host.
+
+Suggested temporary destination:
+
+```text
+C:\pulse-node-bundle\
+```
+
+---
+
+## 3. Run install.bat as Administrator
 
 Right-click `install.bat` and choose **Run as administrator**.
 
+Do not separately launch `clarix-agent.exe` during a normal node install.
+
 The installer will:
 
-1. Copy the bundle into `%ProgramData%\ClarixPulse\Agent`
-2. Preserve `config.yaml` on reinstall, or create it from the example if missing
-3. Open the config on first install so the node can be customized
-4. Validate UDP tools if any UDP input is enabled
-5. Register `clarix-agent.exe` as Windows service `ClarixPulseAgent`
-6. Set it to auto-start on boot
-7. Start it immediately
-8. Configure log rotation
+1. copy files into `%ProgramData%\ClarixPulse\Agent`
+2. preserve or seed `config.yaml`
+3. stage service and UDP helper binaries
+4. validate the config
+5. install `ClarixPulseAgent`
+6. set the service to auto-start
+7. start it immediately
 
-### 4. Configure the node
+---
 
-The config file lives at:
+## 4. Configure the node
+
+The installed config lives at:
 
 ```text
 %ProgramData%\ClarixPulse\Agent\config.yaml
 ```
 
-You can edit it later by running:
+You can update it later with:
 
 ```text
 %ProgramData%\ClarixPulse\Agent\configure.bat
 ```
 
-Use `udp_inputs` on each player to turn UDP monitoring on or off without reinstalling the node.
-Every node bundle uses the same UDP-capable software path. When one or more UDP inputs are enabled
-for a player, Pulse routes that player through the bundled `ffmpeg.exe` / `ffprobe.exe` checks and
-reports the healthiest enabled source as the live UDP matrix result.
-For Admax players, the agent can resolve the installed layout from version-agnostic root candidates,
-so a move from `2.0` to `2.0.2` does not require a new config if the install stays under the usual
-`Unimedia\Admax*\admax` structure.
-
-For UDP URLs, Pulse accepts:
-
-- `udp://224.2.2.2:5004`
-- `udp://@224.2.2.2:5004` for multicast listen syntax
-- `udp@://224.2.2.2:5004` as a convenience form that Pulse normalizes automatically
-
-After editing the config, `configure.bat` now runs `clarix-agent.exe --validate-config` before it
-offers a service restart, so invalid enabled UDP inputs are caught early. The current templates
-ship with room for up to 5 UDP inputs on a player so operators do not need to hand-build the YAML
-structure from scratch.
-
-Example:
+### Generic Example Config
 
 ```yaml
-node_id: ny-main-pc
-node_name: NY-MAIN
-site_id: ny-main
-hub_url: https://pulse.clarixtech.com
+node_id: site-a-node-1
+node_name: SITE-A-NODE-1
+site_id: site-a
+hub_url: https://monitor.example.com
 agent_token: REPLACE_ME
+poll_interval_seconds: 5
 
 players:
-  - player_id: ny-main-insta-1
+  - player_id: site-a-insta-1
     playout_type: insta
     paths:
       shared_log_dir: C:\Program Files\Indytek\Insta log
       instance_root: C:\Program Files\Indytek\Insta Playout\Settings
-      fnf_log: C:\Program Files\Indytek\Insta Playout\logs\FNF
-      playlistscan_log: C:\Program Files\Indytek\Insta Playout\logs\playlistscan
-    udp_inputs: []
+    udp_inputs:
+      - udp_input_id: site-a-insta-1-udp-1
+        enabled: false
+        stream_url: ""
+        thumbnail_interval_s: 10
 
-  - player_id: ny-main-admax-1
+  - player_id: site-a-admax-1
     playout_type: admax
     paths:
       admax_root_candidates:
         - C:\Program Files (x86)\Unimedia\Admax One*\admax
         - C:\Program Files\Unimedia\Admax One*\admax
     udp_inputs:
-      - udp_input_id: ny-main-admax-1-udp-1
+      - udp_input_id: site-a-admax-1-udp-1
         enabled: true
-        stream_url: udp://192.168.1.50:5000
+        stream_url: udp://239.1.1.1:5000
         thumbnail_interval_s: 10
 ```
 
-### 5. Verify
+### UDP Notes
+
+- UDP is configured per player
+- each player can define up to 5 UDP inputs
+- `configure.bat` validates enabled UDP inputs before restart
+- the dashboard can also edit UDP inputs when `CONFIG_WRITE_KEY` is configured on the hub
+
+Accepted UDP forms include:
+
+- `udp://239.1.1.1:5000`
+- `udp://@239.1.1.1:5000`
+- `udp@://239.1.1.1:5000`
+
+---
+
+## 5. Verify
 
 ```bat
 sc query ClarixPulseAgent
 type "%ProgramData%\ClarixPulse\Agent\clarix-agent.log"
 ```
 
-Expected startup log:
+Typical startup output:
 
 ```text
-2026-03-26 10:00:00 [INFO] Pulse Agent starting - node_id=ny-main-pc, hub=https://pulse.clarixtech.com
-2026-03-26 10:00:00 [INFO] Monitoring 3 player(s): ['ny-main-insta-1', 'ny-main-insta-2', 'ny-main-admax-1']
+2026-03-27 12:00:00 [INFO] Pulse Agent starting - node_id=site-a-node-1, hub=https://monitor.example.com
+2026-03-27 12:00:00 [INFO] Monitoring 2 player(s): ['site-a-insta-1', 'site-a-admax-1']
 ```
 
 ---
 
-## Local LAN Mode
+## 6. Common Deployment Patterns
 
-`hub_url` does not have to be public.
+### Single-player node
 
-Supported patterns include:
+- one Windows host
+- one `player_id`
+- optional UDP
 
-- `https://pulse.clarixtech.com` for the remote hub
-- `http://192.168.1.10:3001` for a LAN-local hub
+### Multi-player node
 
-This means the node can keep monitoring locally without internet, as long as it can still reach the
-configured hub on the LAN. Internet is only required for:
+- one Windows host
+- two or more `player_id` entries
+- mixed software types allowed
 
-- remote monitoring when the hub is off-site
-- Telegram alerts
-- email alerts
+### Mixed-site rollout
 
----
-
-## Per-Node Configuration Reference
-
-### NY Main node (`ny-main-pc`)
-
-| Player ID | Type | UDP |
-|---|---|---|
-| `ny-main-insta-1` | insta | optional |
-| `ny-main-insta-2` | insta | optional |
-| `ny-main-admax-1` | admax | optional |
-
-Key paths:
-
-- Insta shared log: `C:\Program Files\Indytek\Insta log`
-- Insta player 1: `C:\Program Files\Indytek\Insta Playout\Settings`
-- Insta player 2: `C:\Program Files\Indytek\Insta Playout 2\Settings`
-- Admax install: use `admax_root_candidates` so the agent can resolve the live Admax folder automatically
-
-### NY Backup node (`ny-backup-pc`)
-
-| Player ID | Type | UDP |
-|---|---|---|
-| `ny-backup-admax-1` | admax | enabled |
-| `ny-backup-admax-2` | admax | enabled |
-
-This node may carry 2-5 UDP inputs across one or more players. Set a distinct `udp_input_id` and
-`stream_url` for each enabled input.
-
-### NJ Optimum node (`nj-optimum-pc`)
-
-| Player ID | Type | UDP |
-|---|---|---|
-| `nj-optimum-insta-1` | insta | optional |
-
-### FL Digicel node (`digicel-pc`)
-
-| Player ID | Type | UDP |
-|---|---|---|
-| `digicel-admax-1` | admax | enabled |
+- rebuild all bundles from one source tree
+- keep installer/runtime assets identical
+- vary only `config.yaml` and bundle naming
 
 ---
 
-## Troubleshooting
+## 7. Local LAN Mode
+
+`hub_url` does not need to be public.
+
+Examples:
+
+- `https://monitor.example.com`
+- `http://192.168.1.10:3001`
+
+This allows fully local monitoring when the hub is on the same network.
+
+---
+
+## 8. Troubleshooting
 
 | Symptom | Check |
 |---|---|
-| Service will not start | Check `clarix-agent.log` for errors |
-| Heartbeat rejected (401) | Wrong `agent_token` in `config.yaml` |
-| Heartbeat rejected (403) | `node_id` does not match hub `AGENT_TOKENS` |
+| Service will not start | Review `clarix-agent.log` |
+| Heartbeat rejected (401) | Wrong `agent_token` |
+| Heartbeat rejected (403) | Wrong `node_id` / token mapping |
 | Player not found (404) | `player_id` not in hub registry |
-| All players gray on dashboard | Hub not reachable - check `hub_url` and LAN/internet path |
-| UDP probe not working | Verify `stream_url` is correct and `ffmpeg.exe` / `ffprobe.exe` are bundled |
-| Config changes not showing up | Run `configure.bat` and restart the service |
+| Dashboard stays gray | Hub unreachable or node not commissioned |
+| UDP probe not working | Verify stream URL and presence of `ffmpeg.exe` / `ffprobe.exe` |
+| Config changes not showing | Re-run `configure.bat` or wait for heartbeat-based sync |
 
 ---
 
-## Updating And Removing
+## 9. Updating and Removing
 
-Update:
+### Update
 
-1. Build a fresh node bundle
-2. Run the new `install.bat` as Administrator
-3. The installer keeps the existing `config.yaml` unless the bundle already contains a node-specific one
+1. build a fresh node bundle
+2. run the new `install.bat` as Administrator
+3. keep the existing `config.yaml` unless intentionally replacing it
 
-Uninstall:
+### Uninstall
 
-1. Run `%ProgramData%\ClarixPulse\Agent\uninstall.bat` as Administrator
-2. Confirm whether the installed files should also be deleted
+1. run `%ProgramData%\ClarixPulse\Agent\uninstall.bat` as Administrator
+2. confirm whether installed files should also be removed

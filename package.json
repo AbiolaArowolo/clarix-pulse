@@ -2,7 +2,7 @@
   "name": "clarix-pulse",
   "version": "1.0.0",
   "private": true,
-  "description": "Pulse — Broadcast monitoring system for NOIRE TV",
+  "description": "Pulse - Broadcast monitoring platform for playout operations",
   "workspaces": [
     "packages/hub",
     "packages/dashboard"
@@ -11,7 +11,10 @@
     "dev": "concurrently \"npm run dev --workspace=packages/hub\" \"npm run dev --workspace=packages/dashboard\"",
     "build": "npm run build --workspace=packages/hub && npm run build --workspace=packages/dashboard",
     "hub": "npm run dev --workspace=packages/hub",
-    "dashboard": "npm run dev --workspace=packages/dashboard"
+    "dashboard": "npm run dev --workspace=packages/dashboard",
+    "agent:rebuild-bundles": "powershell -ExecutionPolicy Bypass -File scripts/rebuild-node-bundles.ps1 -PruneReleaseRoot -Verify",
+    "agent:verify-bundles": "powershell -ExecutionPolicy Bypass -File scripts/verify-bundle-parity.ps1",
+    "agent:refresh-bundles": "npm run agent:rebuild-bundles && npm run agent:verify-bundles"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

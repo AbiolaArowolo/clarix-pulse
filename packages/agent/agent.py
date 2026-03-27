@@ -7,6 +7,7 @@ computes health state.
 """
 
 import ctypes
+import json
 import os
 import sys
 import time
@@ -66,7 +67,7 @@ LOG_SELECTOR_KEYS = {
 INSTALL_DIR = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "ClarixPulse", "Agent")
 SERVICE_NAME = "ClarixPulseAgent"
 SERVICE_DISPLAY_NAME = "Pulse Agent"
-DEFAULT_HUB_URL = "https://pulse.clarixtech.com"
+DEFAULT_HUB_URL = "https://monitor.example.com"
 DEFAULT_INSTA_LOG_DIR = r"C:\Program Files\Indytek\Insta log"
 DEFAULT_INSTA_INSTANCE_ROOT = r"C:\Program Files\Indytek\Insta Playout\Settings"
 NSSM_PACKAGE_URL = "https://community.chocolatey.org/api/v2/package/nssm"
@@ -315,6 +316,7 @@ def _normalize_udp_input(player_id: str, udp_input: Any, index: int) -> dict[str
 
     udp_input_id = _as_str(
         udp_input.get("udp_input_id")
+        or udp_input.get("udpInputId")
         or udp_input.get("id")
         or udp_input.get("input_id")
         or f"{player_id}-udp-{index + 1}"
@@ -323,8 +325,13 @@ def _normalize_udp_input(player_id: str, udp_input: Any, index: int) -> dict[str
     return {
         "udp_input_id": udp_input_id,
         "enabled": _as_bool(udp_input.get("enabled"), False),
-        "stream_url": udp_probe.normalize_stream_url(udp_input.get("stream_url")),
-        "thumbnail_interval_s": _as_int(udp_input.get("thumbnail_interval_s"), 10),
+        "stream_url": udp_probe.normalize_stream_url(
+            udp_input.get("stream_url", udp_input.get("streamUrl"))
+        ),
+        "thumbnail_interval_s": _as_int(
+            udp_input.get("thumbnail_interval_s", udp_input.get("thumbnailIntervalS")),
+            10,
+        ),
     }
 
 
@@ -677,6 +684,89 @@ def _load_yaml_if_exists(path: str) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as handle:
         data = yaml.safe_load(handle) or {}
     return data if isinstance(data, dict) else {}
+
+
+def _runtime_config_path() -> str:
+    installed_config = _installed_path("config.yaml")
+    return installed_config if os.path.exists(installed_config) else os.path.join(_base_dir(), "config.yaml")
+
+
+def _sync_udp_inputs(player_id: str, value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    for index, entry in enumerate(value[:5]):
+        udp_input = _normalize_udp_input(player_id, entry, index)
+        if udp_input is not None:
+            normalized.append(udp_input)
+    return normalized
+
+
+def _apply_desired_node_config(config_path: str, desired_node_config: Any) -> bool:
+    if not isinstance(desired_node_config, dict):
+        return False
+
+    desired_players = desired_node_config.get("players")
+    if not isinstance(desired_players, list):
+        return False
+
+    raw_config = _load_yaml_if_exists(config_path)
+    if not raw_config:
+        return False
+
+    players_key = "players" if isinstance(raw_config.get("players"), list) else "instances" if isinstance(raw_config.get("instances"), list) else ""
+    if not players_key:
+        return False
+
+    players_raw = raw_config.get(players_key)
+    if not isinstance(players_raw, list):
+        return False
+
+    changed = False
+    for desired_player in desired_players:
+        if not isinstance(desired_player, dict):
+            continue
+
+        desired_player_id = _as_str(
+            desired_player.get("playerId")
+            or desired_player.get("player_id")
+            or desired_player.get("id")
+            or desired_player.get("instance_id")
+        )
+        if not desired_player_id:
+            continue
+
+        desired_udp_inputs = _sync_udp_inputs(
+            desired_player_id,
+            desired_player.get("udpInputs", desired_player.get("udp_inputs", [])),
+        )
+
+        for index, player in enumerate(players_raw):
+            if not isinstance(player, dict):
+                continue
+
+            current_player_id = _as_str(
+                player.get("player_id")
+                or player.get("id")
+                or player.get("instance_id")
+            )
+            if current_player_id != desired_player_id:
+                continue
+
+            current_udp_inputs = _sync_udp_inputs(desired_player_id, player.get("udp_inputs", []))
+            if current_udp_inputs != desired_udp_inputs:
+                player["udp_inputs"] = desired_udp_inputs
+                player.pop("udp_probe", None)
+                players_raw[index] = player
+                changed = True
+            break
+
+    if changed:
+        raw_config[players_key] = players_raw
+        _write_yaml(config_path, raw_config)
+
+    return changed
 
 
 def _contains_placeholder(value: Any) -> bool:
@@ -1049,7 +1139,7 @@ def post_heartbeat(
     node_id: str,
     player_id: str,
     observations: dict[str, Any],
-) -> bool:
+) -> dict[str, Any] | None:
     url = f"{hub_url}/api/heartbeat"
     payload = {
         "agentId": node_id,
@@ -1062,12 +1152,16 @@ def post_heartbeat(
     try:
         r = requests.post(url, json=payload, headers={"Authorization": f"Bearer {token}"}, timeout=10)
         if r.status_code == 200:
-            return True
+            try:
+                payload = r.json()
+            except ValueError:
+                payload = {}
+            return payload if isinstance(payload, dict) else {}
         log.warning(f"Heartbeat rejected for {player_id}: {r.status_code} {r.text[:200]}")
-        return False
+        return None
     except requests.RequestException as e:
         log.warning(f"Heartbeat POST failed for {player_id}: {e}")
-        return False
+        return None
 
 
 def post_thumbnail(
@@ -1211,7 +1305,7 @@ def _maybe_capture_thumbnail(
     return data_url
 
 
-def poll_player(node_id: str, hub_url: str, token: str, player: dict[str, Any]) -> None:
+def poll_player(node_id: str, hub_url: str, token: str, player: dict[str, Any]) -> dict[str, Any] | None:
     player_id = player["player_id"]
     playout_type = player.get("playout_type", "insta")
     paths = player.get("paths", {})
@@ -1273,36 +1367,61 @@ def poll_player(node_id: str, hub_url: str, token: str, player: dict[str, Any]) 
         )
 
     # POST heartbeat
-    success = post_heartbeat(hub_url, token, node_id, player_id, observations)
-    if success:
+    response_payload = post_heartbeat(hub_url, token, node_id, player_id, observations)
+    if response_payload is not None:
         log.debug(f"[{player_id}] heartbeat OK — {observations}")
 
     # POST thumbnail if captured
     if thumbnail_data_url and thumbnail_udp_input_id:
         post_thumbnail(hub_url, token, node_id, player_id, thumbnail_udp_input_id, thumbnail_data_url)
 
+    if isinstance(response_payload, dict):
+        desired_node_config = response_payload.get("desiredNodeConfig")
+        return desired_node_config if isinstance(desired_node_config, dict) else None
+
+    return None
+
 
 # --- Main loop ----------------------------------------------------------------
 
 def run_agent_loop() -> int:
-    config = load_config()
-
-    node_id = config["node_id"]
-    node_name = config["node_name"]
-    hub_url = config["hub_url"].rstrip("/")
-    token = config["agent_token"]
-    poll_interval = int(config.get("poll_interval_seconds", 10))
-    players = config.get("players", [])
-
-    log.info(f"Pulse Agent starting — node_id={node_id}, node_name={node_name}, hub={hub_url}")
-    log.info(f"Monitoring {len(players)} player(s): {[p['player_id'] for p in players]}")
+    config_path = _runtime_config_path()
+    last_config_signature = ""
 
     while True:
+        config = load_config(config_path)
+
+        node_id = config["node_id"]
+        node_name = config["node_name"]
+        hub_url = config["hub_url"].rstrip("/")
+        token = config["agent_token"]
+        poll_interval = int(config.get("poll_interval_seconds", 10))
+        players = config.get("players", [])
+
+        config_signature = json.dumps(
+            {
+                "node_id": node_id,
+                "hub_url": hub_url,
+                "poll_interval_seconds": poll_interval,
+                "players": players,
+            },
+            sort_keys=True,
+        )
+        if config_signature != last_config_signature:
+            log.info(f"Pulse Agent starting — node_id={node_id}, node_name={node_name}, hub={hub_url}")
+            log.info(f"Monitoring {len(players)} player(s): {[p['player_id'] for p in players]}")
+            last_config_signature = config_signature
+
         cycle_start = time.time()
+        applied_desired_config = False
 
         for player in players:
             try:
-                poll_player(node_id, hub_url, token, player)
+                desired_node_config = poll_player(node_id, hub_url, token, player)
+                if desired_node_config and not applied_desired_config:
+                    if _apply_desired_node_config(config_path, desired_node_config):
+                        applied_desired_config = True
+                        log.info("Applied managed UDP config from the hub. Local config.yaml is now in sync.")
             except Exception:
                 log.error(f"Unhandled error polling {player.get('player_id', '?')}:\n{traceback.format_exc()}")
 
