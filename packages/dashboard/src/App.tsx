@@ -93,7 +93,7 @@ export default function App() {
               </div>
               <div>
                 <h1 className="text-base font-semibold tracking-wide text-white">Pulse</h1>
-                <p className="text-sm text-slate-400">Broadcast Monitor | NOIRE TV</p>
+                <p className="text-sm text-slate-400">Broadcast Monitor</p>
               </div>
             </div>
 
@@ -146,7 +146,7 @@ export default function App() {
 
       <footer className="relative max-w-7xl mx-auto mt-8 flex flex-col items-start gap-2 border-t border-slate-800/80 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <span className="text-xs text-slate-500">Pulse v1.0.0 | pulse.clarixtech.com</span>
-        <span className="text-xs text-slate-500">{new Date().getFullYear()} NOIRE TV / clarixtech</span>
+        <span className="text-xs text-slate-500">{new Date().getFullYear()} clarixtech</span>
       </footer>
 
       <InstallBar onModeChange={setInstallBarMode} />

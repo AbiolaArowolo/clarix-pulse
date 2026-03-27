@@ -359,3 +359,10 @@ To reduce operator confusion, the active bundles now follow names like `ny-main-
  now `ny-main-v1.1`, `ny-backup-v1.1`, `digicel-v1.1`, and `nj-optimum-v1.2`, with the older
  versioned bundle copies removed from the release folder so operators see one current package per
  node instead of a growing stack of historical zips.
+
+**2026-03-26 21:15:00 America/New_York**: The dashboard shell and PWA metadata were de-branded away
+ from `NOIRE TV` so the live app now presents itself simply as `Pulse` / `Broadcast Monitor` /
+ `clarixtech`. At the same time, the PWA manifest was hardened with PNG app icons, explicit
+ standalone/window display overrides, Apple touch icon metadata, and stronger service-worker cache
+ takeover so phones and PCs are more likely to install Pulse as an app-style experience instead of
+ a weak browser shortcut shell.
