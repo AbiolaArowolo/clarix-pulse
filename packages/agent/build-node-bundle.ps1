@@ -1,6 +1,7 @@
 param(
     [string]$OutputRoot = (Join-Path $PSScriptRoot 'release'),
     [string]$BundleName = 'pulse-node-bundle',
+    [string]$VersionLabel = '',
     [string]$ConfigPath = '',
     [switch]$Zip,
     [switch]$SkipVendorValidation
@@ -9,7 +10,13 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$bundleDir = Join-Path $OutputRoot $BundleName
+$effectiveBundleName = if ([string]::IsNullOrWhiteSpace($VersionLabel)) {
+    $BundleName
+} else {
+    "$BundleName-$VersionLabel"
+}
+
+$bundleDir = Join-Path $OutputRoot $effectiveBundleName
 $vendorDir = Join-Path $PSScriptRoot 'vendor'
 $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $distDir = Join-Path $PSScriptRoot 'dist'
@@ -185,6 +192,7 @@ try {
 Pulse Node Bundle
 Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')
 Bundle Path: $bundleDir
+Bundle Name: $effectiveBundleName
 
 Contents:
 - clarix-agent.exe
@@ -194,17 +202,18 @@ Contents:
 - config.example.yaml
 - config.yaml
 - nssm.exe (required for installation)
-- ffmpeg.exe / ffprobe.exe (required only when UDP inputs are enabled)
+- ffmpeg.exe / ffprobe.exe (bundled and auto-installed for UDP monitoring)
 
 Usage:
 1. Copy this folder to the target node.
-2. Double-click install.bat as Administrator.
-3. Edit config.yaml when prompted or later via configure.bat.
-4. Leave ffmpeg.exe and ffprobe.exe in the bundle so UDP can be switched on later without reinstalling.
+2. Double-click clarix-agent.exe or install.bat.
+3. Accept the Administrator prompt when Windows asks.
+4. If config.yaml is already valid for this node, Pulse installs without extra editing.
+5. If config.yaml is incomplete, Pulse asks for the missing node/player/UDP details itself.
 "@ | Set-Content -Path $manifestPath -Encoding ASCII
 
     if ($Zip) {
-        $zipPath = Join-Path $OutputRoot ($BundleName + '.zip')
+        $zipPath = Join-Path $OutputRoot ($effectiveBundleName + '.zip')
         if (Test-Path $zipPath) {
             Remove-Item -Path $zipPath -Force
         }

@@ -254,8 +254,8 @@ export function InstallBar({ onModeChange }: Props) {
       <div className="mx-auto max-w-7xl px-4 pt-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex min-w-0 flex-1 items-start gap-3">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-teal-400/20 bg-gradient-to-br from-teal-500/20 to-cyan-400/10 shadow-[0_14px_30px_rgba(20,184,166,0.18)]">
-              <img src="/pulse.svg" alt="Pulse logo" className="h-9 w-9" />
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-blue-400/20 bg-[#071538] shadow-[0_16px_34px_rgba(7,21,56,0.52)]">
+              <img src="/pulse.svg" alt="Pulse logo" className="h-full w-full object-cover" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-start justify-between gap-3">

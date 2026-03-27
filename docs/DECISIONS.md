@@ -333,3 +333,29 @@ reinstalls can actually replace a running agent service. `install.bat` now stops
 existing `ClarixPulseAgent` service before copying the new bundle files into `%ProgramData%`,
 instead of attempting to overwrite `clarix-agent.exe` while the old service still has the binary
 locked.
+
+**2026-03-26 20:40:05 America/New_York**: The node release area was renamed to use human-readable
+version labels instead of timestamp-only hotfix names. Open folders remain the unpacked working
+copy of a bundle, while matching `.zip` files are the compressed handoff copy of the same contents.
+To reduce operator confusion, the active bundles now follow names like `ny-main-v1.0` and
+`nj-optimum-v1.1`, and a plain-text latest-bundle guide now sits beside them in the release folder.
+
+**2026-03-26 20:47:32 America/New_York**: The shared Pulse brand mark in the dashboard and PWA was
+ switched from the placeholder badge to the heartbeat-wave logo provided during review. The same
+ `pulse.svg` asset now drives the header badge, install surface, favicon, Apple touch icon, and PWA
+ manifest icon so the interface and installed app stay visually consistent.
+
+**2026-03-26 20:58:45 America/New_York**: The dashboard status model and agent installer flow were
+ tightened together. Runtime badges now keep their own meaning instead of inheriting the overall
+ card warning color, so a player can stay `Playing`/green while only the connectivity badge turns
+ yellow for `offline`. Headline pills now prefer `Active`, `Inactive`, `Offline`, `Paused`, or
+ `Off Air` over the vague `Unknown` label. On the node side, `clarix-agent.exe` now owns the
+ install, configure, and uninstall flows directly, auto-stages `nssm.exe`, auto-installs
+ `ffmpeg.exe` / `ffprobe.exe`, and only prompts for config details when the bundled `config.yaml`
+ is missing or incomplete.
+
+**2026-03-26 21:02:21 America/New_York**: The shared node bundles were rebuilt on top of the new
+ installer/runtime changes and normalized under cleaner version labels. The current release set is
+ now `ny-main-v1.1`, `ny-backup-v1.1`, `digicel-v1.1`, and `nj-optimum-v1.2`, with the older
+ versioned bundle copies removed from the release folder so operators see one current package per
+ node instead of a growing stack of historical zips.

@@ -1,5 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { InstanceState, getStatusColor, isConnectivityWarning, isInactiveInstance } from '../lib/types';
+import {
+  InstanceState,
+  getConnectivityBadgeColor,
+  getHeadlineStatus,
+  getRuntimeBadgeColor,
+  getStatusColor,
+  isConnectivityWarning,
+  isInactiveInstance,
+} from '../lib/types';
 import { StatusBadge } from './StatusBadge';
 import { StreamThumbnail } from './StreamThumbnail';
 
@@ -15,14 +23,6 @@ function formatAge(isoString: string | null, nowMs: number): string {
   return `${Math.floor(secs / 3600)}h ago`;
 }
 
-const BROADCAST_LABELS: Record<string, string> = {
-  healthy: 'On Air',
-  degraded: 'Degraded',
-  off_air_likely: 'Off Air (likely)',
-  off_air_confirmed: 'OFF AIR',
-  unknown: 'Unknown',
-};
-
 const RUNTIME_LABELS: Record<string, string> = {
   healthy: 'Playing',
   paused: 'Paused',
@@ -30,12 +30,13 @@ const RUNTIME_LABELS: Record<string, string> = {
   stalled: 'Stalled',
   stopped: 'Stopped',
   content_error: 'Content Error',
-  unknown: 'Unknown',
+  unknown: 'Inactive',
 };
 
 export function InstanceCard({ instance }: Props) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const color = getStatusColor(instance);
+  const headline = getHeadlineStatus(instance);
   const inactive = isInactiveInstance(instance);
   const connectivityWarning = isConnectivityWarning(instance);
 
@@ -62,18 +63,17 @@ export function InstanceCard({ instance }: Props) {
 
   const udpLabel = instance.udpMonitoringEnabled
     ? `UDP matrix: ${instance.udpHealthyInputCount}/${Math.max(instance.udpInputCount, 1)} healthy`
-    : 'UDP matrix: off';
+    : instance.udpMonitoringCapable
+      ? 'UDP matrix: configurable'
+      : 'UDP matrix: off';
   const modeLabel = instance.udpMonitoringEnabled ? 'Mode: local + UDP' : 'Mode: local only';
   const runtimeLabel = inactive
-    ? 'Runtime: standby'
+    ? 'Runtime: inactive'
     : `Runtime: ${RUNTIME_LABELS[instance.runtimeHealth] ?? instance.runtimeHealth}`;
   const connectivityLabel = inactive
-    ? 'Net: standby'
+    ? 'Net: inactive'
     : `Net: ${instance.connectivityHealth}`;
-  const statusLabel = inactive
-    ? 'Inactive'
-    : (BROADCAST_LABELS[instance.broadcastHealth] ?? instance.broadcastHealth);
-  const heartbeatLabel = inactive ? 'standby' : formatAge(instance.lastHeartbeatAt, nowMs);
+  const heartbeatLabel = inactive ? 'inactive' : formatAge(instance.lastHeartbeatAt, nowMs);
 
   return (
     <div
@@ -88,16 +88,16 @@ export function InstanceCard({ instance }: Props) {
           </p>
         </div>
         <StatusBadge
-          color={color}
-          label={statusLabel}
+          color={headline.color}
+          label={headline.label}
           size="md"
         />
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <StatusBadge color={inactive ? 'gray' : color} label={runtimeLabel} />
+        <StatusBadge color={getRuntimeBadgeColor(instance)} label={runtimeLabel} />
         <StatusBadge
-          color={inactive ? 'gray' : instance.connectivityHealth === 'online' ? 'green' : 'yellow'}
+          color={getConnectivityBadgeColor(instance)}
           label={connectivityLabel}
         />
         <span className="rounded-full border border-slate-700 px-2 py-0.5 text-xs text-slate-400">

@@ -88,8 +88,8 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-teal-400/20 bg-gradient-to-br from-teal-500/20 to-cyan-400/10 shadow-[0_14px_30px_rgba(20,184,166,0.18)]">
-                <img src="/pulse.svg" alt="Pulse logo" className="h-9 w-9" />
+              <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border border-blue-400/20 bg-[#071538] shadow-[0_16px_34px_rgba(7,21,56,0.52)]">
+                <img src="/pulse.svg" alt="Pulse logo" className="h-full w-full object-cover" />
               </div>
               <div>
                 <h1 className="text-base font-semibold tracking-wide text-white">Pulse</h1>

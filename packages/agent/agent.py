@@ -1,20 +1,29 @@
 """
 Pulse - Local Monitoring Agent.
-Runs as a Windows Service via NSSM. Polls every N seconds, POSTs one heartbeat
-per player to the hub. Sends raw observations only - hub computes health state.
+Can run as a local installer/configurator in an interactive session and as a
+monitoring loop when launched by the Windows service. Polls every N seconds,
+POSTs one heartbeat per player to the hub. Sends raw observations only - hub
+computes health state.
 """
 
+import ctypes
 import os
 import sys
 import time
 import glob
 import logging
+import shutil
+import socket
+import subprocess
+import tempfile
 import traceback
+import zipfile
 from datetime import datetime
 from typing import Any
 
 import yaml
 import requests
+import psutil
 
 from monitors import process_monitor, log_monitor, file_monitor, connectivity, udp_probe
 
@@ -53,6 +62,18 @@ LOG_SELECTOR_KEYS = {
     "reinit_regex",
     "token_patterns",
 }
+
+INSTALL_DIR = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "ClarixPulse", "Agent")
+SERVICE_NAME = "ClarixPulseAgent"
+SERVICE_DISPLAY_NAME = "Pulse Agent"
+DEFAULT_HUB_URL = "https://pulse.clarixtech.com"
+DEFAULT_INSTA_LOG_DIR = r"C:\Program Files\Indytek\Insta log"
+DEFAULT_INSTA_INSTANCE_ROOT = r"C:\Program Files\Indytek\Insta Playout\Settings"
+NSSM_PACKAGE_URL = "https://community.chocolatey.org/api/v2/package/nssm"
+FFMPEG_ARCHIVE_URL = (
+    "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/"
+    "ffmpeg-n8.0-latest-win64-gpl-8.0.zip"
+)
 
 
 # --- Config -------------------------------------------------------------------
@@ -264,21 +285,26 @@ def _resolve_admax_paths(paths: dict[str, Any]) -> dict[str, Any]:
     return paths
 
 
-def _load_raw_config() -> dict[str, Any]:
-    config_path = os.path.join(
-        os.path.dirname(sys.executable if getattr(sys, "frozen", False) else __file__),
-        "config.yaml",
-    )
-    if not os.path.exists(config_path):
-        log.error(f"config.yaml not found at {config_path}")
-        sys.exit(1)
+def _base_dir() -> str:
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(__file__)
 
-    with open(config_path, "r", encoding="utf-8") as f:
+
+def _current_executable_path() -> str:
+    return sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__)
+
+
+def _load_raw_config(config_path: str | None = None) -> dict[str, Any]:
+    resolved_path = config_path or os.path.join(_base_dir(), "config.yaml")
+    if not os.path.exists(resolved_path):
+        raise FileNotFoundError(f"config.yaml not found at {resolved_path}")
+
+    with open(resolved_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
 
     if not isinstance(data, dict):
-        log.error("config.yaml must contain a mapping at the top level")
-        sys.exit(1)
+        raise ValueError("config.yaml must contain a mapping at the top level")
 
     return data
 
@@ -389,8 +415,7 @@ def _normalize_player(player: Any, index: int) -> dict[str, Any] | None:
 def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
     node_id = _as_str(raw.get("node_id") or raw.get("agent_id"))
     if not node_id:
-        log.error("config.yaml missing node_id (or legacy agent_id)")
-        sys.exit(1)
+        raise ValueError("config.yaml missing node_id (or legacy agent_id)")
 
     node_name = _as_str(raw.get("node_name") or raw.get("pc_name") or node_id)
     hub_url = _as_str(raw.get("hub_url"))
@@ -398,20 +423,17 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
     poll_interval_seconds = max(1, _as_int(raw.get("poll_interval_seconds"), 10))
 
     if not hub_url:
-        log.error("config.yaml missing hub_url")
-        sys.exit(1)
+        raise ValueError("config.yaml missing hub_url")
 
     if not agent_token:
-        log.error("config.yaml missing agent_token")
-        sys.exit(1)
+        raise ValueError("config.yaml missing agent_token")
 
     players_raw = raw.get("players")
     if players_raw is None:
         players_raw = raw.get("instances", [])
 
     if not isinstance(players_raw, list):
-        log.error("config.yaml players/instances must be a list")
-        sys.exit(1)
+        raise ValueError("config.yaml players/instances must be a list")
 
     players: list[dict[str, Any]] = []
     for index, player in enumerate(players_raw):
@@ -420,12 +442,12 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
             players.append(normalized)
 
     if not players:
-        log.error("config.yaml must define at least one player")
-        sys.exit(1)
+        raise ValueError("config.yaml must define at least one player")
 
     return {
         "node_id": node_id,
         "node_name": node_name,
+        "site_id": _as_str(raw.get("site_id")),
         "hub_url": hub_url,
         "agent_token": agent_token,
         "poll_interval_seconds": poll_interval_seconds,
@@ -433,15 +455,16 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def load_config() -> dict[str, Any]:
-    return normalize_config(_load_raw_config())
+def load_config(config_path: str | None = None) -> dict[str, Any]:
+    return normalize_config(_load_raw_config(config_path))
 
 
-def validate_config_command() -> int:
+def validate_config_command(config_path: str | None = None) -> int:
     try:
-        config = load_config()
-    except SystemExit as exc:
-        return int(exc.code or 1)
+        config = load_config(config_path)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"ERROR: {exc}")
+        return 1
 
     print(f"Config OK for node_id={config['node_id']} ({config['node_name']})")
     validation_failed = False
@@ -483,6 +506,539 @@ def validate_config_command() -> int:
 
     print("Config validation passed.")
     return 0
+
+
+def _is_admin() -> bool:
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def _relaunch_as_admin(args: list[str]) -> int:
+    executable = sys.executable
+    parameters = subprocess.list2cmdline(args)
+    if not getattr(sys, "frozen", False):
+        parameters = subprocess.list2cmdline([os.path.abspath(__file__), *args])
+
+    result = ctypes.windll.shell32.ShellExecuteW(None, "runas", executable, parameters, None, 1)
+    if result <= 32:
+        print("ERROR: Unable to request Administrator privileges.")
+        return 1
+    return 0
+
+
+def _run_command(command: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
+    completed = subprocess.run(command, capture_output=True, text=True)
+    if check and completed.returncode != 0:
+        stderr = completed.stderr.strip()
+        stdout = completed.stdout.strip()
+        details = stderr or stdout or f"exit code {completed.returncode}"
+        raise RuntimeError(f"{' '.join(command)} failed: {details}")
+    return completed
+
+
+def _service_exists() -> bool:
+    return subprocess.run(
+        ["sc", "query", SERVICE_NAME],
+        capture_output=True,
+        text=True,
+    ).returncode == 0
+
+
+def _bundle_path(name: str) -> str:
+    return os.path.join(_base_dir(), name)
+
+
+def _installed_path(name: str) -> str:
+    return os.path.join(INSTALL_DIR, name)
+
+
+def _ensure_directory(path: str) -> None:
+    os.makedirs(path, exist_ok=True)
+
+
+def _copy_if_exists(source: str, destination: str) -> None:
+    if os.path.exists(source):
+        _ensure_directory(os.path.dirname(destination))
+        if os.path.abspath(source) != os.path.abspath(destination):
+            shutil.copy2(source, destination)
+
+
+def _download_file(url: str, destination: str) -> None:
+    response = requests.get(url, timeout=120, stream=True)
+    response.raise_for_status()
+    with open(destination, "wb") as handle:
+        for chunk in response.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                handle.write(chunk)
+
+
+def _extract_from_zip(zip_path: str, suffix: str, destination: str) -> bool:
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        for member in archive.namelist():
+            if member.lower().endswith(suffix.lower()):
+                with archive.open(member) as source, open(destination, "wb") as target:
+                    shutil.copyfileobj(source, target)
+                return True
+    return False
+
+
+def _ensure_nssm() -> str:
+    install_target = _installed_path("nssm.exe")
+    if os.path.exists(install_target):
+        return install_target
+
+    bundle_target = _bundle_path("nssm.exe")
+    if os.path.exists(bundle_target):
+        _copy_if_exists(bundle_target, install_target)
+        return install_target
+
+    _ensure_directory(INSTALL_DIR)
+    with tempfile.TemporaryDirectory(prefix="pulse-nssm-") as temp_dir:
+        package_path = os.path.join(temp_dir, "nssm.nupkg")
+        _download_file(NSSM_PACKAGE_URL, package_path)
+        if not _extract_from_zip(package_path, os.path.join("win64", "nssm.exe"), install_target):
+            if not _extract_from_zip(package_path, "nssm.exe", install_target):
+                raise RuntimeError("Failed to extract nssm.exe from downloaded package.")
+
+    return install_target
+
+
+def _ensure_ff_tools(required: bool) -> None:
+    ffmpeg_target = _installed_path("ffmpeg.exe")
+    ffprobe_target = _installed_path("ffprobe.exe")
+
+    if os.path.exists(ffmpeg_target) and os.path.exists(ffprobe_target):
+        return
+
+    _copy_if_exists(_bundle_path("ffmpeg.exe"), ffmpeg_target)
+    _copy_if_exists(_bundle_path("ffprobe.exe"), ffprobe_target)
+    if os.path.exists(ffmpeg_target) and os.path.exists(ffprobe_target):
+        return
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="pulse-ffmpeg-") as temp_dir:
+            archive_path = os.path.join(temp_dir, "ffmpeg.zip")
+            _download_file(FFMPEG_ARCHIVE_URL, archive_path)
+            if not _extract_from_zip(archive_path, "ffmpeg.exe", ffmpeg_target):
+                raise RuntimeError("Failed to extract ffmpeg.exe from downloaded archive.")
+            if not _extract_from_zip(archive_path, "ffprobe.exe", ffprobe_target):
+                raise RuntimeError("Failed to extract ffprobe.exe from downloaded archive.")
+    except Exception:
+        if required:
+            raise
+
+
+def _stop_existing_service(nssm_path: str | None = None) -> None:
+    if not _service_exists():
+        return
+
+    chosen_nssm = nssm_path if nssm_path and os.path.exists(nssm_path) else ""
+    if not chosen_nssm and os.path.exists(_installed_path("nssm.exe")):
+        chosen_nssm = _installed_path("nssm.exe")
+
+    if chosen_nssm:
+        subprocess.run([chosen_nssm, "stop", SERVICE_NAME], capture_output=True, text=True)
+        subprocess.run([chosen_nssm, "remove", SERVICE_NAME, "confirm"], capture_output=True, text=True)
+    else:
+        subprocess.run(["sc", "stop", SERVICE_NAME], capture_output=True, text=True)
+        subprocess.run(["sc", "delete", SERVICE_NAME], capture_output=True, text=True)
+
+    installed_exe = os.path.abspath(_installed_path("clarix-agent.exe"))
+    current_pid = os.getpid()
+    for proc in psutil.process_iter(["pid", "name", "exe"]):
+        try:
+            pid = int(proc.info.get("pid") or 0)
+            if pid == current_pid:
+                continue
+            name = str(proc.info.get("name") or "").lower()
+            exe_path = os.path.abspath(str(proc.info.get("exe") or ""))
+            if name not in {"clarix-agent.exe", "clarix-agent"}:
+                continue
+            if exe_path and exe_path != installed_exe:
+                continue
+            proc.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError, ValueError):
+            continue
+
+    time.sleep(2)
+
+
+def _write_yaml(path: str, data: dict[str, Any]) -> None:
+    _ensure_directory(os.path.dirname(path))
+    with open(path, "w", encoding="utf-8") as handle:
+        yaml.safe_dump(data, handle, sort_keys=False, allow_unicode=False)
+
+
+def _load_yaml_if_exists(path: str) -> dict[str, Any]:
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+    return data if isinstance(data, dict) else {}
+
+
+def _contains_placeholder(value: Any) -> bool:
+    if isinstance(value, str):
+        return "REPLACE_ME" in value
+    if isinstance(value, dict):
+        return any(_contains_placeholder(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_placeholder(item) for item in value)
+    return False
+
+
+def _prompt(text: str, default: str = "", required: bool = False) -> str:
+    while True:
+        suffix = f" [{default}]" if default else ""
+        response = input(f"{text}{suffix}: ").strip()
+        if response:
+            return response
+        if default:
+            return default
+        if not required:
+            return ""
+        print("A value is required.")
+
+
+def _prompt_int(text: str, default: int, minimum: int, maximum: int) -> int:
+    while True:
+        raw = _prompt(text, str(default), required=True)
+        try:
+            value = int(raw)
+        except ValueError:
+            print("Enter a number.")
+            continue
+        if minimum <= value <= maximum:
+            return value
+        print(f"Enter a value between {minimum} and {maximum}.")
+
+
+def _prompt_yes_no(text: str, default: bool) -> bool:
+    default_label = "Y/n" if default else "y/N"
+    while True:
+        response = input(f"{text} [{default_label}]: ").strip().lower()
+        if not response:
+            return default
+        if response in {"y", "yes"}:
+            return True
+        if response in {"n", "no"}:
+            return False
+        print("Enter y or n.")
+
+
+def _prompt_choice(text: str, choices: list[str], default: str) -> str:
+    allowed = {choice.lower(): choice for choice in choices}
+    while True:
+        response = _prompt(text, default, required=True).lower()
+        if response in allowed:
+            return allowed[response]
+        print(f"Choose one of: {', '.join(choices)}")
+
+
+def _default_site_id(node_id: str) -> str:
+    lowered = node_id.lower()
+    return lowered[:-3] if lowered.endswith("-pc") else lowered
+
+
+def _default_player_id(node_id: str, playout_type: str, index: int) -> str:
+    return f"{node_id}-{playout_type}-{index + 1}"
+
+
+def _build_udp_inputs(player_id: str, existing_inputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    count_default = min(5, len(existing_inputs)) if existing_inputs else 0
+    udp_count = _prompt_int("How many UDP inputs should this player expose", count_default, 0, 5)
+    udp_inputs: list[dict[str, Any]] = []
+
+    for index in range(udp_count):
+        existing = existing_inputs[index] if index < len(existing_inputs) else {}
+        udp_input_id = _prompt(
+            f"UDP input {index + 1} ID",
+            _as_str(existing.get("udp_input_id"), f"{player_id}-udp-{index + 1}"),
+            required=True,
+        )
+        enabled = _prompt_yes_no(
+            f"Enable UDP input {udp_input_id}",
+            _as_bool(existing.get("enabled"), False),
+        )
+        stream_url = _prompt(
+            f"UDP stream URL for {udp_input_id}",
+            _as_str(existing.get("stream_url")),
+            required=False,
+        )
+        stream_url = udp_probe.normalize_stream_url(stream_url)
+        thumbnail_interval = _prompt_int(
+            f"Thumbnail interval seconds for {udp_input_id}",
+            _as_int(existing.get("thumbnail_interval_s"), 10),
+            1,
+            300,
+        )
+        udp_inputs.append(
+            {
+                "udp_input_id": udp_input_id,
+                "enabled": enabled,
+                "stream_url": stream_url,
+                "thumbnail_interval_s": thumbnail_interval,
+            }
+        )
+
+    return udp_inputs
+
+
+def _prompt_player(index: int, existing_player: dict[str, Any], node_id: str) -> dict[str, Any]:
+    existing_type = _as_str(existing_player.get("playout_type"), "insta").lower()
+    playout_type = _prompt_choice(
+        f"Player {index + 1} playout type",
+        ["insta", "admax"],
+        existing_type if existing_type in {"insta", "admax"} else "insta",
+    )
+    player_id = _prompt(
+        f"Player {index + 1} ID",
+        _as_str(existing_player.get("player_id"), _default_player_id(node_id, playout_type, index)),
+        required=True,
+    )
+
+    existing_paths = _as_mapping(existing_player.get("paths"))
+    if playout_type == "insta":
+        paths = {
+            "shared_log_dir": _prompt(
+                f"{player_id} shared_log_dir",
+                _as_str(existing_paths.get("shared_log_dir"), DEFAULT_INSTA_LOG_DIR),
+                required=True,
+            ),
+            "instance_root": _prompt(
+                f"{player_id} instance_root",
+                _as_str(existing_paths.get("instance_root"), DEFAULT_INSTA_INSTANCE_ROOT),
+                required=True,
+            ),
+        }
+    else:
+        detected_root = _best_existing_dir(_default_admax_root_patterns())
+        paths = {
+            "admax_root_candidates": [
+                _prompt(
+                    f"{player_id} Admax root",
+                    _as_str(existing_paths.get("admax_root"), detected_root),
+                    required=True,
+                )
+            ]
+        }
+
+    return {
+        "player_id": player_id,
+        "playout_type": playout_type,
+        "paths": paths,
+        "udp_inputs": _build_udp_inputs(player_id, existing_player.get("udp_inputs", [])),
+    }
+
+
+def _run_config_wizard(existing: dict[str, Any] | None = None) -> dict[str, Any]:
+    existing = existing or {}
+    existing_players = existing.get("players") if isinstance(existing.get("players"), list) else []
+
+    node_id = _prompt(
+        "Node ID",
+        _as_str(existing.get("node_id"), socket.gethostname().lower().replace(" ", "-")),
+        required=True,
+    )
+    node_name = _prompt(
+        "Node name",
+        _as_str(existing.get("node_name"), socket.gethostname()),
+        required=True,
+    )
+    site_id = _prompt(
+        "Site ID",
+        _as_str(existing.get("site_id"), _default_site_id(node_id)),
+        required=True,
+    )
+    hub_url = _prompt(
+        "Hub URL",
+        _as_str(existing.get("hub_url"), DEFAULT_HUB_URL),
+        required=True,
+    )
+    agent_token = _prompt(
+        "Agent token",
+        _as_str(existing.get("agent_token")),
+        required=True,
+    )
+    poll_interval = _prompt_int(
+        "Poll interval seconds",
+        _as_int(existing.get("poll_interval_seconds"), 5),
+        1,
+        120,
+    )
+    player_count = _prompt_int(
+        "How many players run on this node",
+        len(existing_players) or 1,
+        1,
+        10,
+    )
+
+    players: list[dict[str, Any]] = []
+    for index in range(player_count):
+        existing_player = existing_players[index] if index < len(existing_players) else {}
+        players.append(_prompt_player(index, existing_player, node_id))
+
+    return {
+        "node_id": node_id,
+        "node_name": node_name,
+        "site_id": site_id,
+        "hub_url": hub_url,
+        "agent_token": agent_token,
+        "poll_interval_seconds": poll_interval,
+        "players": players,
+    }
+
+
+def _stage_runtime_files() -> str:
+    _ensure_directory(INSTALL_DIR)
+    staged_exe = _installed_path("clarix-agent.exe")
+    _copy_if_exists(_current_executable_path(), staged_exe)
+
+    for filename in ("install.bat", "configure.bat", "uninstall.bat", "config.example.yaml"):
+        _copy_if_exists(_bundle_path(filename), _installed_path(filename))
+
+    return staged_exe
+
+
+def _load_or_prepare_config(config_path: str) -> dict[str, Any]:
+    existing = _load_yaml_if_exists(config_path)
+    if not existing and os.path.exists(_bundle_path("config.yaml")):
+        _copy_if_exists(_bundle_path("config.yaml"), config_path)
+        existing = _load_yaml_if_exists(config_path)
+
+    if existing and not _contains_placeholder(existing):
+        try:
+            load_config(config_path)
+            return existing
+        except (FileNotFoundError, ValueError):
+            pass
+
+    print()
+    print("Pulse will guide the node configuration now.")
+    configured = _run_config_wizard(existing)
+    _write_yaml(config_path, configured)
+    load_config(config_path)
+    return configured
+
+
+def install_service_command() -> int:
+    if not _is_admin():
+        print("Administrator approval is required for the Pulse installation.")
+        return _relaunch_as_admin(["--install-service"])
+
+    try:
+        nssm_path = _ensure_nssm()
+        _stop_existing_service(nssm_path)
+        staged_exe = _stage_runtime_files()
+        config_path = _installed_path("config.yaml")
+        raw_config = _load_or_prepare_config(config_path)
+        validated_config = load_config(config_path)
+        _ensure_ff_tools(required=True)
+
+        _run_command([nssm_path, "install", SERVICE_NAME, staged_exe, "--service-loop"])
+        _run_command([nssm_path, "set", SERVICE_NAME, "DisplayName", SERVICE_DISPLAY_NAME])
+        _run_command([nssm_path, "set", SERVICE_NAME, "AppDirectory", INSTALL_DIR])
+        _run_command([nssm_path, "set", SERVICE_NAME, "AppStdout", _installed_path("clarix-agent.log")])
+        _run_command([nssm_path, "set", SERVICE_NAME, "AppStderr", _installed_path("clarix-agent.log")])
+        _run_command([nssm_path, "set", SERVICE_NAME, "AppRotateFiles", "1"])
+        _run_command([nssm_path, "set", SERVICE_NAME, "AppRotateBytes", "10485760"])
+        _run_command([nssm_path, "set", SERVICE_NAME, "AppRestartDelay", "5000"])
+        _run_command([nssm_path, "set", SERVICE_NAME, "Start", "SERVICE_AUTO_START"])
+        _run_command(["sc", "description", SERVICE_NAME, "Pulse local node monitoring agent"])
+        _run_command([nssm_path, "start", SERVICE_NAME])
+
+        print()
+        print("Pulse installation complete.")
+        print(f"Node: {validated_config['node_id']} ({validated_config['node_name']})")
+        print(f"Installed to: {INSTALL_DIR}")
+        return 0
+    except Exception as exc:
+        print(f"ERROR: {exc}")
+        return 1
+
+
+def configure_command() -> int:
+    if not _is_admin():
+        print("Administrator approval is required to update Pulse configuration.")
+        return _relaunch_as_admin(["--configure"])
+
+    try:
+        config_path = _installed_path("config.yaml")
+        if not os.path.exists(config_path) and os.path.exists(_bundle_path("config.yaml")):
+            _copy_if_exists(_bundle_path("config.yaml"), config_path)
+
+        existing = _load_yaml_if_exists(config_path)
+        configured = _run_config_wizard(existing)
+        _write_yaml(config_path, configured)
+        load_config(config_path)
+
+        udp_enabled = any(
+            _as_bool(udp_input.get("enabled"), False)
+            for player in configured.get("players", [])
+            if isinstance(player, dict)
+            for udp_input in player.get("udp_inputs", [])
+            if isinstance(udp_input, dict)
+        )
+        _ensure_ff_tools(required=udp_enabled)
+
+        if _service_exists():
+            nssm_path = _ensure_nssm()
+            _run_command([nssm_path, "restart", SERVICE_NAME])
+
+        print()
+        print("Pulse configuration updated.")
+        return 0
+    except Exception as exc:
+        print(f"ERROR: {exc}")
+        return 1
+
+
+def uninstall_service_command() -> int:
+    if not _is_admin():
+        print("Administrator approval is required to uninstall Pulse.")
+        return _relaunch_as_admin(["--uninstall-service"])
+
+    try:
+        nssm_path = _installed_path("nssm.exe") if os.path.exists(_installed_path("nssm.exe")) else ""
+        _stop_existing_service(nssm_path or None)
+
+        if os.path.exists(INSTALL_DIR) and _prompt_yes_no(f"Delete installed files from {INSTALL_DIR}", False):
+            shutil.rmtree(INSTALL_DIR, ignore_errors=True)
+
+        print("Pulse uninstalled.")
+        return 0
+    except Exception as exc:
+        print(f"ERROR: {exc}")
+        return 1
+
+
+def _is_interactive_session() -> bool:
+    session_name = os.environ.get("SESSIONNAME", "")
+    return sys.stdin.isatty() and session_name.lower() != "services"
+
+
+def interactive_entrypoint() -> int:
+    if os.path.abspath(_base_dir()) != os.path.abspath(INSTALL_DIR) or not _service_exists():
+        return install_service_command()
+
+    print("Pulse Agent")
+    print("1. Install or update service")
+    print("2. Configure node")
+    print("3. Run monitoring now")
+    print("4. Uninstall")
+    print("5. Exit")
+    choice = _prompt_choice("Choose an action", ["1", "2", "3", "4", "5"], "2")
+    if choice == "1":
+        return install_service_command()
+    if choice == "2":
+        return configure_command()
+    if choice == "4":
+        return uninstall_service_command()
+    if choice == "5":
+        return 0
+    return run_agent_loop()
 
 
 # --- Heartbeat ----------------------------------------------------------------
@@ -728,7 +1284,7 @@ def poll_player(node_id: str, hub_url: str, token: str, player: dict[str, Any]) 
 
 # --- Main loop ----------------------------------------------------------------
 
-def main() -> None:
+def run_agent_loop() -> int:
     config = load_config()
 
     node_id = config["node_id"]
@@ -754,8 +1310,30 @@ def main() -> None:
         sleep_time = max(0, poll_interval - elapsed)
         time.sleep(sleep_time)
 
+    return 0
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    if args:
+        command = args[0]
+        if command == "--validate-config":
+            config_path = args[1] if len(args) > 1 else None
+            return validate_config_command(config_path)
+        if command == "--install-service":
+            return install_service_command()
+        if command == "--configure":
+            return configure_command()
+        if command == "--uninstall-service":
+            return uninstall_service_command()
+        if command == "--service-loop":
+            return run_agent_loop()
+
+    if _is_interactive_session():
+        return interactive_entrypoint()
+
+    return run_agent_loop()
+
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--validate-config":
-        sys.exit(validate_config_command())
-    main()
+    sys.exit(main())
