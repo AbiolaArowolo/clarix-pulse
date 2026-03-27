@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
 import { BroadcastHealth, RuntimeHealth } from '../store/db';
 import { wasAlertSentForCurrentIncident, logEvent } from '../store/state';
+import { getAlertSettings } from '../store/alertSettings';
 
 
 interface AlertContext {
@@ -16,17 +17,21 @@ interface AlertContext {
 
 async function sendTelegram(message: string): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
-  if (!token || !chatId) return;
+  if (!token) return;
 
-  try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML' }),
-    });
-  } catch (err) {
-    console.error('[alerting] Telegram send failed:', err);
+  const settings = await getAlertSettings();
+  if (settings.telegramChatIds.length === 0) return;
+
+  for (const chatId of settings.telegramChatIds) {
+    try {
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML' }),
+      });
+    } catch (err) {
+      console.error(`[alerting] Telegram send failed for chat ${chatId}:`, err);
+    }
   }
 }
 
@@ -46,10 +51,14 @@ function getTransporter() {
 
 async function sendEmail(subject: string, body: string): Promise<void> {
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER) return;
+
+  const settings = await getAlertSettings();
+  if (settings.emailRecipients.length === 0) return;
+
   try {
     await getTransporter().sendMail({
       from: process.env.SMTP_FROM ?? 'alerts@example.com',
-      to: process.env.SMTP_TO ?? 'operations@example.com',
+      to: settings.emailRecipients.join(', '),
       subject,
       text: body,
     });

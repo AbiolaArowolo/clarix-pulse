@@ -4,6 +4,7 @@ import { useAlarm } from './hooks/useAlarm';
 import { SiteGroup } from './components/SiteGroup';
 import { AlarmBanner } from './components/AlarmBanner';
 import { InstallBar, InstallBarMode } from './components/InstallBar';
+import { AlertContactsEditor } from './components/AlertContactsEditor';
 import { SiteState, isInactiveInstance } from './lib/types';
 
 const SHOW_INACTIVE_KEY = 'pulse.show_inactive';
@@ -125,6 +126,8 @@ export default function App() {
       </header>
 
       <main className="relative max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+        <AlertContactsEditor />
+
         {visibleSites.length === 0 ? (
           <div className="rounded-3xl border border-slate-800 bg-slate-900/55 px-8 py-16 text-center shadow-[0_24px_80px_rgba(2,6,23,0.35)] backdrop-blur">
             <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-800 bg-slate-950/80 text-xl text-slate-500">

@@ -1,5 +1,6 @@
 import { Request, Response, Router } from 'express';
 import { getNodeDesiredConfig, getPlayerNodeConfig, updatePlayerUdpInputs, UdpInputConfig } from '../config/nodeConfigs';
+import { getAlertSettings, updateAlertSettings } from '../store/alertSettings';
 
 function parseAgentTokens(): Map<string, string> {
   const map = new Map<string, string>();
@@ -77,6 +78,14 @@ function normalizeUdpInputs(playerId: string, udpInputs: unknown): UdpInputConfi
   });
 }
 
+function normalizeOptionalStringList(values: unknown): string[] | null {
+  if (!Array.isArray(values)) return null;
+  return values
+    .slice(0, 3)
+    .map((value) => asString(value))
+    .filter(Boolean);
+}
+
 export function createConfigRouter(): Router {
   const router = Router();
   const tokenToNode = parseAgentTokens();
@@ -109,6 +118,49 @@ export function createConfigRouter(): Router {
       ok: true,
       player: updated,
       appliedOnNextHeartbeat: true,
+    });
+  });
+
+  router.get('/alerts', async (req: Request, res: Response) => {
+    if (!requireWriteKey(req, res)) return;
+
+    return res.json({
+      settings: await getAlertSettings(),
+      capabilities: {
+        emailDeliveryConfigured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER),
+        telegramDeliveryConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN),
+        phoneDeliveryConfigured: false,
+      },
+    });
+  });
+
+  router.post('/alerts', async (req: Request, res: Response) => {
+    if (!requireWriteKey(req, res)) return;
+
+    const emailRecipients = normalizeOptionalStringList(req.body?.emailRecipients);
+    const telegramChatIds = normalizeOptionalStringList(req.body?.telegramChatIds);
+    const phoneNumbers = normalizeOptionalStringList(req.body?.phoneNumbers);
+
+    if (!emailRecipients || !telegramChatIds || !phoneNumbers) {
+      return res.status(400).json({
+        error: 'emailRecipients, telegramChatIds, and phoneNumbers must each be arrays of up to 3 values.',
+      });
+    }
+
+    const settings = await updateAlertSettings({
+      emailRecipients,
+      telegramChatIds,
+      phoneNumbers,
+    });
+
+    return res.json({
+      ok: true,
+      settings,
+      capabilities: {
+        emailDeliveryConfigured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER),
+        telegramDeliveryConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN),
+        phoneDeliveryConfigured: false,
+      },
     });
   });
 

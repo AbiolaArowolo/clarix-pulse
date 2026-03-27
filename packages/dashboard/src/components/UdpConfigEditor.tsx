@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { readStoredConfigWriteKey, storeConfigWriteKey } from '../lib/configWriteKey';
 
 interface UdpInputConfig {
   udpInputId: string;
@@ -16,32 +17,6 @@ interface PlayerConfigPayload {
 
 interface Props {
   playerId: string;
-}
-
-const CONFIG_WRITE_KEY_STORAGE = 'pulse.config_write_key';
-
-function readStoredKey(): string {
-  if (typeof window === 'undefined') return '';
-
-  try {
-    return window.localStorage.getItem(CONFIG_WRITE_KEY_STORAGE) ?? '';
-  } catch {
-    return '';
-  }
-}
-
-function storeKey(value: string) {
-  if (typeof window === 'undefined') return;
-
-  try {
-    if (value) {
-      window.localStorage.setItem(CONFIG_WRITE_KEY_STORAGE, value);
-    } else {
-      window.localStorage.removeItem(CONFIG_WRITE_KEY_STORAGE);
-    }
-  } catch {
-    // Ignore storage failures.
-  }
 }
 
 function ensureFiveInputs(playerId: string, udpInputs: UdpInputConfig[]): UdpInputConfig[] {
@@ -74,7 +49,7 @@ function formatUpdatedAt(value: string | null): string {
 
 export function UdpConfigEditor({ playerId }: Props) {
   const [open, setOpen] = useState(false);
-  const [writeKey, setWriteKey] = useState(() => readStoredKey());
+  const [writeKey, setWriteKey] = useState(() => readStoredConfigWriteKey());
   const [draft, setDraft] = useState<UdpInputConfig[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -106,7 +81,7 @@ export function UdpConfigEditor({ playerId }: Props) {
       const config = payload as PlayerConfigPayload;
       setDraft(ensureFiveInputs(playerId, config.udpInputs ?? []));
       setUpdatedAt(config.updatedAt ?? null);
-      storeKey(writeKey.trim());
+      storeConfigWriteKey(writeKey.trim());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load UDP settings.');
     } finally {
@@ -155,7 +130,7 @@ export function UdpConfigEditor({ playerId }: Props) {
       setDraft(ensureFiveInputs(playerId, config?.udpInputs ?? draft));
       setUpdatedAt(config?.updatedAt ?? new Date().toISOString());
       setNotice('Saved. The node will apply this on its next heartbeat cycle.');
-      storeKey(writeKey.trim());
+      storeConfigWriteKey(writeKey.trim());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save UDP settings.');
     } finally {

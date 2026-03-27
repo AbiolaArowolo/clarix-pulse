@@ -285,6 +285,8 @@ CONFIG_WRITE_KEY=replace-with-a-random-secret
 
 `CONFIG_WRITE_KEY` protects dashboard-side UDP config editing. It is not a stream URL.
 
+Alert recipients can also be managed from the dashboard or mobile PWA once `CONFIG_WRITE_KEY` is set. The hub stores up to 3 email recipients, 3 Telegram chat IDs, and 3 phone numbers without exposing SMTP or bot secrets in the browser.
+
 ---
 
 ## Scalability Notes
