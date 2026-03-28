@@ -1,49 +1,86 @@
-# Pulse - Deployment Guide
+# Pulse - Hub And VPS Deployment Guide
 
-**Version**: 1.0.0  
-**Date**: 2026-03-27
+**Document Date**: 2026-03-27
 
----
+## Purpose
 
-## Infrastructure Requirements
+This guide covers the current production deployment model for the Pulse hub and dashboard.
 
-Typical deployment:
+It reflects the release state after the March 27, 2026 hardening pass:
 
-| Component | Example |
-|---|---|
-| Hub host | Linux VPS, VM, or on-prem server |
-| OS | Ubuntu 24.04 LTS |
-| Domain | `monitor.example.com` |
-| Reverse proxy | Caddy |
-| Process manager | PM2 |
-| DNS / CDN | optional |
+- external state DB path adopted through `PULSE_DB_PATH`
+- dashboard deployed behind Caddy
+- PM2-managed hub process
+- node-local configuration as the source of truth
+- static commissioned node/player registry still in place
 
 ---
 
-## 1. Initial Server Setup
+## Current Production Facts
 
-```bash
-ssh root@your-server-ip
+### Hub Runtime
 
-apt update && apt upgrade -y
+- Node.js + TypeScript
+- PM2 process: `clarix-hub`
+- reverse proxy: Caddy
+- current state store: SQLite via `@libsql/client`
 
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-apt install -y nodejs git
-npm install -g pm2
+### Current Constraints
 
-apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
-apt update && apt install -y caddy
+- nodes are authenticated with `AGENT_TOKENS`
+- allowed player ownership is still enforced through the static hub registry in [packages/hub/src/config/instances.ts](/D:/monitoring/packages/hub/src/config/instances.ts)
+- dashboard mirrors node config but does not currently own machine-local editing
+
+---
+
+## Required Environment Variables
+
+The current environment template is [/.env.example](/D:/monitoring/.env.example).
+
+Important fields:
+
+```env
+HUB_PORT=3001
+PULSE_DB_PATH=/var/lib/clarix-pulse/clarix.db
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM=alerts@yourdomain.com
+SMTP_TO=ops@yourdomain.com
+AGENT_TOKENS=node-a:token-a,node-b:token-b
+CONFIG_WRITE_KEY=
+```
+
+### Database Path
+
+Use an external persistent DB path:
+
+```env
+PULSE_DB_PATH=/var/lib/clarix-pulse/clarix.db
+```
+
+Do not rely on the in-app `packages/hub/data` path for production persistence.
+
+---
+
+## Recommended Server Layout
+
+```text
+/var/www/clarix-pulse                  # application checkout
+/var/lib/clarix-pulse/clarix.db        # external state database
+/root/.pm2                             # PM2 runtime state
 ```
 
 ---
 
-## 2. Clone and Build
+## Initial Build
 
 ```bash
 cd /var/www
-git clone <your-repo-url> clarix-pulse
+git clone <repo-url> clarix-pulse
 cd clarix-pulse
 
 cp .env.example .env.local
@@ -54,21 +91,12 @@ npm run build --workspace=packages/hub
 npm run build --workspace=packages/dashboard
 ```
 
-Fill in:
-
-- `TELEGRAM_*`
-- `SMTP_*`
-- `AGENT_TOKENS`
-- `CONFIG_WRITE_KEY` if dashboard-side UDP editing is desired
-
 ---
 
-## 3. Configure the Reverse Proxy
-
-Example Caddy configuration:
+## Reverse Proxy Example
 
 ```caddy
-monitor.example.com {
+pulse.example.com {
     reverse_proxy /api/* localhost:3001
     reverse_proxy /socket.io/* localhost:3001 {
         header_up Connection {http.upgrade}
@@ -88,81 +116,25 @@ systemctl enable caddy
 
 ---
 
-## 4. Optional DNS / CDN
-
-If using a DNS provider or CDN:
-
-1. create an `A` or `CNAME` record for the dashboard domain
-2. point it to the hub host
-3. enable HTTPS according to your provider and proxy model
-
-Pulse does not require a specific DNS provider.
-
----
-
-## 5. Start the Hub
+## Starting The Hub
 
 ```bash
 cd /var/www/clarix-pulse
-pm2 start packages/hub/dist/index.js --name clarix-hub --env production
+pm2 start packages/hub/dist/index.js --name clarix-hub --update-env
 pm2 save
-pm2 startup
 ```
 
-Check:
+Checks:
 
 ```bash
 pm2 status
-pm2 logs clarix-hub
+pm2 logs clarix-hub --lines 100
+curl -s http://localhost:3001/api/health
 ```
 
 ---
 
-## 6. Verify Deployment
-
-```bash
-curl http://localhost:3001/api/health
-```
-
-Expected:
-
-```json
-{"ok":true,"ts":"..."}
-```
-
-From a browser:
-
-- open `https://monitor.example.com`
-- confirm the dashboard loads
-
-Example heartbeat test:
-
-```bash
-curl -X POST https://monitor.example.com/api/heartbeat \
-  -H "Authorization: Bearer <site-a-node-1-token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "nodeId":"site-a-node-1",
-    "playerId":"site-a-insta-1",
-    "timestamp":"2026-03-27T12:00:00Z",
-    "observations":{
-      "playout_process_up":1,
-      "playout_window_up":1,
-      "internet_up":1,
-      "gateway_up":1
-    }
-  }'
-```
-
----
-
-## 7. Mobile / PWA Install
-
-The dashboard is installable as a PWA. Operators can use browser install prompts or add it to the home screen on mobile devices for faster access during monitoring and alert response.
-
----
-
-## 8. Updates
+## Standard Update Flow
 
 ```bash
 cd /var/www/clarix-pulse
@@ -170,18 +142,92 @@ git pull
 npm install
 npm run build --workspace=packages/hub
 npm run build --workspace=packages/dashboard
-pm2 restart clarix-hub
+pm2 restart clarix-hub --update-env
 systemctl reload caddy
 ```
 
+If using the repo helper:
+
+- [scripts/vps_clean_redeploy.py](/D:/monitoring/scripts/vps_clean_redeploy.py)
+
+That script preserves `.env` / `.env.local` and avoids dragging the bundled app-tree DB back into the fresh deploy.
+
 ---
 
-## 9. Backups
+## Verification Checklist
 
-The main stateful artifact is the SQLite database:
+### Basic Hub Checks
 
 ```bash
-cp packages/hub/data/clarix.db packages/hub/data/clarix.db.bak
+curl -s http://localhost:3001/api/health
+pm2 status --no-color
 ```
 
-Automate backups with your preferred scheduler or host tooling.
+### Public Checks
+
+```bash
+curl -s https://pulse.clarixtech.com/api/health
+```
+
+### Logs
+
+```bash
+pm2 logs clarix-hub --lines 100 --nostream
+```
+
+Look for:
+
+- `[hub] Pulse hub running on port 3001`
+- `[hub] State DB path: /var/lib/clarix-pulse/clarix.db`
+
+---
+
+## Backups And Repair
+
+### Backup
+
+Back up the external DB file, not the old app-tree path:
+
+```bash
+cp /var/lib/clarix-pulse/clarix.db /var/lib/clarix-pulse/clarix.db.bak
+```
+
+### Repair / Reset Helper
+
+Current helper:
+
+- [scripts/vps_repair_state_db.py](/D:/monitoring/scripts/vps_repair_state_db.py)
+
+Important behavior:
+
+- it stops the hub
+- moves the current DB aside with a timestamped suffix
+- starts the hub against a fresh DB
+
+This is a recovery / reset action, not a full logical repair. Persisted hub state such as alert settings, maintenance flags, mirrored config, and thumbnails will need to repopulate.
+
+---
+
+## Known Production Risks
+
+As of March 27, 2026:
+
+- the VPS still shows `SQLITE_CORRUPT` in live hub logs
+- Telegram alert delivery has at least one invalid configured target
+- thumbnail blobs are still stored inline in the hub DB
+- onboarding new nodes still requires static registry and token updates on the hub
+
+These are operationally important and should be tracked in the next engineering phase.
+
+---
+
+## Recommended Next Architecture Step
+
+For the next major phase:
+
+1. move hub persistence to PostgreSQL
+2. replace static registry with DB-backed nodes / players / tokens
+3. add dynamic enrollment for new nodes
+4. keep local node config authoritative for machine-local paths and UDP inputs
+
+For the full timestamped release record, see [docs/RELEASE_KB_2026-03-27.md](/D:/monitoring/docs/RELEASE_KB_2026-03-27.md).

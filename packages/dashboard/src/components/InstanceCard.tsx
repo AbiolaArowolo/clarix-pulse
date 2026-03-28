@@ -7,6 +7,7 @@ import {
   getStatusColor,
   isConnectivityWarning,
   isInactiveInstance,
+  isMonitoringSuppressed,
 } from '../lib/types';
 import { StatusBadge } from './StatusBadge';
 import { StreamThumbnail } from './StreamThumbnail';
@@ -34,12 +35,117 @@ const RUNTIME_LABELS: Record<string, string> = {
   unknown: 'Inactive',
 };
 
+function MonitoringControls({ instance }: Props) {
+  const [monitoringEnabled, setMonitoringEnabled] = useState(instance.monitoringEnabled);
+  const [maintenanceMode, setMaintenanceMode] = useState(instance.maintenanceMode);
+  const [saving, setSaving] = useState<'monitoring' | 'maintenance' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setMonitoringEnabled(instance.monitoringEnabled);
+  }, [instance.monitoringEnabled]);
+
+  useEffect(() => {
+    setMaintenanceMode(instance.maintenanceMode);
+  }, [instance.maintenanceMode]);
+
+  const updateControls = async (patch: { monitoringEnabled?: boolean; maintenanceMode?: boolean }, kind: 'monitoring' | 'maintenance') => {
+    const previous = {
+      monitoringEnabled,
+      maintenanceMode,
+    };
+
+    if (patch.monitoringEnabled !== undefined) {
+      setMonitoringEnabled(patch.monitoringEnabled);
+    }
+    if (patch.maintenanceMode !== undefined) {
+      setMaintenanceMode(patch.maintenanceMode);
+    }
+
+    setSaving(kind);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/config/instance/${instance.playerId}/controls`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(patch),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(String(payload?.error ?? 'Failed to update controls.'));
+      }
+
+      setMonitoringEnabled(Boolean(payload?.controls?.monitoringEnabled ?? patch.monitoringEnabled ?? previous.monitoringEnabled));
+      setMaintenanceMode(Boolean(payload?.controls?.maintenanceMode ?? patch.maintenanceMode ?? previous.maintenanceMode));
+    } catch (err) {
+      setMonitoringEnabled(previous.monitoringEnabled);
+      setMaintenanceMode(previous.maintenanceMode);
+      setError(err instanceof Error ? err.message : 'Failed to update controls.');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  return (
+    <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/35 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Monitoring Controls</p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void updateControls({ maintenanceMode: !maintenanceMode }, 'maintenance')}
+            disabled={saving !== null}
+            className={`rounded-full border px-3 py-1 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+              maintenanceMode
+                ? 'border-orange-500/60 bg-orange-500/15 text-orange-200'
+                : 'border-slate-700 text-slate-300 hover:border-slate-500 hover:text-white'
+            }`}
+          >
+            {saving === 'maintenance' ? 'Saving...' : maintenanceMode ? 'Maintenance on' : 'Maintenance off'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void updateControls({ monitoringEnabled: !monitoringEnabled }, 'monitoring')}
+            disabled={saving !== null}
+            className={`rounded-full border px-3 py-1 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+              monitoringEnabled
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+                : 'border-red-500/60 bg-red-500/15 text-red-200'
+            }`}
+          >
+            {saving === 'monitoring' ? 'Saving...' : monitoringEnabled ? 'Monitoring on' : 'Monitoring off'}
+          </button>
+        </div>
+      </div>
+
+      <p className="mt-2 text-[11px] text-slate-500">
+        Use maintenance to pause alarms and alerts during work. Turn monitoring off to remove this player from live alarming entirely.
+      </p>
+
+      {error && (
+        <div className="mt-2 rounded-xl border border-red-700/40 bg-red-900/20 px-3 py-2 text-[11px] text-red-200">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function InstanceCard({ instance }: Props) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const color = getStatusColor(instance);
   const headline = getHeadlineStatus(instance);
   const inactive = isInactiveInstance(instance);
   const connectivityWarning = isConnectivityWarning(instance);
+  const monitoringSuppressed = isMonitoringSuppressed(instance);
+  const showUdpMonitoring = instance.udpMonitoringEnabled && instance.udpInputCount > 0;
+  const udpAllHealthy = showUdpMonitoring && instance.udpHealthyInputCount >= instance.udpInputCount;
+  const udpBadgeColor = showUdpMonitoring
+    ? (udpAllHealthy ? 'green' : instance.udpHealthyInputCount > 0 ? 'yellow' : 'red')
+    : 'gray';
 
   useEffect(() => {
     const interval = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -62,18 +168,26 @@ export function InstanceCard({ instance }: Props) {
     gray: 'shadow-[0_16px_30px_rgba(15,23,42,0.16)]',
   };
 
-  const udpLabel = instance.udpMonitoringEnabled
-    ? `UDP matrix: ${instance.udpHealthyInputCount}/${Math.max(instance.udpInputCount, 1)} healthy`
-    : instance.udpMonitoringCapable
-      ? 'UDP matrix: configurable'
-      : 'UDP matrix: off';
-  const modeLabel = instance.udpMonitoringEnabled ? 'Mode: local + UDP' : 'Mode: local only';
+  const udpLabel = `UDP matrix: ${instance.udpHealthyInputCount}/${Math.max(instance.udpInputCount, 1)} healthy`;
+  const modeLabel = !instance.monitoringEnabled
+    ? 'Mode: monitoring off'
+    : instance.maintenanceMode
+      ? 'Mode: maintenance'
+      : showUdpMonitoring ? 'Mode: local + stream' : 'Mode: local only';
   const runtimeLabel = inactive
     ? 'Runtime: inactive'
-    : `Runtime: ${RUNTIME_LABELS[instance.runtimeHealth] ?? instance.runtimeHealth}`;
+    : !instance.monitoringEnabled
+      ? 'Runtime: monitoring off'
+      : instance.maintenanceMode
+        ? 'Runtime: maintenance'
+        : `Runtime: ${RUNTIME_LABELS[instance.runtimeHealth] ?? instance.runtimeHealth}`;
   const connectivityLabel = inactive
     ? 'Net: inactive'
-    : `Net: ${instance.connectivityHealth}`;
+    : !instance.monitoringEnabled
+      ? 'Net: monitoring off'
+      : instance.maintenanceMode
+        ? 'Net: maintenance'
+        : `Net: ${instance.connectivityHealth}`;
   const heartbeatLabel = inactive ? 'inactive' : formatAge(instance.lastHeartbeatAt, nowMs);
 
   return (
@@ -101,16 +215,12 @@ export function InstanceCard({ instance }: Props) {
           color={getConnectivityBadgeColor(instance)}
           label={connectivityLabel}
         />
-        <span className="rounded-full border border-slate-700 px-2 py-0.5 text-xs text-slate-400">
-          {modeLabel}
-        </span>
-        <span className="rounded-full border border-slate-700 px-2 py-0.5 text-xs text-slate-400">
-          {udpLabel}
-        </span>
-        {instance.udpSelectedInputId && (
-          <span className="rounded-full border border-slate-700 px-2 py-0.5 text-xs text-slate-400">
-            Selected on node: {instance.udpSelectedInputId}
-          </span>
+        <StatusBadge color={monitoringSuppressed ? 'gray' : showUdpMonitoring ? udpBadgeColor : 'gray'} label={modeLabel} />
+        {!monitoringSuppressed && showUdpMonitoring && (
+          <StatusBadge color={udpBadgeColor} label={udpLabel} />
+        )}
+        {!monitoringSuppressed && showUdpMonitoring && instance.udpSelectedInputId && (
+          <StatusBadge color={udpBadgeColor} label={`Selected on node: ${instance.udpSelectedInputId}`} />
         )}
       </div>
 
@@ -126,15 +236,29 @@ export function InstanceCard({ instance }: Props) {
         </div>
       )}
 
+      {!instance.monitoringEnabled && (
+        <div className="mt-3 rounded-xl border border-slate-700/50 bg-slate-900/40 px-3 py-2 text-[11px] text-slate-300">
+          Monitoring is turned off for this player. Alarm banner, email, and Telegram alerts stay suppressed until you turn monitoring back on.
+        </div>
+      )}
+
+      {instance.maintenanceMode && instance.monitoringEnabled && (
+        <div className="mt-3 rounded-xl border border-orange-700/40 bg-orange-900/15 px-3 py-2 text-[11px] text-orange-200">
+          Maintenance mode is on. Alarm banner, email, and Telegram alerts are paused for this player until maintenance is turned off.
+        </div>
+      )}
+
       <div className="mt-3 text-xs text-slate-500">
         Last heartbeat: <span className="text-slate-300">{heartbeatLabel}</span>
       </div>
+
+      <MonitoringControls instance={instance} />
 
       {instance.udpMonitoringCapable && (
         <UdpConfigEditor playerId={instance.playerId} />
       )}
 
-      {(instance.udpMonitoringEnabled || instance.hasThumbnail) && (
+      {!monitoringSuppressed && showUdpMonitoring && instance.hasThumbnail && (
         <StreamThumbnail
           dataUrl={instance.thumbnailDataUrl}
           capturedAt={instance.thumbnailAt}

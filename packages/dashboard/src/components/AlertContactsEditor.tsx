@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { readStoredConfigWriteKey, storeConfigWriteKey } from '../lib/configWriteKey';
 
 interface AlertSettingsPayload {
   settings: {
     emailRecipients: string[];
     telegramChatIds: string[];
     phoneNumbers: string[];
+    emailEnabled: boolean;
+    telegramEnabled: boolean;
+    phoneEnabled: boolean;
     updatedAt: string | null;
   };
   capabilities: {
@@ -13,13 +15,32 @@ interface AlertSettingsPayload {
     telegramDeliveryConfigured: boolean;
     phoneDeliveryConfigured: boolean;
   };
+  error?: string;
+}
+
+interface TelegramTarget {
+  chatId: string;
+  recipient: string;
+  title: string;
+  subtitle: string;
+}
+
+interface TelegramTargetsPayload {
+  targets: TelegramTarget[];
+  configured: boolean;
+  error?: string;
 }
 
 interface ContactDraft {
   emailRecipients: string[];
   telegramChatIds: string[];
   phoneNumbers: string[];
+  emailEnabled: boolean;
+  telegramEnabled: boolean;
+  phoneEnabled: boolean;
 }
+
+type ContactListField = 'emailRecipients' | 'telegramChatIds' | 'phoneNumbers';
 
 const EMPTY_CONTACTS = ['', '', ''];
 
@@ -56,14 +77,34 @@ function normalizeDraft(values: string[]): string[] {
   return normalized.slice(0, 3);
 }
 
+async function readJsonResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
+  const text = await response.text();
+
+  if (!text.trim()) {
+    return {} as T;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    if (text.trim().startsWith('<')) {
+      throw new Error('The server returned an HTML error page. Refresh and try again.');
+    }
+
+    throw new Error(fallbackMessage);
+  }
+}
+
 export function AlertContactsEditor() {
   const [open, setOpen] = useState(false);
-  const [writeKey, setWriteKey] = useState(() => readStoredConfigWriteKey());
   const [draft, setDraft] = useState<ContactDraft>({
     emailRecipients: [...EMPTY_CONTACTS],
     telegramChatIds: [...EMPTY_CONTACTS],
-    phoneNumbers: [...EMPTY_CONTACTS],
-  });
+      phoneNumbers: [...EMPTY_CONTACTS],
+      emailEnabled: true,
+      telegramEnabled: true,
+      phoneEnabled: false,
+    });
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [capabilities, setCapabilities] = useState<AlertSettingsPayload['capabilities']>({
     emailDeliveryConfigured: false,
@@ -72,8 +113,11 @@ export function AlertContactsEditor() {
   });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [discoveringTelegram, setDiscoveringTelegram] = useState(false);
+  const [telegramTargets, setTelegramTargets] = useState<TelegramTarget[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [loadedOnce, setLoadedOnce] = useState(false);
 
   const summary = useMemo(() => ({
     emails: normalizeDraft(draft.emailRecipients).length,
@@ -81,50 +125,7 @@ export function AlertContactsEditor() {
     phones: normalizeDraft(draft.phoneNumbers).length,
   }), [draft]);
 
-  const loadSettings = async () => {
-    if (!writeKey.trim()) {
-      setError('Enter the config write key to load alert contacts.');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    setNotice(null);
-
-    try {
-      const response = await fetch('/api/config/alerts', {
-        headers: {
-          'x-config-write-key': writeKey.trim(),
-        },
-      });
-      const payload = await response.json() as AlertSettingsPayload & { error?: string };
-      if (!response.ok) {
-        throw new Error(String(payload?.error ?? 'Failed to load alert contacts.'));
-      }
-
-      const data = payload as AlertSettingsPayload;
-      setDraft({
-        emailRecipients: padContacts(data.settings.emailRecipients ?? []),
-        telegramChatIds: padContacts(data.settings.telegramChatIds ?? []),
-        phoneNumbers: padContacts(data.settings.phoneNumbers ?? []),
-      });
-      setUpdatedAt(data.settings.updatedAt ?? null);
-      setCapabilities(data.capabilities);
-      storeConfigWriteKey(writeKey.trim());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load alert contacts.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!open || loading || !writeKey.trim()) return;
-    if (updatedAt || error || notice) return;
-    void loadSettings();
-  }, [error, loading, notice, open, updatedAt, writeKey]);
-
-  const updateField = (channel: keyof ContactDraft, index: number, value: string) => {
+  const updateField = (channel: ContactListField, index: number, value: string) => {
     setDraft((current) => ({
       ...current,
       [channel]: current[channel].map((entry, entryIndex) => (
@@ -133,12 +134,80 @@ export function AlertContactsEditor() {
     }));
   };
 
-  const saveSettings = async () => {
-    if (!writeKey.trim()) {
-      setError('Enter the config write key before saving.');
-      return;
-    }
+  const updateToggle = (channel: 'emailEnabled' | 'telegramEnabled' | 'phoneEnabled', value: boolean) => {
+    setDraft((current) => ({
+      ...current,
+      [channel]: value,
+    }));
+  };
 
+  const loadTelegramTargets = async () => {
+    setDiscoveringTelegram(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/config/alerts/telegram-targets');
+      const payload = await readJsonResponse<TelegramTargetsPayload>(
+        response,
+        'Failed to load Telegram conversations.',
+      );
+      if (!response.ok) {
+        throw new Error(String(payload?.error ?? 'Failed to load Telegram conversations.'));
+      }
+
+      setTelegramTargets(Array.isArray(payload.targets) ? payload.targets : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load Telegram conversations.');
+    } finally {
+      setDiscoveringTelegram(false);
+    }
+  };
+
+  const loadSettings = async () => {
+    setLoading(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      const response = await fetch('/api/config/alerts');
+      const payload = await readJsonResponse<AlertSettingsPayload>(
+        response,
+        'Failed to load alert contacts.',
+      );
+      if (!response.ok) {
+        throw new Error(String(payload?.error ?? 'Failed to load alert contacts.'));
+      }
+
+      setDraft({
+        emailRecipients: padContacts(payload.settings.emailRecipients ?? []),
+        telegramChatIds: padContacts(payload.settings.telegramChatIds ?? []),
+        phoneNumbers: padContacts(payload.settings.phoneNumbers ?? []),
+        emailEnabled: payload.settings.emailEnabled ?? true,
+        telegramEnabled: payload.settings.telegramEnabled ?? true,
+        phoneEnabled: payload.settings.phoneEnabled ?? false,
+      });
+      setUpdatedAt(payload.settings.updatedAt ?? null);
+      setCapabilities(payload.capabilities);
+      setLoadedOnce(true);
+
+      if (payload.capabilities.telegramDeliveryConfigured) {
+        void loadTelegramTargets();
+      } else {
+        setTelegramTargets([]);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load alert contacts.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!open || loading || loadedOnce) return;
+    void loadSettings();
+  }, [loadedOnce, loading, open]);
+
+  const saveSettings = async () => {
     setSaving(true);
     setError(null);
     setNotice(null);
@@ -148,29 +217,35 @@ export function AlertContactsEditor() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-config-write-key': writeKey.trim(),
         },
         body: JSON.stringify({
           emailRecipients: normalizeDraft(draft.emailRecipients),
           telegramChatIds: normalizeDraft(draft.telegramChatIds),
           phoneNumbers: normalizeDraft(draft.phoneNumbers),
+          emailEnabled: draft.emailEnabled,
+          telegramEnabled: draft.telegramEnabled,
+          phoneEnabled: draft.phoneEnabled,
         }),
       });
-      const payload = await response.json() as AlertSettingsPayload & { error?: string };
+      const payload = await readJsonResponse<AlertSettingsPayload>(
+        response,
+        'Failed to save alert contacts.',
+      );
       if (!response.ok) {
         throw new Error(String(payload?.error ?? 'Failed to save alert contacts.'));
       }
 
-      const data = payload as AlertSettingsPayload;
       setDraft({
-        emailRecipients: padContacts(data.settings.emailRecipients ?? []),
-        telegramChatIds: padContacts(data.settings.telegramChatIds ?? []),
-        phoneNumbers: padContacts(data.settings.phoneNumbers ?? []),
+        emailRecipients: padContacts(payload.settings.emailRecipients ?? []),
+        telegramChatIds: padContacts(payload.settings.telegramChatIds ?? []),
+        phoneNumbers: padContacts(payload.settings.phoneNumbers ?? []),
+        emailEnabled: payload.settings.emailEnabled ?? true,
+        telegramEnabled: payload.settings.telegramEnabled ?? true,
+        phoneEnabled: payload.settings.phoneEnabled ?? false,
       });
-      setUpdatedAt(data.settings.updatedAt ?? new Date().toISOString());
-      setCapabilities(data.capabilities);
-      setNotice('Saved. These contacts now apply to alerts from all monitored nodes.');
-      storeConfigWriteKey(writeKey.trim());
+      setUpdatedAt(payload.settings.updatedAt ?? new Date().toISOString());
+      setCapabilities(payload.capabilities);
+      setNotice('Saved. These contacts now apply to alerts from every monitored node.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save alert contacts.');
     } finally {
@@ -178,14 +253,32 @@ export function AlertContactsEditor() {
     }
   };
 
+  const addTelegramTarget = (recipient: string) => {
+    setDraft((current) => {
+      if (current.telegramChatIds.includes(recipient)) {
+        return current;
+      }
+
+      const next = [...current.telegramChatIds];
+      const firstEmptyIndex = next.findIndex((entry) => !entry.trim());
+      if (firstEmptyIndex >= 0) {
+        next[firstEmptyIndex] = recipient;
+      } else {
+        next[0] = recipient;
+      }
+
+      return {
+        ...current,
+        telegramChatIds: next.slice(0, 3),
+      };
+    });
+  };
+
   return (
     <section className="rounded-3xl border border-slate-800 bg-slate-900/58 p-4 shadow-[0_20px_60px_rgba(2,6,23,0.28)] backdrop-blur">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-100">Alert Contacts</h2>
-          <p className="mt-1 text-sm text-slate-400">
-            Configure who receives hub-wide alert notifications from every node.
-          </p>
           <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">
             Last saved {formatUpdatedAt(updatedAt)}
           </p>
@@ -217,113 +310,147 @@ export function AlertContactsEditor() {
 
       {open && (
         <div className="mt-4 space-y-4">
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-            <input
-              type="password"
-              value={writeKey}
-              onChange={(event) => setWriteKey(event.target.value)}
-              placeholder="Config write key"
-              className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-teal-500"
-            />
-            <button
-              type="button"
-              onClick={() => void loadSettings()}
-              disabled={loading}
-              className="rounded-xl border border-teal-600/50 bg-teal-700/20 px-3 py-2 text-sm font-medium text-teal-100 transition-colors hover:border-teal-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {loading ? 'Loading...' : 'Load'}
-            </button>
-          </div>
+          {loading ? (
+            <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-4 text-sm text-slate-400">
+              Loading alert contacts...
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-4 lg:grid-cols-3">
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/45 p-3">
+                  <div className="mb-3 flex items-start justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Email Recipients</p>
+                    <button
+                      type="button"
+                      onClick={() => updateToggle('emailEnabled', !draft.emailEnabled)}
+                      className={`rounded-full border px-3 py-1 text-[11px] font-medium transition-colors ${
+                        draft.emailEnabled
+                          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+                          : 'border-slate-700 text-slate-400'
+                      }`}
+                    >
+                      {draft.emailEnabled ? 'Enabled' : 'Disabled'}
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {draft.emailRecipients.map((value, index) => (
+                      <input
+                        key={`email-${index}`}
+                        type="email"
+                        value={value}
+                        onChange={(event) => updateField('emailRecipients', index, event.target.value)}
+                        placeholder={`Email ${index + 1}`}
+                        className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-teal-500"
+                      />
+                    ))}
+                  </div>
+                </div>
 
-          <div className="grid gap-4 lg:grid-cols-3">
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/45 p-3">
-              <div className="mb-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Email Recipients</p>
-                <p className="mt-1 text-[11px] text-slate-500">
-                  One to three optional email destinations for SMTP alert delivery.
-                </p>
-              </div>
-              <div className="space-y-2">
-                {draft.emailRecipients.map((value, index) => (
-                  <input
-                    key={`email-${index}`}
-                    type="email"
-                    value={value}
-                    onChange={(event) => updateField('emailRecipients', index, event.target.value)}
-                    placeholder={`Email ${index + 1}`}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-teal-500"
-                  />
-                ))}
-              </div>
-            </div>
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/45 p-3">
+                  <div className="mb-3 flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Telegram Recipients</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => updateToggle('telegramEnabled', !draft.telegramEnabled)}
+                        className={`rounded-full border px-3 py-1 text-[11px] font-medium transition-colors ${
+                          draft.telegramEnabled
+                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+                            : 'border-slate-700 text-slate-400'
+                        }`}
+                      >
+                        {draft.telegramEnabled ? 'Enabled' : 'Disabled'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void loadTelegramTargets()}
+                        disabled={discoveringTelegram || !capabilities.telegramDeliveryConfigured}
+                        className="rounded-full border border-slate-700 px-3 py-1 text-[11px] font-medium text-slate-300 transition-colors hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {discoveringTelegram ? 'Refreshing...' : 'Refresh'}
+                      </button>
+                    </div>
+                  </div>
 
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/45 p-3">
-              <div className="mb-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Telegram Targets</p>
-                <p className="mt-1 text-[11px] text-slate-500">
-                  One to three optional Telegram chat IDs. A bot token still has to be configured on the hub.
-                </p>
-              </div>
-              <div className="space-y-2">
-                {draft.telegramChatIds.map((value, index) => (
-                  <input
-                    key={`telegram-${index}`}
-                    type="text"
-                    value={value}
-                    onChange={(event) => updateField('telegramChatIds', index, event.target.value)}
-                    placeholder={`Telegram chat ID ${index + 1}`}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-teal-500"
-                  />
-                ))}
-              </div>
-            </div>
+                  <div className="space-y-2">
+                    {draft.telegramChatIds.map((value, index) => (
+                      <input
+                        key={`telegram-${index}`}
+                        type="text"
+                        value={value}
+                        onChange={(event) => updateField('telegramChatIds', index, event.target.value)}
+                        placeholder={`Telegram ${index + 1}`}
+                        className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-teal-500"
+                      />
+                    ))}
+                  </div>
 
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/45 p-3">
-              <div className="mb-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Phone Contacts</p>
-                <p className="mt-1 text-[11px] text-slate-500">
-                  One to three optional phone numbers stored for escalation workflows and future SMS or call integration.
-                </p>
-              </div>
-              <div className="space-y-2">
-                {draft.phoneNumbers.map((value, index) => (
-                  <input
-                    key={`phone-${index}`}
-                    type="tel"
-                    value={value}
-                    onChange={(event) => updateField('phoneNumbers', index, event.target.value)}
-                    placeholder={`Phone ${index + 1}`}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-teal-500"
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
+                  {telegramTargets.length > 0 && (
+                    <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                      <div className="space-y-2">
+                        {telegramTargets.map((target) => (
+                          <button
+                            key={target.chatId}
+                            type="button"
+                            onClick={() => addTelegramTarget(target.recipient)}
+                            className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-left transition-colors hover:border-teal-500"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium text-slate-100">{target.title}</p>
+                              <p className="truncate text-[11px] text-slate-500">{target.subtitle}</p>
+                            </div>
+                            <span className="shrink-0 rounded-full border border-teal-500/40 px-2 py-1 text-[11px] text-teal-200">
+                              Add
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
 
-          <div className="grid gap-2 text-[11px] text-slate-500 sm:grid-cols-3">
-            <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2">
-              SMTP delivery: <span className={capabilities.emailDeliveryConfigured ? 'text-emerald-300' : 'text-yellow-300'}>
-                {capabilities.emailDeliveryConfigured ? 'configured' : 'not configured'}
-              </span>
-            </div>
-            <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2">
-              Telegram bot: <span className={capabilities.telegramDeliveryConfigured ? 'text-emerald-300' : 'text-yellow-300'}>
-                {capabilities.telegramDeliveryConfigured ? 'configured' : 'not configured'}
-              </span>
-            </div>
-            <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2">
-              Phone delivery: <span className="text-yellow-300">stored only</span>
-            </div>
-          </div>
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/45 p-3">
+                  <div className="mb-3 flex items-start justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Phone Contacts</p>
+                    <button
+                      type="button"
+                      onClick={() => updateToggle('phoneEnabled', !draft.phoneEnabled)}
+                      className={`rounded-full border px-3 py-1 text-[11px] font-medium transition-colors ${
+                        draft.phoneEnabled
+                          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+                          : 'border-slate-700 text-slate-400'
+                      }`}
+                    >
+                      {draft.phoneEnabled ? 'Enabled' : 'Disabled'}
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {draft.phoneNumbers.map((value, index) => (
+                      <input
+                        key={`phone-${index}`}
+                        type="tel"
+                        value={value}
+                        onChange={(event) => updateField('phoneNumbers', index, event.target.value)}
+                        placeholder={`Phone ${index + 1}`}
+                        className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-teal-500"
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
 
-          <button
-            type="button"
-            onClick={() => void saveSettings()}
-            disabled={saving}
-            className="w-full rounded-xl border border-yellow-600/60 bg-yellow-500/15 px-4 py-2 text-sm font-semibold text-yellow-100 transition-colors hover:border-yellow-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {saving ? 'Saving...' : 'Save alert contacts'}
-          </button>
+              <button
+                type="button"
+                onClick={() => void saveSettings()}
+                disabled={saving}
+                className="w-full rounded-xl border border-yellow-600/60 bg-yellow-500/15 px-4 py-2 text-sm font-semibold text-yellow-100 transition-colors hover:border-yellow-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {saving ? 'Saving...' : 'Apply alert contacts'}
+              </button>
+            </>
+          )}
 
           {notice && (
             <div className="rounded-xl border border-emerald-700/40 bg-emerald-900/15 px-3 py-2 text-xs text-emerald-200">

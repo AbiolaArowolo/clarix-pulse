@@ -1,64 +1,62 @@
 # Pulse - Tech Stack
 
-**Version**: 1.0.0  
-**Date**: 2026-03-27
-
----
+**Document Date**: 2026-03-27
 
 ## Hub
 
-| Layer | Choice | Version |
-|---|---|---|
-| Runtime | Node.js | 20 LTS |
-| Language | TypeScript | 5.x |
-| HTTP framework | Express | 4.x |
-| Realtime transport | Socket.IO | 4.x |
-| Database client | `@libsql/client` | 0.14.x |
-| Email | Nodemailer | 6.x |
-| Process manager | PM2 | 5.x |
+| Layer | Current Choice |
+|---|---|
+| Runtime | Node.js 20 LTS |
+| Language | TypeScript |
+| HTTP framework | Express |
+| Realtime transport | Socket.IO |
+| Current DB client | `@libsql/client` |
+| Current DB engine | SQLite |
+| Email | Nodemailer |
+| Process manager | PM2 |
+
+Current note:
+
+- SQLite is still the active hub store
+- PostgreSQL is the recommended next-step store for the hub control plane
 
 ## Dashboard
 
-| Layer | Choice | Version |
-|---|---|---|
-| Build tool | Vite | 5.x |
-| Framework | React | 18.x |
-| Language | TypeScript | 5.x |
-| Styling | Tailwind CSS | 3.x |
-| Realtime client | `socket.io-client` | 4.x |
-| Mobile install | PWA support | browser-native |
-
-## Local Agent
-
-| Layer | Choice | Version |
-|---|---|---|
-| Language | Python | 3.11 |
-| HTTP client | requests | 2.x |
-| Process inspection | psutil | 5.x |
-| Windows window inspection | pywin32 | latest |
-| YAML config | PyYAML | 6.x |
-| Image handling | Pillow | 10.x |
-| Packaging | PyInstaller | 6.x |
-| Windows service wrapper | NSSM | staged in bundle |
-
-## Infrastructure
-
-| Layer | Typical Choice |
+| Layer | Current Choice |
 |---|---|
-| Hub host | Linux VPS, VM, or on-prem server |
-| OS | Ubuntu 24.04 LTS or similar |
-| Reverse proxy | Caddy 2.x |
-| Database | SQLite |
-| Optional DNS / CDN | provider of choice |
-| UDP media probe | ffmpeg / ffprobe on node |
+| Build tool | Vite |
+| Framework | React |
+| Language | TypeScript |
+| Realtime client | `socket.io-client` |
+| Install model | PWA / browser-native install |
 
-## Repository Shape
+## Windows Agent
 
-| Item | Value |
+| Layer | Current Choice |
 |---|---|
-| Structure | npm workspaces monorepo |
-| Hub package | `packages/hub` |
-| Dashboard package | `packages/dashboard` |
-| Agent package | `packages/agent` |
-| Deployment configs | `configs/` |
-| Automation scripts | `scripts/` |
+| Language | Python 3.11 |
+| Packaging | PyInstaller |
+| HTTP client | requests |
+| Process inspection | psutil |
+| Windows integration | pywin32 |
+| YAML | PyYAML |
+| Image handling | Pillow |
+| Service wrapper | NSSM |
+| Media probing | ffmpeg / ffprobe bundled in installer |
+
+## Operational Infrastructure
+
+| Layer | Current Choice |
+|---|---|
+| Hub host | Linux VPS / VM / on-prem server |
+| Reverse proxy | Caddy |
+| TLS / public edge | operator choice |
+| Persistent hub DB path | `PULSE_DB_PATH` |
+| Node-local config UI | built into the agent at `127.0.0.1:3210` |
+
+## Current Architecture Direction
+
+- local YAML on the node remains the source of truth for machine-local config
+- hub persistence is currently SQLite but under review for PostgreSQL migration
+- prepared per-node bundles are the current rollout format
+- generic installer plus dynamic enrollment is the next major onboarding target

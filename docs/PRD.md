@@ -1,185 +1,115 @@
-# Pulse - Product Requirements Document
+# Pulse - Product Requirements Summary
 
-**Project**: Pulse  
-**Version**: 1.0.0  
-**Date**: 2026-03-27  
-**Author**: Pulse Team  
-**Status**: Approved - implementation in progress
+**Document Date**: 2026-03-27  
+**Status**: Current release summary with next-phase direction
 
----
+## Problem
 
-## 1. Problem Statement
+Broadcast operators need a reliable way to monitor playout nodes across multiple sites without confusing runtime faults, connectivity faults, and off-air conditions.
 
-Broadcast operations teams often run multiple playout nodes across one or more sites without a single reliable monitoring plane. That creates blind spots around off-air events, software stalls, node outages, and delayed incident response.
+Pulse addresses this with:
 
-Pulse solves this by providing a shared monitoring platform for playout environments, whether they belong to one broadcaster, one managed services provider, or multiple businesses operating in different regions.
-
----
-
-## 2. Goals
-
-Build **Pulse** as a production-grade monitoring platform that provides:
-
-- real-time visibility of all monitored playout players from a single dashboard
-- automatic alerting when a player goes or is likely to go off-air
-- clean separation of playout failure from network failure
-- a lightweight Windows agent deployable without a separate Python install
-- core identity based on `node_id` and `player_id`
-- optional UDP stream confidence probes per player
-- a deployment model that scales across customers, sites, and regions
+- a Windows node agent
+- a central hub state engine
+- a live dashboard / PWA
+- alerting for critical and recovery events
 
 ---
 
-## 3. Users
+## Current Release Goals
 
-| User | Context | Primary Need |
-|---|---|---|
-| Broadcast operator | On call, checking phone or desktop | Know immediately when a player is off-air |
-| Technical director | Office, NOC, or remote | Understand root cause and scope quickly |
-| Support engineer | Managed service or internal ops | Receive reliable alerting and recovery signals |
-| Platform administrator | Deployment and maintenance | Roll out node bundles consistently across environments |
+The current release is optimized for:
 
----
-
-## 4. Deployment Model
-
-Pulse supports:
-
-- single-player, single-node installations
-- multi-node sites with mixed playout software
-- multi-site regional deployments
-- one platform serving many businesses with separate configs and tokens
-
-### Example Reference Topology
-
-| Node ID | Site ID | Players | Software Mix | UDP |
-|---|---|---|---|---|
-| `site-a-node-1` | `site-a` | `site-a-insta-1`, `site-a-insta-2` | Insta | optional |
-| `site-a-node-2` | `site-a` | `site-a-admax-1` | Admax | optional |
-| `site-b-node-1` | `site-b` | `site-b-admax-1`, `site-b-admax-2` | Admax | enabled on selected players |
-| `site-c-node-1` | `site-c` | `site-c-insta-1` | Insta | optional |
-
-Each node may carry multiple players, and each player may have zero to five UDP inputs.
+- stable monitoring of commissioned nodes
+- correct play / pause / stop runtime behavior
+- one-click Windows installation
+- local node configuration through a persistent local UI
+- remote visibility through a dashboard mirror
+- consistent release bundles across all prepared nodes
 
 ---
 
-## 5. Features
+## Current Product Scope
 
-### 5.1 Core
+### Shipped / Active
 
-| # | Feature | Priority |
-|---|---|---|
-| F1 | Real-time dashboard grouped by site and node | P0 |
-| F2 | Per-player health cards | P0 |
-| F3 | Separate `broadcast_health`, `runtime_health`, and `connectivity_health` | P0 |
-| F4 | Audio and vibration alarm for critical states | P0 |
-| F5 | Telegram alerting for critical and recovery events | P0 |
-| F6 | Email alerting for critical and recovery events | P0 |
-| F7 | Windows agent auto-start as a service | P0 |
-| F8 | Agent packaged as a standalone `.exe` | P0 |
-| F9 | Deep log monitoring for supported playout software | P0 |
-| F10 | Process presence and window presence checks | P0 |
-| F11 | Stall detection from local runtime files | P0 |
-| F12 | Content error detection from error logs | P1 |
-| F13 | Optional UDP stream confidence probing | P1 |
-| F14 | Thumbnail snapshots for UDP-enabled players | P1 |
-| F15 | Heartbeat stale/offline indicator | P0 |
-| F16 | Installable mobile-responsive PWA dashboard | P1 |
-| F17 | SQLite-backed alert dedup across hub restarts | P0 |
-| F18 | Hub-managed UDP configuration sync back to the node | P1 |
+- real-time dashboard grouped by site and player
+- separate broadcast, runtime, and connectivity health
+- Windows service agent
+- Insta and Admax monitoring
+- optional UDP monitoring per player
+- thumbnail previews for UDP-enabled monitoring
+- maintenance mode
+- monitoring enable / disable control
+- Telegram and email alerting
+- alert-channel enable / disable toggles
+- local node UI as the source of truth for machine-local config
+- mirrored node config in the dashboard
 
-### 5.2 Future
+### Current Operational Constraints
 
-- maintenance mode per player
-- user authentication and role-based access
-- historical event views and reporting
-- controlled recovery automation after prolonged failure
-- multi-tenant dashboard segmentation
+- hub onboarding is still static and commissioned in code / env
+- new nodes still need registry and token work on the hub
+- hub persistence is still SQLite
+- dashboard does not currently own machine-local config editing
 
 ---
 
-## 6. Non-Goals
+## User Roles
 
-- full browser video playback of monitored channels
-- automatic restart or remediation by default
-- support for non-Windows playout nodes in v1
-- public-facing consumer status pages
-
----
-
-## 7. Health State Model
-
-Pulse tracks three independent health domains:
-
-```text
-broadcast_health:    healthy | degraded | off_air_likely | off_air_confirmed | unknown
-runtime_health:      healthy | paused | restarting | stalled | stopped | content_error | unknown
-connectivity_health: online | stale | offline
-```
-
-The hub is the only state engine. Agents send observations, not final state labels.
-
-### Dashboard Color Mapping
-
-| Color | Condition |
+| User | Need |
 |---|---|
-| Green | broadcast healthy and runtime healthy |
-| Yellow | broadcast degraded or runtime warning state |
-| Red | off-air likely or off-air confirmed |
-| Orange | connectivity stale |
-| Gray | connectivity offline or node not commissioned |
+| Operator | See off-air risk immediately and react quickly |
+| Engineer | Diagnose runtime vs connectivity vs signal issues |
+| Platform admin | Build and roll out bundles consistently |
+| Support lead | Preserve operational memory and release notes |
 
 ---
 
-## 8. Monitoring Protocol
+## Current Release Requirements
 
-On each poll interval, the agent can:
+### Monitoring
 
-1. check process and window presence
-2. tail new log lines for runtime tokens
-3. inspect local runtime files for stall or pause signals
-4. check content error logs
-5. probe local network and internet reachability
-6. run UDP confidence checks when UDP inputs are enabled
-7. POST one heartbeat per player to the hub
+- Process, window, file, and log monitoring must remain active for supported playout types.
+- Optional UDP monitoring must remain per-player, not global.
+- Pause should show yellow immediately and red after sustained duration.
+- Stop should show yellow immediately and red after sustained duration.
+- Player shutdown should go red immediately.
 
----
+### Configuration Ownership
 
-## 9. Constraints
+- The node must own machine-local settings such as paths and UDP URLs.
+- The hub must own operational controls such as maintenance and monitoring enabled state.
+- The dashboard must clearly reflect mirrored node settings and current controls.
 
-- internet loss must not be treated as off-air by itself
-- all normal communication is outbound from agent to hub
-- the same product must work for one node or many nodes
-- deployment-specific labels, domains, and tokens must live in config, not product docs
-- node bundles must be rebuildable from a shared baseline
+### Installer Consistency
 
----
+- Every release bundle must use the same runtime baseline.
+- Bundle-specific variation should be limited to config and labeling.
 
-## 10. Success Metrics
+### Knowledge Base
 
-| Metric | Target |
-|---|---|
-| Time from off-air event to critical alert | < 30 seconds |
-| False critical alerts | < 1 per week per deployment |
-| Agent uptime | > 99.9% |
-| Hub availability | > 99.9% |
-| Alert dedup correctness | 100% |
+- Major release and debug passes must be documented with exact timestamps, outcomes, artifacts, risks, and next actions.
 
 ---
 
-## 11. Deployment
+## Future Requirements
 
-| Component | Typical Placement | Runtime |
-|---|---|---|
-| Hub + Dashboard | Linux VPS, VM, or on-prem server | Node.js + PM2 + reverse proxy |
-| Database | Same host as hub | SQLite |
-| Agent | Each Windows playout node | Windows service |
-| DNS / CDN | Operator choice | optional |
+The next major product phase should add:
+
+- dynamic node enrollment / registration
+- DB-backed inventory for nodes and players
+- PostgreSQL hub persistence
+- cleaner desired-vs-current config flow
+- optional remote config editing with version / ack safety
 
 ---
 
-## 12. Revision History
+## Success Criteria For The March 27, 2026 Release
 
-| Date | Version | Change |
-|---|---|---|
-| 2026-03-27 | 1.0.0 | Generic product PRD aligned to multi-site, multi-business use |
+- Play / pause / stop behavior accepted in live use
+- All prepared node bundles rebuilt to `v1.5`
+- Documentation aligned with actual product behavior
+- Clear record of current live risks, especially hub DB durability
+
+The detailed release record is captured in [docs/RELEASE_KB_2026-03-27.md](/D:/monitoring/docs/RELEASE_KB_2026-03-27.md).

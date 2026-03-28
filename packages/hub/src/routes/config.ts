@@ -1,6 +1,9 @@
 import { Request, Response, Router } from 'express';
-import { getNodeDesiredConfig, getPlayerNodeConfig, updatePlayerUdpInputs, UdpInputConfig } from '../config/nodeConfigs';
+import { INSTANCE_MAP } from '../config/instances';
+import { getNodeDesiredConfig, getPlayerNodeConfig } from '../config/nodeConfigs';
 import { getAlertSettings, updateAlertSettings } from '../store/alertSettings';
+import { getInstanceControls, updateInstanceControls } from '../store/instanceControls';
+import { getMirroredPlayerConfig } from '../store/nodeConfigMirror';
 
 function parseAgentTokens(): Map<string, string> {
   const map = new Map<string, string>();
@@ -17,26 +20,6 @@ function validateAgentToken(req: Request, tokenToNode: Map<string, string>): str
   if (!auth.startsWith('Bearer ')) return null;
   const token = auth.slice(7).trim();
   return tokenToNode.get(token) ?? null;
-}
-
-function getWriteKey(): string {
-  return (process.env.CONFIG_WRITE_KEY ?? '').trim();
-}
-
-function requireWriteKey(req: Request, res: Response): boolean {
-  const configuredKey = getWriteKey();
-  if (!configuredKey) {
-    res.status(503).json({ error: 'Config editing is not enabled on this hub.' });
-    return false;
-  }
-
-  const providedKey = String(req.headers['x-config-write-key'] ?? '').trim();
-  if (!providedKey || providedKey !== configuredKey) {
-    res.status(401).json({ error: 'Invalid config write key.' });
-    return false;
-  }
-
-  return true;
 }
 
 function asString(value: unknown, fallback = ''): string {
@@ -60,24 +43,6 @@ function clampInt(value: unknown, fallback: number, minimum: number, maximum: nu
   return Math.min(maximum, Math.max(minimum, normalized));
 }
 
-function normalizeUdpInputs(playerId: string, udpInputs: unknown): UdpInputConfig[] | null {
-  if (!Array.isArray(udpInputs)) return null;
-  if (udpInputs.length > 5) return null;
-
-  return udpInputs.map((entry, index) => {
-    const input = entry && typeof entry === 'object' && !Array.isArray(entry)
-      ? entry as Record<string, unknown>
-      : {};
-
-    return {
-      udpInputId: asString(input.udpInputId ?? input.udp_input_id, `${playerId}-udp-${index + 1}`),
-      enabled: asBool(input.enabled, false),
-      streamUrl: asString(input.streamUrl ?? input.stream_url),
-      thumbnailIntervalS: clampInt(input.thumbnailIntervalS ?? input.thumbnail_interval_s, 10, 1, 300),
-    };
-  });
-}
-
 function normalizeOptionalStringList(values: unknown): string[] | null {
   if (!Array.isArray(values)) return null;
   return values
@@ -86,14 +51,81 @@ function normalizeOptionalStringList(values: unknown): string[] | null {
     .filter(Boolean);
 }
 
+interface TelegramTarget {
+  chatId: string;
+  recipient: string;
+  title: string;
+  subtitle: string;
+}
+
+function formatTelegramTarget(chat: Record<string, unknown>): TelegramTarget | null {
+  const chatId = asString(chat.id);
+  if (!chatId) return null;
+
+  const chatType = asString(chat.type, 'private');
+  const username = asString(chat.username);
+  const firstName = asString(chat.first_name);
+  const lastName = asString(chat.last_name);
+  const title = asString(chat.title);
+  const displayTitle = title || [firstName, lastName].filter(Boolean).join(' ').trim() || username || chatId;
+  const subtitleParts = [chatType];
+  if (username) {
+    subtitleParts.push(`@${username}`);
+  }
+
+  return {
+    chatId,
+    recipient: username ? `@${username}` : chatId,
+    title: displayTitle,
+    subtitle: subtitleParts.join(' | '),
+  };
+}
+
+async function listTelegramTargets(): Promise<TelegramTarget[]> {
+  const token = asString(process.env.TELEGRAM_BOT_TOKEN);
+  if (!token) {
+    return [];
+  }
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${token}/getUpdates`);
+    if (!response.ok) {
+      return [];
+    }
+
+    const payload = await response.json() as { result?: Array<Record<string, unknown>> };
+    const updates = Array.isArray(payload.result) ? payload.result : [];
+    const targets = new Map<string, TelegramTarget>();
+
+    for (const update of updates.slice(-50)) {
+      const message = (
+        update.message
+        ?? update.edited_message
+        ?? update.channel_post
+        ?? update.edited_channel_post
+      ) as Record<string, unknown> | undefined;
+      const chat = message && typeof message.chat === 'object' && !Array.isArray(message.chat)
+        ? message.chat as Record<string, unknown>
+        : null;
+      if (!chat) continue;
+
+      const target = formatTelegramTarget(chat);
+      if (!target) continue;
+      targets.set(target.chatId, target);
+    }
+
+    return Array.from(targets.values()).reverse();
+  } catch {
+    return [];
+  }
+}
+
 export function createConfigRouter(): Router {
   const router = Router();
   const tokenToNode = parseAgentTokens();
 
-  router.get('/player/:playerId', (req: Request, res: Response) => {
-    if (!requireWriteKey(req, res)) return;
-
-    const player = getPlayerNodeConfig(req.params.playerId);
+  router.get('/player/:playerId', async (req: Request, res: Response) => {
+    const player = await getMirroredPlayerConfig(req.params.playerId) ?? getPlayerNodeConfig(req.params.playerId);
     if (!player) {
       return res.status(404).json({ error: 'Unknown player config.' });
     }
@@ -102,28 +134,49 @@ export function createConfigRouter(): Router {
   });
 
   router.post('/player/:playerId', (req: Request, res: Response) => {
-    if (!requireWriteKey(req, res)) return;
+    return res.status(409).json({
+      error: 'This player is configured locally on the node. Open Pulse on the node to edit settings there.',
+    });
+  });
 
-    const udpInputs = normalizeUdpInputs(req.params.playerId, req.body?.udpInputs);
-    if (!udpInputs) {
-      return res.status(400).json({ error: 'udpInputs must be an array of up to 5 inputs.' });
-    }
-
-    const updated = updatePlayerUdpInputs(req.params.playerId, udpInputs);
-    if (!updated) {
-      return res.status(404).json({ error: 'Unknown player config.' });
+  router.get('/instance/:playerId/controls', (req: Request, res: Response) => {
+    const instance = INSTANCE_MAP.get(req.params.playerId);
+    if (!instance) {
+      return res.status(404).json({ error: 'Unknown player.' });
     }
 
     return res.json({
+      instanceId: instance.id,
+      controls: getInstanceControls(instance.id),
+    });
+  });
+
+  router.post('/instance/:playerId/controls', async (req: Request, res: Response) => {
+    const instance = INSTANCE_MAP.get(req.params.playerId);
+    if (!instance) {
+      return res.status(404).json({ error: 'Unknown player.' });
+    }
+
+    const monitoringEnabled = req.body && Object.prototype.hasOwnProperty.call(req.body, 'monitoringEnabled')
+      ? asBool(req.body.monitoringEnabled, true)
+      : undefined;
+    const maintenanceMode = req.body && Object.prototype.hasOwnProperty.call(req.body, 'maintenanceMode')
+      ? asBool(req.body.maintenanceMode, false)
+      : undefined;
+
+    const controls = await updateInstanceControls(instance.id, {
+      monitoringEnabled,
+      maintenanceMode,
+    });
+
+    return res.json({
       ok: true,
-      player: updated,
-      appliedOnNextHeartbeat: true,
+      instanceId: instance.id,
+      controls,
     });
   });
 
   router.get('/alerts', async (req: Request, res: Response) => {
-    if (!requireWriteKey(req, res)) return;
-
     return res.json({
       settings: await getAlertSettings(),
       capabilities: {
@@ -134,12 +187,20 @@ export function createConfigRouter(): Router {
     });
   });
 
-  router.post('/alerts', async (req: Request, res: Response) => {
-    if (!requireWriteKey(req, res)) return;
+  router.get('/alerts/telegram-targets', async (req: Request, res: Response) => {
+    return res.json({
+      targets: await listTelegramTargets(),
+      configured: Boolean(process.env.TELEGRAM_BOT_TOKEN),
+    });
+  });
 
+  router.post('/alerts', async (req: Request, res: Response) => {
     const emailRecipients = normalizeOptionalStringList(req.body?.emailRecipients);
     const telegramChatIds = normalizeOptionalStringList(req.body?.telegramChatIds);
     const phoneNumbers = normalizeOptionalStringList(req.body?.phoneNumbers);
+    const emailEnabled = asBool(req.body?.emailEnabled, true);
+    const telegramEnabled = asBool(req.body?.telegramEnabled, true);
+    const phoneEnabled = asBool(req.body?.phoneEnabled, true);
 
     if (!emailRecipients || !telegramChatIds || !phoneNumbers) {
       return res.status(400).json({
@@ -151,6 +212,9 @@ export function createConfigRouter(): Router {
       emailRecipients,
       telegramChatIds,
       phoneNumbers,
+      emailEnabled,
+      telegramEnabled,
+      phoneEnabled,
     });
 
     return res.json({

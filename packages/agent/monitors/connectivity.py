@@ -12,6 +12,18 @@ import socket
 import platform
 
 
+def _hidden_subprocess_kwargs() -> dict:
+    if platform.system().lower() != "windows":
+        return {}
+
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    return {
+        "startupinfo": startupinfo,
+        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    }
+
+
 def _ping(host: str, timeout: int = 1) -> bool:
     """Ping a host, return True if reachable."""
     param = "-n" if platform.system().lower() == "windows" else "-c"
@@ -20,6 +32,7 @@ def _ping(host: str, timeout: int = 1) -> bool:
             ["ping", param, "1", "-w", str(timeout * 1000), host],
             capture_output=True,
             timeout=timeout + 1,
+            **_hidden_subprocess_kwargs(),
         )
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
@@ -31,7 +44,10 @@ def _get_default_gateway() -> str | None:
     try:
         result = subprocess.run(
             ["ipconfig"],
-            capture_output=True, text=True, timeout=5
+            capture_output=True,
+            text=True,
+            timeout=5,
+            **_hidden_subprocess_kwargs(),
         )
         for line in result.stdout.splitlines():
             if "Default Gateway" in line:

@@ -1,215 +1,166 @@
 # Pulse - Architecture Document
 
-**Version**: 1.0.0  
-**Date**: 2026-03-27  
-**Status**: Baseline - approved for implementation
+**Document Date**: 2026-03-27  
+**Status**: Current release architecture
 
----
+## System Model
 
-## 1. System Overview
-
-Pulse is a three-tier monitoring system built around nodes and players.
+Pulse is a three-part monitoring system:
 
 ```text
-PLAYOUT NODES
-  - one or more Windows nodes per site
-  - one or more players per node
-  - optional UDP inputs per player
-
-LOCAL AGENT
-  - one Windows service per node
-  - polls local runtime state
-  - reports raw observations
-
-HUB
-  - receives heartbeats
-  - computes health state
-  - stores current state and events
-  - emits dashboard updates
-
-DASHBOARD / PWA
-  - renders site, node, and player state
-  - shows alarm conditions
-  - exposes optional UDP config editing
+Windows playout node
+  -> Pulse agent service
+  -> Hub API + state engine
+  -> Dashboard / PWA
 ```
 
-The key identity rule is:
+### Identity Model
 
 - `node_id` identifies the physical host
-- `player_id` identifies the individual playout source on that host
+- `player_id` identifies the monitored playout source on that host
+- one node can host multiple players
+- one player can define zero to five UDP inputs
 
 ---
 
-## 2. Component Responsibilities
+## Components
 
-### 2.1 Local Agent
+### Local Agent
 
-- runs as a Windows service
-- reads local files, logs, process state, and optional UDP inputs
-- never accepts inbound connections
-- posts raw observations to the hub
-- can sync hub-managed UDP settings back into local `config.yaml`
+Responsibilities:
 
-### 2.2 Hub
+- run as a Windows service
+- inspect local process, window, log, file, connectivity, and optional UDP signals
+- host the persistent local configuration UI
+- post raw observations to the hub
+- mirror current node config upward to the hub
 
-- validates Bearer tokens per node
-- maps each `node_id` to allowed `player_id` values
-- computes `broadcast_health`, `runtime_health`, and `connectivity_health`
-- stores current state and event history in SQLite
-- emits real-time updates to dashboard clients
-- serves config-edit APIs for protected UDP management
+Important current rule:
 
-### 2.3 Dashboard
+- the node is the source of truth for machine-local config
 
-- serves a live operational view
-- consumes real-time state updates over Socket.IO
-- falls back to API polling when needed
-- supports mobile and desktop PWA install
-- can edit UDP input configuration when the write key is provided
+That includes:
 
-### 2.4 State Store
+- local paths
+- playout type
+- player count
+- per-player UDP inputs
+- selectors and runtime-specific overrides
 
-SQLite is the source of truth for:
+### Hub
 
-- current instance state
-- incident transitions
-- alert dedup
-- persisted thumbnails
+Responsibilities:
+
+- validate agent bearer tokens
+- validate node / player ownership against the commissioned registry
+- compute health state
+- persist current state and event history
+- persist alert settings and instance controls
+- persist mirrored node config
+- emit live dashboard updates
+
+Current implementation note:
+
+- the commissioned registry is still static and lives in [packages/hub/src/config/instances.ts](/D:/monitoring/packages/hub/src/config/instances.ts)
+
+### Dashboard
+
+Responsibilities:
+
+- render the live operational view
+- display alarms, health, thumbnails, and monitoring controls
+- display mirrored node-side stream settings
+- edit hub-owned operational controls such as maintenance mode and alert settings
+
+Current implementation note:
+
+- the dashboard is not the primary editor for machine-local paths or UDP inputs in the current release
 
 ---
 
-## 3. Data Flow
+## Persistence Model
 
-### 3.1 Heartbeat Flow
+Current hub persistence is SQLite through [packages/hub/src/store/db.ts](/D:/monitoring/packages/hub/src/store/db.ts).
+
+Persisted data includes:
+
+- instance state
+- incident / event history
+- alert settings
+- instance controls
+- mirrored node config
+- thumbnails
+
+Current production note:
+
+- the live DB path is externalized through `PULSE_DB_PATH`
+- the live VPS still shows SQLite corruption in logs as of March 27, 2026
+
+---
+
+## Current Data Flows
+
+### Heartbeat Flow
 
 ```text
-Agent polls local checks for one player
+Agent polls one player
   -> POST /api/heartbeat
   -> Hub validates token and player ownership
-  -> Hub computes health state
-  -> Hub updates SQLite state
-  -> Hub emits Socket.IO update
-  -> Dashboard re-renders affected card
+  -> Hub computes health
+  -> Hub updates persisted state
+  -> Hub emits Socket.IO state update
+  -> Dashboard updates the card
 ```
 
-### 3.2 Thumbnail Flow
+### Thumbnail Flow
 
 ```text
-Agent captures frame from selected UDP input
+Agent captures thumbnail from selected UDP input
   -> POST /api/thumbnail
   -> Hub stores thumbnail
   -> Hub emits thumbnail update
   -> Dashboard refreshes preview
 ```
 
-### 3.3 Config Sync Flow
+### Config Mirror Flow
 
 ```text
-Operator edits UDP settings in dashboard
-  -> Dashboard calls protected config API
-  -> Hub updates canonical node config
-  -> Agent receives desired config in heartbeat response
-  -> Agent writes updated UDP inputs to local config.yaml
-  -> Next poll applies the new UDP settings
+Local node config changes
+  -> Agent includes nodeConfigMirror in heartbeat payload
+  -> Hub stores mirrored config
+  -> Dashboard reads mirrored stream settings
 ```
 
-### 3.4 Timeout Flow
+### Operational Control Flow
 
 ```text
-Hub timer checks heartbeat age
-  -> stale after about 45s
-  -> offline after about 90s
-  -> dashboard keeps last known state while marking connectivity separately
+Operator changes monitoringEnabled / maintenanceMode / alert settings
+  -> Dashboard calls hub API
+  -> Hub persists operational control
+  -> Dashboard and alert engine use the updated control state
 ```
 
 ---
 
-## 4. Identity and Security
+## Current Non-Goals In Production
 
-### 4.1 Identity Model
+The current release does not yet provide:
 
-- each node has one token
-- each heartbeat declares both `nodeId` and `playerId`
-- hub enforces allowed player IDs per node
-- source IP is not used for identity
+- dynamic self-registration for brand-new nodes
+- DB-backed dynamic node/player inventory
+- dashboard-owned editing of machine-local path or UDP config
+- fully active desired-config pushdown from the hub back to nodes
 
-### 4.2 Transport
-
-- agents call the hub over HTTP or HTTPS, depending on deployment
-- HTTPS is recommended for internet-facing deployments
-- reverse proxy and CDN choices are deployment-specific
-
-### 4.3 Secrets and Config
-
-Typical secret sources:
-
-- `.env` / `.env.local` on the hub host
-- `config.yaml` on each node
-
-Typical config fields:
-
-```yaml
-node_id: site-a-node-1
-agent_token: REPLACE_ME
-hub_url: https://monitor.example.com
-players:
-  - player_id: site-a-insta-1
-    udp_inputs:
-      - udp_input_id: site-a-insta-1-udp-1
-        enabled: true
-        stream_url: udp://239.1.1.1:5000
-```
+The codebase contains some preparatory pieces for future desired-config flows, but they are not the active production control plane today.
 
 ---
 
-## 5. Monitoring Model
+## Current Architecture Truths
 
-### 5.1 Supported Signal Families
+1. The agent owns machine-local monitoring config.
+2. The hub owns health computation and operational controls.
+3. The dashboard mirrors node config and edits hub-owned controls.
+4. The commissioned registry is still static.
+5. SQLite is the current store, but it is now an operational risk rather than a finished long-term answer.
 
-- process presence
-- window presence
-- log tokens
-- local runtime file movement
-- content error logs
-- connectivity checks
-- UDP stream confidence
-
-### 5.2 Health Computation
-
-The hub combines raw observations into three separate domains:
-
-- broadcast health
-- runtime health
-- connectivity health
-
-This prevents connectivity failures from being misreported as off-air events.
-
-### 5.3 UDP Model
-
-- UDP is optional per player
-- each player can hold multiple UDP inputs
-- the agent probes enabled inputs and chooses the best active source
-- the hub uses the returned UDP observations to strengthen off-air confidence
-
----
-
-## 6. Deployment Patterns
-
-Pulse can be deployed in several ways:
-
-- one hub serving one site
-- one hub serving many sites
-- one managed platform serving many businesses with separate node configs
-
-Typical infrastructure:
-
-- Linux host for hub and dashboard
-- Node.js runtime with PM2
-- reverse proxy such as Caddy
-- optional DNS/CDN in front
-
----
-
-## 7. Operational Rule
-
-Product docs should remain generic. Customer names, live domains, tokens, and site-specific topology belong in deployment config and private operations notes, not in shared architecture material.
+For the dated release and incident record, see [docs/RELEASE_KB_2026-03-27.md](/D:/monitoring/docs/RELEASE_KB_2026-03-27.md).

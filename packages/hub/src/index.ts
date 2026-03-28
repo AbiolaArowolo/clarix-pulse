@@ -6,6 +6,8 @@ import dotenv from 'dotenv';
 import path from 'path';
 
 import { initState, getAllStates, setConnectivity, markInstanceOffline } from './store/state';
+import { DB_PATH } from './store/db';
+import { getInstanceControls, initInstanceControls, isAlertingSuppressed } from './store/instanceControls';
 import { createHeartbeatRouter } from './routes/heartbeat';
 import { createConfigRouter } from './routes/config';
 import { createThumbnailRouter } from './routes/thumbnail';
@@ -13,7 +15,7 @@ import { createStatusRouter, buildStatusPayload } from './routes/status';
 import { sendNetworkIssueAlert } from './services/alerting';
 import { INSTANCE_MAP } from './config/instances';
 
-const repoRoot = path.resolve(__dirname, '../../..');
+const repoRoot = path.resolve(__dirname, '../../../..');
 dotenv.config({ path: path.join(repoRoot, '.env') });
 dotenv.config({ path: path.join(repoRoot, '.env.local'), override: true });
 
@@ -65,29 +67,35 @@ setInterval(async () => {
         console.error(err);
         return undefined;
       });
+      const controls = getInstanceControls(state.instanceId);
       io.emit('state_update', {
         instanceId: state.instanceId,
         broadcastHealth: 'unknown',
         runtimeHealth: updated?.runtimeHealth ?? 'unknown',
         connectivityHealth: 'offline',
+        monitoringEnabled: controls.monitoringEnabled,
+        maintenanceMode: controls.maintenanceMode,
         lastHeartbeatAt: state.lastHeartbeatAt,
         updatedAt: updated?.updatedAt ?? new Date().toISOString(),
       });
 
       // Send network issue alert (once per incident, debounced 5 min)
       const lastSent = networkIssueSentAt.get(state.instanceId) ?? 0;
-      if (now - lastSent > 300_000) {
+      if (now - lastSent > 300_000 && !isAlertingSuppressed(state.instanceId)) {
         networkIssueSentAt.set(state.instanceId, now);
         const inst = INSTANCE_MAP.get(state.instanceId);
         if (inst) sendNetworkIssueAlert(state.instanceId, inst.label).catch(console.error);
       }
     } else if (ageMs >= STALE_THRESHOLD_MS && state.connectivityHealth === 'online') {
       setConnectivity(state.instanceId, 'stale').catch(console.error);
+      const controls = getInstanceControls(state.instanceId);
       io.emit('state_update', {
         instanceId: state.instanceId,
         broadcastHealth: state.broadcastHealth,
         runtimeHealth: state.runtimeHealth,
         connectivityHealth: 'stale',
+        monitoringEnabled: controls.monitoringEnabled,
+        maintenanceMode: controls.maintenanceMode,
         lastHeartbeatAt: state.lastHeartbeatAt,
         updatedAt: new Date().toISOString(),
       });
@@ -97,10 +105,12 @@ setInterval(async () => {
 
 async function start() {
   await initState();
+  await initInstanceControls();
 
   httpServer.listen(PORT, () => {
     console.log(`[hub] Pulse hub running on port ${PORT}`);
     console.log(`[hub] SQLite state initialised for ${getAllStates().length} instances`);
+    console.log(`[hub] State DB path: ${DB_PATH}`);
   });
 }
 

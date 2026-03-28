@@ -15,24 +15,8 @@ players:
       shared_log_dir: C:\Program Files\Indytek\Insta log
       instance_root: C:\Program Files\Indytek\Insta Playout\Settings
     udp_inputs:
-      # Optional future UDP monitoring matrix for NJ Optimum.
+      # Enabled streams are managed from the Pulse UI.
       - udp_input_id: nj-optimum-insta-1-udp-1
         enabled: false
-        stream_url: "udp://REPLACE_ME_NJ_OPTIMUM_INSTA_1_UDP_1"
-        thumbnail_interval_s: 10
-      - udp_input_id: nj-optimum-insta-1-udp-2
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NJ_OPTIMUM_INSTA_1_UDP_2"
-        thumbnail_interval_s: 10
-      - udp_input_id: nj-optimum-insta-1-udp-3
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NJ_OPTIMUM_INSTA_1_UDP_3"
-        thumbnail_interval_s: 10
-      - udp_input_id: nj-optimum-insta-1-udp-4
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NJ_OPTIMUM_INSTA_1_UDP_4"
-        thumbnail_interval_s: 10
-      - udp_input_id: nj-optimum-insta-1-udp-5
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NJ_OPTIMUM_INSTA_1_UDP_5"
+        stream_url: "udp://@192.168.1.3:5001"
         thumbnail_interval_s: 10

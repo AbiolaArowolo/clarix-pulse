@@ -22,29 +22,7 @@ players:
     log_selectors:
       include_contains:
         - Insta 1
-    udp_inputs:
-      # Disabled by default. Replace the stream_url values and flip enabled to true
-      # when NY Main needs UDP monitoring on this player.
-      - udp_input_id: ny-main-insta-1-udp-1
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NY_MAIN_INSTA_1_UDP_1"
-        thumbnail_interval_s: 10
-      - udp_input_id: ny-main-insta-1-udp-2
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NY_MAIN_INSTA_1_UDP_2"
-        thumbnail_interval_s: 10
-      - udp_input_id: ny-main-insta-1-udp-3
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NY_MAIN_INSTA_1_UDP_3"
-        thumbnail_interval_s: 10
-      - udp_input_id: ny-main-insta-1-udp-4
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NY_MAIN_INSTA_1_UDP_4"
-        thumbnail_interval_s: 10
-      - udp_input_id: ny-main-insta-1-udp-5
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NY_MAIN_INSTA_1_UDP_5"
-        thumbnail_interval_s: 10
+    udp_inputs: []
 
   - player_id: ny-main-insta-2
     playout_type: insta
@@ -59,27 +37,7 @@ players:
     log_selectors:
       include_contains:
         - Insta 2
-    udp_inputs:
-      - udp_input_id: ny-main-insta-2-udp-1
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NY_MAIN_INSTA_2_UDP_1"
-        thumbnail_interval_s: 10
-      - udp_input_id: ny-main-insta-2-udp-2
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NY_MAIN_INSTA_2_UDP_2"
-        thumbnail_interval_s: 10
-      - udp_input_id: ny-main-insta-2-udp-3
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NY_MAIN_INSTA_2_UDP_3"
-        thumbnail_interval_s: 10
-      - udp_input_id: ny-main-insta-2-udp-4
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NY_MAIN_INSTA_2_UDP_4"
-        thumbnail_interval_s: 10
-      - udp_input_id: ny-main-insta-2-udp-5
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NY_MAIN_INSTA_2_UDP_5"
-        thumbnail_interval_s: 10
+    udp_inputs: []
 
   - player_id: ny-main-admax-1
     playout_type: admax
@@ -93,24 +51,4 @@ players:
     log_selectors:
       include_contains:
         - Admax 1
-    udp_inputs:
-      - udp_input_id: ny-main-admax-1-udp-1
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NY_MAIN_ADMAX_1_UDP_1"
-        thumbnail_interval_s: 10
-      - udp_input_id: ny-main-admax-1-udp-2
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NY_MAIN_ADMAX_1_UDP_2"
-        thumbnail_interval_s: 10
-      - udp_input_id: ny-main-admax-1-udp-3
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NY_MAIN_ADMAX_1_UDP_3"
-        thumbnail_interval_s: 10
-      - udp_input_id: ny-main-admax-1-udp-4
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NY_MAIN_ADMAX_1_UDP_4"
-        thumbnail_interval_s: 10
-      - udp_input_id: ny-main-admax-1-udp-5
-        enabled: false
-        stream_url: "udp://REPLACE_ME_NY_MAIN_ADMAX_1_UDP_5"
-        thumbnail_interval_s: 10
+    udp_inputs: []

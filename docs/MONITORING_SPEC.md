@@ -1,172 +1,148 @@
 # Pulse - Monitoring Specification
 
-**Version**: 1.0.0  
-**Date**: 2026-03-27
+**Document Date**: 2026-03-27
+
+## Scope
+
+This document describes the current monitoring behavior of the shipped release.
+
+## Health Domains
+
+| Domain | Values |
+|---|---|
+| `broadcast_health` | `healthy`, `degraded`, `off_air_likely`, `off_air_confirmed`, `unknown` |
+| `runtime_health` | `healthy`, `paused`, `restarting`, `stalled`, `stopped`, `content_error`, `unknown` |
+| `connectivity_health` | `online`, `stale`, `offline` |
 
 ---
 
-## 1. Registry Model
+## Poll Sequence
 
-Pulse expects operators to define their own node and player registry.
-
-### Example Reference Registry
-
-| Node ID | Player ID | Site | Software | UDP |
-|---|---|---|---|---|
-| `site-a-node-1` | `site-a-insta-1` | Site A | Insta | Optional |
-| `site-a-node-1` | `site-a-insta-2` | Site A | Insta | Optional |
-| `site-a-node-2` | `site-a-admax-1` | Site A | Admax | Optional |
-| `site-b-node-1` | `site-b-admax-1` | Site B | Admax | Enabled |
-| `site-b-node-1` | `site-b-admax-2` | Site B | Admax | Enabled |
-| `site-c-node-1` | `site-c-insta-1` | Site C | Insta | Optional |
-
-A node can carry multiple players. A player can carry multiple UDP inputs. UDP is enabled or disabled per player, not globally per node.
-
----
-
-## 2. Health State Model
-
-Pulse keeps three independent domains:
-
-### `broadcast_health`
-
-| Value | Meaning |
-|---|---|
-| `healthy` | High confidence that output is on-air |
-| `degraded` | Playback appears active, but warnings exist |
-| `off_air_likely` | Strong local runtime evidence of outage |
-| `off_air_confirmed` | UDP output probe confirms outage |
-| `unknown` | Reporting path is offline or indeterminate |
-
-### `runtime_health`
-
-| Value | Meaning |
-|---|---|
-| `healthy` | Process and runtime movement look normal |
-| `paused` | Runtime explicitly reports pause |
-| `restarting` | Restart or re-init behavior detected |
-| `stalled` | Process is up but runtime movement is frozen |
-| `stopped` | Process is missing or runtime says not running |
-| `content_error` | FNF or playlist scan errors detected |
-| `unknown` | Not enough evidence |
-
-### `connectivity_health`
-
-| Value | Meaning |
-|---|---|
-| `online` | Heartbeats are current |
-| `stale` | Heartbeats are delayed |
-| `offline` | Heartbeats are missing |
-
----
-
-## 3. Polling Sequence
-
-On each poll interval, the agent runs these checks for each player:
+On each cycle, the agent can collect:
 
 1. process and window presence
-2. deep log monitoring
-3. local runtime file checks
-4. content error log checks
+2. deep log tokens
+3. runtime file movement and runtime flags
+4. content error logs
 5. connectivity checks
-6. optional UDP probe checks
-7. heartbeat POST to the hub
+6. optional UDP probes
+7. one heartbeat per player
+
+The hub is the only place that computes final health.
 
 ---
 
-## 4. Signal Sources
+## Runtime Signal Families
 
-### 4.1 Process and Window Signals
+### Process Signals
 
-Used to determine whether the monitored playout application is actually running and visible in the session.
+Used for:
 
-### 4.2 Log Signals
+- process present / missing
+- restart evidence
+- CPU activity
 
-Used to detect:
+### Log Signals
+
+Used for:
 
 - pause
-- fully played
 - skip
-- restart / re-init
+- fully played
+- reinit
 - app exit
 
-### 4.3 Runtime File Signals
+### Runtime File Signals
 
-Used to detect:
+Used for:
 
-- persistent playback state
-- file position or frame advancement
-- freezes or stalls
+- playback movement
+- freeze / stall detection
+- current runtime flags
+- current playlist / file advancement
 
-### 4.4 Connectivity Signals
+### Connectivity Signals
 
-Typical checks:
+Used for:
 
 - default gateway reachability
 - public internet reachability
 
-Connectivity failure is tracked separately from playout failure.
+### UDP Signals
 
-### 4.5 UDP Signals
+When enabled for a player, the agent may probe:
 
-When UDP is enabled for a player, the agent can run:
-
-- presence checks with `ffprobe`
-- freeze detection with `ffmpeg`
-- black detection with `ffmpeg`
-- silence detection with `ffmpeg`
-- thumbnail capture with `ffmpeg`
-
-If a player has several enabled inputs, the agent evaluates them as a matrix and reports the best active input as the selected source.
+- presence
+- freeze
+- black
+- silence
+- thumbnail frame
 
 ---
 
-## 5. Runtime and Alarm Rules
+## Current Escalation Rules
 
-### 5.1 Connectivity Thresholds
+### Connectivity
 
 | Condition | Result |
 |---|---|
-| heartbeat age < 45s | `online` |
-| heartbeat age 45-90s | `stale` |
-| heartbeat age > 90s | `offline` |
+| heartbeat age under about 45s | `online` |
+| heartbeat age about 45s to 90s | `stale` |
+| heartbeat age over about 90s | `offline` |
 
-### 5.2 Runtime Escalation Without UDP Confirmation
+### Runtime Without UDP Confirmation
 
-| Condition | Immediate State | Red Escalation |
+| Condition | Immediate Result | Escalation |
 |---|---|---|
-| explicit pause | `runtime_health=paused`, `broadcast_health=degraded` | after about 60s continuous pause |
-| stopped / process missing | `runtime_health=stopped`, `broadcast_health=degraded` | after about 45s continuous stop |
-| stalled runtime | `runtime_health=stalled`, `broadcast_health=degraded` | after about 45s continuous stall state |
+| explicit pause | `runtime=paused`, `broadcast=degraded` | red after about 60s |
+| explicit stop while process is still up | `runtime=stopped`, `broadcast=degraded` | red after about 60s |
+| process missing / player shut down | `runtime=stopped`, `broadcast=off_air_likely` | immediate |
+| stall evidence | `runtime=stalled`, `broadcast=degraded` | red after about 45s |
+| restart evidence | `runtime=restarting`, `broadcast=degraded` | warning state |
 
-### 5.3 UDP Escalation
+### UDP
 
-| Condition | Immediate State | Red Escalation |
+| Condition | Immediate Result | Escalation |
 |---|---|---|
-| missing, frozen, black, or silent UDP output | `broadcast_health=degraded` | after about 40s continuous UDP fault |
-
-### 5.4 Recovery
-
-The red alarm clears when the hub receives a healthy heartbeat or, for UDP-enabled players, the first healthy UDP-confirmed sample after the fault clears.
+| missing / frozen / black / silent UDP output | `broadcast=degraded` | red after about 40s sustained fault |
 
 ---
 
-## 6. Decision Matrix
+## Current Pause Recovery Rule
+
+For the current release, pause recovery is intentionally conservative.
+
+A paused player should not clear back to healthy from process CPU activity alone.
+
+Stronger resume evidence includes:
+
+- playback movement
+- fresh positive log token such as `fully_played` or `skipped`
+- playlist or runtime file advancement
+
+This rule was important in the March 27, 2026 live NJ Optimum work because CPU activity remained high even while the player was paused.
+
+---
+
+## Decision Matrix
 
 | Observation | Broadcast | Runtime |
 |---|---|---|
-| healthy local and UDP signals | `healthy` | `healthy` |
-| explicit pause | `degraded` | `paused` |
-| restart tokens or repeated restarts | `degraded` | `restarting` |
-| stall evidence | `degraded` | `stalled` |
-| process missing | `degraded` then `off_air_likely` if sustained | `stopped` |
-| content error logs | `degraded` | `content_error` |
-| UDP fault | `degraded` then `off_air_confirmed` if sustained | unchanged |
-| reporting path offline | `unknown` | `unknown` |
+| local runtime healthy, no warnings | `healthy` | `healthy` |
+| paused under 60s | `degraded` | `paused` |
+| paused at or above 60s | `off_air_likely` | `paused` |
+| stopped under 60s while process still present | `degraded` | `stopped` |
+| stopped at or above 60s while process still present | `off_air_likely` | `stopped` |
+| player shut down / process missing | `off_air_likely` | `stopped` |
+| stalled runtime under threshold | `degraded` | `stalled` |
+| stalled runtime after sustained threshold | `off_air_likely` | `stalled` |
+| content error | `degraded` | `content_error` |
+| UDP sustained fault | `off_air_confirmed` | unchanged |
+| no current reporting path | `unknown` | `unknown` |
 
 ---
 
-## 7. Alert Policy
+## Alert Policy
 
 ### Critical
 
@@ -175,12 +151,7 @@ Used for:
 - `off_air_likely`
 - `off_air_confirmed`
 
-Examples:
-
-- `OFF AIR: Site A - Admax 1 - output signal missing`
-- `OFF AIR LIKELY: Site C - Insta 1 - process missing`
-
-### Warning
+### Warning / Degraded
 
 Used for:
 
@@ -188,17 +159,22 @@ Used for:
 - `stalled`
 - `restarting`
 - `content_error`
-- `connectivity_health=offline` or `stale`
-
-Examples:
-
-- `DEGRADED: Site A - Insta 2 - paused`
-- `NETWORK ISSUE: Site B - Admax 1 - heartbeat missing`
+- connectivity `stale` / `offline`
 
 ### Recovery
 
-Example:
+Sent when a previously critical player returns to healthy conditions.
 
-- `RECOVERED: Site A - Admax 1 - broadcast health restored`
+Current alerting is deduplicated through hub persistence.
 
-Alerts are deduplicated through the SQLite event store so the same incident does not re-alert on every poll.
+---
+
+## Current Known Monitoring Caveats
+
+As of March 27, 2026:
+
+- some Insta installs can keep CPU active while paused
+- some local runtime files can be stale and should not be trusted alone
+- UDP is optional and should strengthen confidence, not replace all local runtime monitoring
+
+The dated release record and live challenges are documented in [docs/RELEASE_KB_2026-03-27.md](/D:/monitoring/docs/RELEASE_KB_2026-03-27.md).

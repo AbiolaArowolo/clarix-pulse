@@ -16,6 +16,9 @@ set "EXIT_CODE=%ERRORLEVEL%"
 echo.
 if "%EXIT_CODE%"=="0" (
     echo Pulse install/update finished.
+    echo Opening local Pulse UI...
+    timeout /t 3 >nul
+    "%EXE_PATH%" --open-local-ui
 ) else (
     echo Pulse install/update failed with exit code %EXIT_CODE%.
 )

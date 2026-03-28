@@ -28,6 +28,8 @@ INSTA_PROCESS_ALLOWLIST = {
 
 _restart_events: Dict[str, Deque[datetime]] = {}
 _last_process_up: Dict[str, bool] = {}
+_prev_cpu_total: Dict[str, float] = {}
+_prev_cpu_ts: Dict[str, datetime] = {}
 
 
 def _as_list(value: object) -> list[str]:
@@ -117,6 +119,23 @@ def _check_window_exists(pid: int, selectors: dict) -> bool:
     return result[0]
 
 
+def _total_cpu_seconds(processes: list[psutil.Process]) -> float | None:
+    total = 0.0
+    found = False
+    for proc in processes:
+        try:
+            cpu_times = proc.cpu_times()
+            total += float(cpu_times.user) + float(cpu_times.system)
+            found = True
+        except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+            continue
+
+    if not found:
+        return None
+
+    return total
+
+
 def check(instance_id: str, playout_type: str, selectors: dict | None = None) -> dict:
     selectors = selectors or {}
     matching_processes = list(_iter_matching_processes(playout_type, selectors))
@@ -139,6 +158,22 @@ def check(instance_id: str, playout_type: str, selectors: dict | None = None) ->
 
     restart_count = len(_restart_events[instance_id])
     window_up = False
+    cpu_usage_ratio_poll = None
+
+    now = datetime.now()
+    current_cpu_total = _total_cpu_seconds(matching_processes) if process_up else None
+    previous_cpu_total = _prev_cpu_total.get(instance_id)
+    previous_cpu_ts = _prev_cpu_ts.get(instance_id)
+    if current_cpu_total is not None:
+        if previous_cpu_total is not None and previous_cpu_ts is not None:
+            elapsed_seconds = max(0.001, (now - previous_cpu_ts).total_seconds())
+            cpu_delta = max(0.0, current_cpu_total - previous_cpu_total)
+            cpu_usage_ratio_poll = cpu_delta / elapsed_seconds
+        _prev_cpu_total[instance_id] = current_cpu_total
+        _prev_cpu_ts[instance_id] = now
+    else:
+        _prev_cpu_total.pop(instance_id, None)
+        _prev_cpu_ts.pop(instance_id, None)
 
     if process_up:
         for proc in matching_processes:
@@ -153,4 +188,5 @@ def check(instance_id: str, playout_type: str, selectors: dict | None = None) ->
         "playout_process_up": 1 if process_up else 0,
         "playout_window_up": 1 if window_up else 0,
         "restart_events_15m": restart_count,
+        "playout_cpu_usage_ratio_poll": round(cpu_usage_ratio_poll, 3) if cpu_usage_ratio_poll is not None else None,
     }

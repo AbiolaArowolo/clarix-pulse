@@ -1,11 +1,31 @@
 import { createClient, Client } from '@libsql/client';
 import path from 'path';
 import fs from 'fs';
+import dotenv from 'dotenv';
 
-const DATA_DIR = path.join(__dirname, '../../data');
+const repoRoot = path.resolve(__dirname, '../../../..');
+dotenv.config({ path: path.join(repoRoot, '.env') });
+dotenv.config({ path: path.join(repoRoot, '.env.local'), override: true });
+
+const DEFAULT_DATA_DIR = path.join(__dirname, '../../data');
+
+function resolveDbPath(): string {
+  const configuredDbPath = process.env.PULSE_DB_PATH?.trim();
+  if (configuredDbPath) {
+    return path.resolve(configuredDbPath);
+  }
+
+  const configuredDataDir = process.env.PULSE_DATA_DIR?.trim();
+  if (configuredDataDir) {
+    return path.join(path.resolve(configuredDataDir), 'clarix.db');
+  }
+
+  return path.join(DEFAULT_DATA_DIR, 'clarix.db');
+}
+
+export const DB_PATH = resolveDbPath();
+const DATA_DIR = path.dirname(DB_PATH);
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-
-const DB_PATH = path.join(DATA_DIR, 'clarix.db');
 
 // Create libsql client pointing to a local SQLite file
 export const db: Client = createClient({ url: `file:${DB_PATH}` });
@@ -23,6 +43,10 @@ async function ensureColumn(
 }
 
 export async function initDb(): Promise<void> {
+  await db.execute('PRAGMA journal_mode = WAL');
+  await db.execute('PRAGMA synchronous = NORMAL');
+  await db.execute('PRAGMA busy_timeout = 5000');
+
   await db.executeMultiple(`
     CREATE TABLE IF NOT EXISTS instance_state (
       instance_id         TEXT PRIMARY KEY,
@@ -56,12 +80,31 @@ export async function initDb(): Promise<void> {
       email_recipients  TEXT NOT NULL DEFAULT '[]',
       telegram_chat_ids TEXT NOT NULL DEFAULT '[]',
       phone_numbers     TEXT NOT NULL DEFAULT '[]',
+      email_enabled     INTEGER NOT NULL DEFAULT 1,
+      telegram_enabled  INTEGER NOT NULL DEFAULT 1,
+      phone_enabled     INTEGER NOT NULL DEFAULT 1,
       updated_at        TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS node_config_mirror (
+      node_id           TEXT PRIMARY KEY,
+      payload           TEXT NOT NULL,
+      updated_at        TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS instance_controls (
+      instance_id         TEXT PRIMARY KEY,
+      monitoring_enabled  INTEGER NOT NULL DEFAULT 1,
+      maintenance_mode    INTEGER NOT NULL DEFAULT 0,
+      updated_at          TEXT NOT NULL
     );
   `);
 
   await ensureColumn('instance_state', 'runtime_started_at', 'TEXT');
   await ensureColumn('instance_state', 'broadcast_started_at', 'TEXT');
+  await ensureColumn('alert_settings', 'email_enabled', 'INTEGER NOT NULL DEFAULT 1');
+  await ensureColumn('alert_settings', 'telegram_enabled', 'INTEGER NOT NULL DEFAULT 1');
+  await ensureColumn('alert_settings', 'phone_enabled', 'INTEGER NOT NULL DEFAULT 1');
   await db.execute(`
     UPDATE instance_state
     SET runtime_started_at = COALESCE(runtime_started_at, updated_at)
@@ -80,8 +123,8 @@ export async function initDb(): Promise<void> {
 
   await db.execute({
     sql: `INSERT OR IGNORE INTO alert_settings
-            (id, email_recipients, telegram_chat_ids, phone_numbers, updated_at)
-          VALUES (1, ?, ?, ?, ?)`,
+            (id, email_recipients, telegram_chat_ids, phone_numbers, email_enabled, telegram_enabled, phone_enabled, updated_at)
+          VALUES (1, ?, ?, ?, 1, 1, 1, ?)`,
     args: [seedEmailRecipients, seedTelegramChatIds, seedPhoneNumbers, timestamp],
   });
 }

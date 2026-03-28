@@ -5,7 +5,7 @@
 # - player_id: unique player ID reported to the hub
 # - udp_inputs: zero or more optional UDP monitoring inputs per player
 # - if one or more udp_inputs are enabled, the agent evaluates them as a UDP matrix
-# - one player can carry multiple udp_inputs, and one node can carry 2-5 UDP inputs overall
+# - one player can carry multiple udp_inputs, and one node can carry 0-5 UDP inputs overall
 #
 # Backward compatibility:
 # - agent_id still works as a legacy alias for node_id
@@ -36,29 +36,8 @@ players:
     # log_selectors:
     #   include_contains:
     #     - Insta 1
-    udp_inputs:
-      # Fill any 1-5 inputs below. When one or more are enabled, Pulse treats them as a UDP matrix
-      # and automatically follows the healthiest source through ffmpeg / ffprobe.
-      - udp_input_id: primary-insta-1-udp-1
-        enabled: false
-        stream_url: ""
-        thumbnail_interval_s: 10
-      - udp_input_id: primary-insta-1-udp-2
-        enabled: false
-        stream_url: ""
-        thumbnail_interval_s: 10
-      - udp_input_id: primary-insta-1-udp-3
-        enabled: false
-        stream_url: ""
-        thumbnail_interval_s: 10
-      - udp_input_id: primary-insta-1-udp-4
-        enabled: false
-        stream_url: ""
-        thumbnail_interval_s: 10
-      - udp_input_id: primary-insta-1-udp-5
-        enabled: false
-        stream_url: ""
-        thumbnail_interval_s: 10
+    # Add UDP, RTSP, RTMP, or direct .ts stream URLs later from the Pulse dashboard when needed.
+    udp_inputs: []
 
   - player_id: primary-insta-2
     playout_type: insta
@@ -76,31 +55,7 @@ players:
       admax_root_candidates:
         - C:\Program Files (x86)\Unimedia\Admax One*\admax
         - C:\Program Files\Unimedia\Admax One*\admax
-    udp_inputs:
-      - udp_input_id: primary-admax-1-udp-1
-        enabled: false
-        stream_url: ""
-        thumbnail_interval_s: 10
-      - udp_input_id: primary-admax-1-udp-2
-        enabled: false
-        stream_url: ""
-        thumbnail_interval_s: 10
-      - udp_input_id: primary-admax-1-udp-3
-        enabled: false
-        stream_url: ""
-        thumbnail_interval_s: 10
-      - udp_input_id: primary-admax-1-udp-4
-        enabled: false
-        stream_url: ""
-        thumbnail_interval_s: 10
-      - udp_input_id: primary-admax-1-udp-5
-        enabled: false
-        stream_url: ""
-        thumbnail_interval_s: 10
-        # Accepted examples:
-        # stream_url: "udp://224.2.2.2:5004"
-        # stream_url: "udp://@224.2.2.2:5004"   # multicast listen
-        # stream_url: "udp@://224.2.2.2:5004"   # Pulse normalizes this automatically
+    udp_inputs: []
 
 # Example: a node with multiple UDP inputs on one player
 # players:

@@ -10,8 +10,15 @@ if not exist "%EXE_PATH%" (
     exit /b 1
 )
 
-"%EXE_PATH%" --configure
+"%EXE_PATH%" --open-local-ui
 set "EXIT_CODE=%ERRORLEVEL%"
+
+if "%EXIT_CODE%"=="2" (
+    echo.
+    echo Persistent local UI is not running yet. Falling back to the guided configuration flow.
+    "%EXE_PATH%" --configure
+    set "EXIT_CODE=%ERRORLEVEL%"
+)
 
 echo.
 if "%EXIT_CODE%"=="0" (

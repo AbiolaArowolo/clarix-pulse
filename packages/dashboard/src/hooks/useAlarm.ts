@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SiteState, isAlarmState } from '../lib/types';
 
+const ALARM_SOUND_ENABLED_KEY = 'pulse.alarm_sound_enabled';
+
 type BrowserWindow = Window & {
   webkitAudioContext?: typeof AudioContext;
 };
@@ -14,23 +16,35 @@ function createAudioContext(): AudioContext | null {
 }
 
 export function useAlarm(sites: SiteState[]) {
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return window.localStorage.getItem(ALARM_SOUND_ENABLED_KEY) === '0';
+    } catch {
+      return false;
+    }
+  });
   const [alarmActive, setAlarmActive] = useState(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
   const gainRef = useRef<GainNode | null>(null);
+  const freqIntervalRef = useRef<number | null>(null);
   const vibrationTimerRef = useRef<number | null>(null);
-  const prevAlarmRef = useRef(false);
 
   const hasAlarm = sites.some((site) => site.instances.some(isAlarmState));
 
   useEffect(() => {
-    if (hasAlarm && !prevAlarmRef.current) {
-      setMuted(false);
-    }
-    prevAlarmRef.current = hasAlarm;
     setAlarmActive(hasAlarm);
   }, [hasAlarm]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(ALARM_SOUND_ENABLED_KEY, muted ? '0' : '1');
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [muted]);
 
   useEffect(() => {
     if (alarmActive && !muted) {
@@ -74,13 +88,13 @@ export function useAlarm(sites: SiteState[]) {
     osc.connect(gain);
     osc.start();
     oscillatorRef.current = osc;
-
-    (gain as GainNode & { _interval?: number })._interval = interval;
+    freqIntervalRef.current = interval;
   }
 
   function stopAlarm() {
-    if (gainRef.current) {
-      window.clearInterval((gainRef.current as GainNode & { _interval?: number })._interval);
+    if (freqIntervalRef.current !== null) {
+      window.clearInterval(freqIntervalRef.current);
+      freqIntervalRef.current = null;
     }
 
     if (oscillatorRef.current) {

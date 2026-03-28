@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { getAllStates } from '../store/state';
 import { SITES } from '../config/instances';
+import { getInstanceControls } from '../store/instanceControls';
 
 export function buildStatusPayload() {
   const states = getAllStates();
@@ -11,6 +12,7 @@ export function buildStatusPayload() {
     name: site.name,
     instances: site.instances.map((inst) => {
       const state = stateMap.get(inst.id);
+      const controls = getInstanceControls(inst.id);
       const udpInputCount = Number(state?.lastObservations?.udp_input_count ?? 0);
       const udpHealthyInputCount = Number(state?.lastObservations?.udp_healthy_input_count ?? 0);
       const udpMonitoringEnabled = (state?.lastObservations?.udp_enabled ?? 0) === 1 || udpInputCount > 0;
@@ -23,7 +25,9 @@ export function buildStatusPayload() {
         siteId: inst.siteId,
         playoutType: inst.playoutType,
         commissioned: inst.commissioned,
-        monitoringMode: udpMonitoringEnabled ? 'hybrid' : 'local',
+        monitoringMode: !controls.monitoringEnabled ? 'disabled' : controls.maintenanceMode ? 'maintenance' : udpMonitoringEnabled ? 'hybrid' : 'local',
+        monitoringEnabled: controls.monitoringEnabled,
+        maintenanceMode: controls.maintenanceMode,
         udpMonitoringCapable: inst.udpMonitoringCapable,
         udpMonitoringEnabled,
         udpInputCount,

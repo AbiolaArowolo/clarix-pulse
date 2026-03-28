@@ -29,6 +29,11 @@ function isIPhoneLike(): boolean {
   return /iPad|iPhone|iPod/.test(navigator.userAgent);
 }
 
+function isFirefoxLike(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Firefox/i.test(navigator.userAgent);
+}
+
 function needsLanFriendlyUrl(shareUrl: string): boolean {
   if (!shareUrl) return false;
 
@@ -167,12 +172,15 @@ export function InstallBar({ onModeChange }: Props) {
     copyLink,
     share,
   } = useInstallPrompt();
+  const firefoxLike = isFirefoxLike();
   const needsLanUrl = needsLanFriendlyUrl(shareUrl);
   const installHint = isIPhoneLike
-    ? 'On iPhone: tap Share, then Add to Home Screen.'
+    ? 'On iPhone or iPad: use Share, then Add to Home Screen. Safari does not show a separate Install button.'
+    : firefoxLike
+      ? 'Firefox does not offer the same PWA install flow here. Open Pulse in Chrome or Edge to install it as an app.'
     : canInstall
       ? 'Use Install for the full-screen app experience.'
-      : 'Use the browser menu to install this app.';
+      : 'If no Install button appears yet, use Chrome or Edge and choose Install app or Add to desktop from the browser menu.';
   const qrHint = needsLanUrl
     ? 'Use a LAN URL instead of localhost if you want phone installs on the same network.'
     : 'Scan this code from a phone on the same network to open Pulse instantly.';
@@ -231,7 +239,7 @@ export function InstallBar({ onModeChange }: Props) {
           onClick={expandPanel}
           className="rounded-lg bg-teal-500 px-3 py-2 text-sm font-semibold text-slate-950 transition-colors hover:bg-teal-400"
         >
-          Install Pulse
+          {canInstall ? 'Install Pulse' : isIPhoneLike ? 'Add to Home' : firefoxLike ? 'Use Chrome/Edge' : 'Install Help'}
         </button>
         {mode === 'collapsed' && (
           <button
@@ -289,6 +297,11 @@ export function InstallBar({ onModeChange }: Props) {
                 <span className="rounded-full border border-slate-700 px-2 py-0.5">QR launch</span>
               </div>
               <p className="mt-3 text-[11px] leading-5 text-slate-500">{installHint}</p>
+              {firefoxLike && (
+                <p className="mt-1 text-[11px] leading-5 text-yellow-300">
+                  Best result: open this same URL in Chrome or Edge, then install from there.
+                </p>
+              )}
               <p className="mt-1 text-[11px] leading-5 text-slate-500">{qrHint}</p>
             </div>
           </div>

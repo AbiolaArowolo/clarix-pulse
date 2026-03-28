@@ -11,7 +11,7 @@ import {
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 
-const FALLBACK_REFRESH_MS = 2000;
+const FALLBACK_REFRESH_MS = 15_000;
 const DISCONNECT_THRESHOLD_MS = 8000;
 
 export function useMonitoring() {
@@ -125,7 +125,12 @@ export function useMonitoring() {
   return { sites, connectionStatus };
 }
 
+function hasOwn(update: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(update, key);
+}
+
 function mergeUpdate(inst: InstanceState, update: any): InstanceState {
+  const updateRecord = update && typeof update === 'object' ? update as Record<string, unknown> : {};
   const thumbnailDataUrl = update.thumbnailDataUrl ?? update.thumbnailData ?? inst.thumbnailDataUrl;
 
   return {
@@ -134,11 +139,15 @@ function mergeUpdate(inst: InstanceState, update: any): InstanceState {
     playerId: update.playerId ?? inst.playerId,
     commissioned: update.commissioned ?? inst.commissioned,
     monitoringMode: (update.monitoringMode ?? inst.monitoringMode) as MonitoringMode,
+    monitoringEnabled: update.monitoringEnabled ?? inst.monitoringEnabled,
+    maintenanceMode: update.maintenanceMode ?? inst.maintenanceMode,
     udpMonitoringCapable: update.udpMonitoringCapable ?? inst.udpMonitoringCapable,
     udpMonitoringEnabled: update.udpMonitoringEnabled ?? inst.udpMonitoringEnabled,
     udpInputCount: update.udpInputCount ?? inst.udpInputCount,
     udpHealthyInputCount: update.udpHealthyInputCount ?? inst.udpHealthyInputCount,
-    udpSelectedInputId: update.udpSelectedInputId ?? inst.udpSelectedInputId,
+    udpSelectedInputId: hasOwn(updateRecord, 'udpSelectedInputId')
+      ? (update.udpSelectedInputId as string | null)
+      : inst.udpSelectedInputId,
     udpProbeEnabled: update.udpProbeEnabled ?? update.udpMonitoringEnabled ?? inst.udpProbeEnabled,
     broadcastHealth: (update.broadcastHealth ?? inst.broadcastHealth) as BroadcastHealth,
     runtimeHealth: (update.runtimeHealth ?? inst.runtimeHealth) as RuntimeHealth,

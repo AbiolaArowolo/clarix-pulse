@@ -1,13 +1,13 @@
 # Pulse - Agent Installation Guide
 
-**Version**: 1.1.0  
-**Date**: 2026-03-27
+**Document Date**: 2026-03-27  
+**Current Bundle Baseline**: `v1.5`
 
----
+## Purpose
 
-## Overview
+This guide covers how to install and update the Windows Pulse agent on playout nodes.
 
-Each Windows playout node should receive one prepared node bundle. The bundle can contain:
+Pulse is packaged as a one-click Windows bundle containing:
 
 - `clarix-agent.exe`
 - `install.bat`
@@ -19,59 +19,40 @@ Each Windows playout node should receive one prepared node bundle. The bundle ca
 - `ffmpeg.exe`
 - `ffprobe.exe`
 
-The intended operator experience is one-click installation with no separate Python, NSSM, ffmpeg, or ffprobe install.
-The operator action is to run `install.bat` as Administrator. `clarix-agent.exe` is bundled because the installer uses it to register and run the Windows service.
+The normal operator action is to run `install.bat` as Administrator. Operators should not manually launch `clarix-agent.exe` for normal installation.
 
 ---
 
-## Pre-Requisites
+## Current Release Notes
 
-- Windows 10 or later (x64)
-- Administrator access for install and uninstall
-- Network reachability to the configured `hub_url`
-- A valid `node_id`, `agent_token`, and player config for the target node
+As of March 27, 2026:
 
-Internet is only required when the hub is remote or when alerting must leave the local network.
+- all node bundles have been rebuilt to `v1.5`
+- the bundle runtime baseline is aligned across all release packages
+- the local Pulse UI is the authoritative place to edit machine-local config
+- the hub still expects the node and player identities to already exist in its commissioned registry
 
----
-
-## Deployment Steps
-
-### 1. Build the agent bundle
-
-On the admin workstation:
-
-```powershell
-pyinstaller --distpath packages/agent/dist --workpath packages/agent/build packages/agent/clarix-agent.spec
-powershell -ExecutionPolicy Bypass -File packages/agent/build-node-bundle.ps1
-```
-
-To inject a specific config:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File packages/agent/build-node-bundle.ps1 `
-  -BundleName site-a-node-1 `
-  -ConfigPath C:\path\to\config.yaml
-```
-
-For consistent multi-node rollouts, rebuild all bundles from the same workspace baseline:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\rebuild-node-bundles.ps1 -PruneReleaseRoot
-powershell -ExecutionPolicy Bypass -File scripts\verify-bundle-parity.ps1
-```
-
-Or:
-
-```powershell
-npm run agent:refresh-bundles
-```
+That last point matters: the installer is generic enough to configure many node layouts, but a new `node_id` / `player_id` combination still needs hub-side registration before heartbeats will be accepted.
 
 ---
 
-## 2. Copy the bundle to the node
+## Supported Install Paths
 
-Copy the bundle folder or zip to the target Windows host.
+### Production Rollout
+
+Use the prepared node bundle for the target node under [packages/agent/release](/D:/monitoring/packages/agent/release).
+
+### Generic / Lab Rollout
+
+The runtime itself also supports a generic installer flow built from [packages/agent/config.example.yaml](/D:/monitoring/packages/agent/config.example.yaml), but production still uses prepared bundles because the hub registry is currently static.
+
+---
+
+## Install Steps
+
+### 1. Copy The Bundle To The Node
+
+Copy either the folder or the `.zip` to the target Windows host.
 
 Suggested temporary destination:
 
@@ -79,47 +60,62 @@ Suggested temporary destination:
 C:\pulse-node-bundle\
 ```
 
----
-
-## 3. Run install.bat as Administrator
+### 2. Run `install.bat` As Administrator
 
 Right-click `install.bat` and choose **Run as administrator**.
 
-Do not separately launch `clarix-agent.exe` during a normal node install.
-
 The installer will:
 
-1. copy files into `%ProgramData%\ClarixPulse\Agent`
-2. preserve or seed `config.yaml`
-3. stage service and UDP helper binaries
+1. self-elevate if needed
+2. stage files into `%ProgramData%\ClarixPulse\Agent`
+3. preserve a valid existing `config.yaml` when appropriate
 4. validate the config
-5. install `ClarixPulseAgent`
-6. set the service to auto-start
+5. install or update the `ClarixPulseAgent` Windows service
+6. set it to automatic startup
 7. start it immediately
+
+### 3. Confirm The Local UI
+
+The installed runtime exposes a persistent local UI at:
+
+```text
+http://127.0.0.1:3210/
+```
+
+Use that UI, or `configure.bat`, for future machine-local updates.
 
 ---
 
-## 4. Configure the node
+## Configuration Model
 
-The installed config lives at:
+Installed config path:
 
 ```text
 %ProgramData%\ClarixPulse\Agent\config.yaml
 ```
 
-You can update it later with:
+Current supported high-value fields:
 
-```text
-%ProgramData%\ClarixPulse\Agent\configure.bat
-```
+- `node_id`
+- `node_name`
+- `site_id`
+- `hub_url`
+- `agent_token`
+- `poll_interval_seconds`
+- `players`
+- `playout_type`
+- `paths`
+- `udp_inputs`
+- advanced `process_selectors`
+- advanced `log_selectors`
 
-### Generic Example Config
+### Example
 
 ```yaml
 node_id: site-a-node-1
-node_name: SITE-A-NODE-1
+node_name: SITE A NODE 1
 site_id: site-a
-hub_url: https://monitor.example.com
+hub_url: https://pulse.example.com
 agent_token: REPLACE_ME
 poll_interval_seconds: 5
 
@@ -141,102 +137,74 @@ players:
       admax_root_candidates:
         - C:\Program Files (x86)\Unimedia\Admax One*\admax
         - C:\Program Files\Unimedia\Admax One*\admax
-    udp_inputs:
-      - udp_input_id: site-a-admax-1-udp-1
-        enabled: true
-        stream_url: udp://239.1.1.1:5000
-        thumbnail_interval_s: 10
+    udp_inputs: []
 ```
 
-### UDP Notes
+### Important Current Rule
 
-- UDP is configured per player
-- each player can define up to 5 UDP inputs
-- `configure.bat` validates enabled UDP inputs before restart
-- the dashboard can also edit UDP inputs when `CONFIG_WRITE_KEY` is configured on the hub
-
-Accepted UDP forms include:
-
-- `udp://239.1.1.1:5000`
-- `udp://@239.1.1.1:5000`
-- `udp@://239.1.1.1:5000`
+The dashboard mirrors node-side config, but in the current release it does not own path or UDP editing. Use the local node UI for those changes.
 
 ---
 
-## 5. Verify
+## Update Flow
+
+To update a node:
+
+1. copy the fresh bundle to the node
+2. run the new `install.bat` as Administrator
+3. keep the existing `%ProgramData%\ClarixPulse\Agent\config.yaml` unless intentionally replacing it
+
+This is the supported update path for the `v1.5` rollout.
+
+---
+
+## Verification
+
+Check the service:
 
 ```bat
 sc query ClarixPulseAgent
+```
+
+Check the agent log:
+
+```bat
 type "%ProgramData%\ClarixPulse\Agent\clarix-agent.log"
 ```
 
-Typical startup output:
+Expected startup shape:
 
 ```text
-2026-03-27 12:00:00 [INFO] Pulse Agent starting - node_id=site-a-node-1, hub=https://monitor.example.com
-2026-03-27 12:00:00 [INFO] Monitoring 2 player(s): ['site-a-insta-1', 'site-a-admax-1']
+Pulse Agent starting - node_id=..., node_name=..., hub=...
+Monitoring N player(s): [...]
 ```
 
 ---
 
-## 6. Common Deployment Patterns
-
-### Single-player node
-
-- one Windows host
-- one `player_id`
-- optional UDP
-
-### Multi-player node
-
-- one Windows host
-- two or more `player_id` entries
-- mixed software types allowed
-
-### Mixed-site rollout
-
-- rebuild all bundles from one source tree
-- keep installer/runtime assets identical
-- vary only `config.yaml` and bundle naming
-
----
-
-## 7. Local LAN Mode
-
-`hub_url` does not need to be public.
-
-Examples:
-
-- `https://monitor.example.com`
-- `http://192.168.1.10:3001`
-
-This allows fully local monitoring when the hub is on the same network.
-
----
-
-## 8. Troubleshooting
+## Troubleshooting
 
 | Symptom | Check |
 |---|---|
-| Service will not start | Review `clarix-agent.log` |
-| Heartbeat rejected (401) | Wrong `agent_token` |
-| Heartbeat rejected (403) | Wrong `node_id` / token mapping |
-| Player not found (404) | `player_id` not in hub registry |
-| Dashboard stays gray | Hub unreachable or node not commissioned |
-| UDP probe not working | Verify stream URL and presence of `ffmpeg.exe` / `ffprobe.exe` |
-| Config changes not showing | Re-run `configure.bat` or wait for heartbeat-based sync |
+| Service does not start | `%ProgramData%\ClarixPulse\Agent\clarix-agent.log` |
+| `401 Unauthorized` | wrong `agent_token` |
+| `403 Player not allowed for this node` | `node_id` / `player_id` is not commissioned on the hub |
+| Local UI not opening from `configure.bat` | open `http://127.0.0.1:3210/` directly |
+| UDP probe not working | verify stream URL and bundled `ffmpeg.exe` / `ffprobe.exe` |
+| Config changed locally but web UI did not reflect it yet | wait for fresh heartbeats and config mirror refresh |
 
 ---
 
-## 9. Updating and Removing
+## Current Release Bundles
 
-### Update
+Release folder:
 
-1. build a fresh node bundle
-2. run the new `install.bat` as Administrator
-3. keep the existing `config.yaml` unless intentionally replacing it
+- [packages/agent/release](/D:/monitoring/packages/agent/release)
 
-### Uninstall
+Current prepared bundles:
 
-1. run `%ProgramData%\ClarixPulse\Agent\uninstall.bat` as Administrator
-2. confirm whether installed files should also be removed
+- `nj-optimum-v1.5`
+- `ny-main-v1.5`
+- `ny-backup-v1.5`
+- `digicel-v1.5`
+
+For exact hashes and timestamped release notes, see [docs/RELEASE_KB_2026-03-27.md](/D:/monitoring/docs/RELEASE_KB_2026-03-27.md).

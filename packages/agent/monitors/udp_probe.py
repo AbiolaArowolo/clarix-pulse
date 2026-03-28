@@ -51,6 +51,18 @@ _FILTER_KEYS = {
 }
 
 
+def _hidden_subprocess_kwargs() -> dict[str, Any]:
+    if not sys.platform.startswith("win"):
+        return {}
+
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    return {
+        "startupinfo": startupinfo,
+        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    }
+
+
 @dataclass(frozen=True)
 class UDPInput:
     """A single UDP source candidate for one player."""
@@ -86,7 +98,13 @@ class UDPProbeSample:
 def _run(args: list[str], timeout: int) -> tuple[int, str, str]:
     """Run a subprocess with timeout, return (returncode, stdout, stderr)."""
     try:
-        r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            **_hidden_subprocess_kwargs(),
+        )
         return r.returncode, r.stdout, r.stderr
     except subprocess.TimeoutExpired:
         return -1, "", "timeout"

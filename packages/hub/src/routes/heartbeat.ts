@@ -1,10 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { Server as SocketServer } from 'socket.io';
 import { AGENT_INSTANCE_MAP, INSTANCE_MAP } from '../config/instances';
-import { getNodeDesiredConfig } from '../config/nodeConfigs';
 import { computeHealth, Observations } from '../services/stateEngine';
 import { evaluateAlert } from '../services/alerting';
+import { getInstanceControls } from '../store/instanceControls';
 import { getState, updateState } from '../store/state';
+import { updateMirroredNodeConfig } from '../store/nodeConfigMirror';
 
 function parseAgentTokens(): Map<string, string> {
   const map = new Map<string, string>();
@@ -39,12 +40,13 @@ export function createHeartbeatRouter(io: SocketServer): Router {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { instanceId, playerId, agentId, nodeId: reportedNodeId, observations } = req.body as {
+    const { instanceId, playerId, agentId, nodeId: reportedNodeId, observations, nodeConfigMirror } = req.body as {
       instanceId?: string;
       playerId?: string;
       agentId?: string;
       nodeId?: string;
       observations: Observations;
+      nodeConfigMirror?: unknown;
     };
 
     const resolvedPlayerId = playerId ?? instanceId;
@@ -66,6 +68,11 @@ export function createHeartbeatRouter(io: SocketServer): Router {
     const instanceConfig = INSTANCE_MAP.get(resolvedPlayerId);
     if (!instanceConfig) {
       return res.status(404).json({ error: 'Unknown player' });
+    }
+    const controls = getInstanceControls(resolvedPlayerId);
+
+    if (nodeConfigMirror !== undefined) {
+      await updateMirroredNodeConfig(nodeId, nodeConfigMirror);
     }
 
     const previousState = getState(resolvedPlayerId);
@@ -98,7 +105,9 @@ export function createHeartbeatRouter(io: SocketServer): Router {
       broadcastHealth,
       runtimeHealth,
       connectivityHealth,
-      monitoringMode: udpMonitoringEnabled ? 'hybrid' : 'local',
+      monitoringMode: !controls.monitoringEnabled ? 'disabled' : controls.maintenanceMode ? 'maintenance' : udpMonitoringEnabled ? 'hybrid' : 'local',
+      monitoringEnabled: controls.monitoringEnabled,
+      maintenanceMode: controls.maintenanceMode,
       udpMonitoringEnabled,
       udpInputCount: Number(observations.udp_input_count ?? 0),
       udpHealthyInputCount: Number(observations.udp_healthy_input_count ?? 0),
@@ -124,7 +133,6 @@ export function createHeartbeatRouter(io: SocketServer): Router {
       broadcastHealth,
       runtimeHealth,
       connectivityHealth,
-      desiredNodeConfig: getNodeDesiredConfig(nodeId),
     });
   });
 

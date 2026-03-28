@@ -63,6 +63,7 @@ function asMapping(value: unknown): RawMapping {
 function normalizeStreamUrl(value: unknown): string {
   const raw = asString(value);
   if (!raw) return '';
+  if (raw.includes('REPLACE_ME')) return '';
 
   const lowered = raw.toLowerCase();
   if (lowered.startsWith('udp@://')) {
@@ -78,6 +79,10 @@ function normalizeStreamUrl(value: unknown): string {
     return raw;
   }
   return `udp://${raw}`;
+}
+
+function shouldKeepUdpInput(entry: UdpInputConfig): boolean {
+  return entry.enabled || Boolean(entry.streamUrl.trim());
 }
 
 function configFiles(): string[] {
@@ -121,16 +126,20 @@ function normalizeUdpInputs(playerId: string, value: unknown): UdpInputConfig[] 
         thumbnailIntervalS: clampInt(udp.thumbnail_interval_s, 10, 1, 300),
       };
     })
-    .filter((entry) => entry.udpInputId);
+    .filter((entry) => entry.udpInputId)
+    .filter(shouldKeepUdpInput);
 }
 
 function serializeUdpInputs(playerId: string, udpInputs: UdpInputConfig[]): Array<Record<string, unknown>> {
-  return udpInputs.slice(0, 5).map((entry, index) => ({
-    udp_input_id: asString(entry.udpInputId, `${playerId}-udp-${index + 1}`),
-    enabled: !!entry.enabled,
-    stream_url: normalizeStreamUrl(entry.streamUrl),
-    thumbnail_interval_s: clampInt(entry.thumbnailIntervalS, 10, 1, 300),
-  }));
+  return udpInputs
+    .slice(0, 5)
+    .map((entry, index) => ({
+      udp_input_id: asString(entry.udpInputId, `${playerId}-udp-${index + 1}`),
+      enabled: !!entry.enabled,
+      stream_url: normalizeStreamUrl(entry.streamUrl),
+      thumbnail_interval_s: clampInt(entry.thumbnailIntervalS, 10, 1, 300),
+    }))
+    .filter((entry) => Boolean(asBool(entry.enabled, false) || asString(entry.stream_url)));
 }
 
 function extractPlayers(doc: RawMapping, filePath: string): PlayerNodeConfig[] {
