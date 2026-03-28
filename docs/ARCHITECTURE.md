@@ -1,7 +1,7 @@
 # Pulse - Architecture
 
-**Document Date**: `2026-03-27 20:43:51 -04:00`  
-**Status**: Codebase architecture after the PostgreSQL and generic-installer refactor
+**Document Date**: `2026-03-28 06:25:19 -04:00`  
+**Status**: Codebase architecture after the PostgreSQL refactor, generic-installer rollout, and playout-profile expansion
 
 ## System Model
 
@@ -33,6 +33,7 @@ The node owns:
 - `hub_url`
 - local player list
 - playout type
+- playout vendor profile
 - local paths
 - process selectors
 - log selectors
@@ -45,6 +46,43 @@ The authoritative local interface is:
 The node persists that configuration in:
 
 - `%ProgramData%\ClarixPulse\Agent\config.yaml`
+
+Identity note:
+
+- `node_name` is a display label and is safe to rename
+- `node_id` and `player_id` are durable identities and should stay stable unless you intentionally want Pulse to treat them as new objects
+
+### Playout profile model
+
+Pulse now separates playout support into:
+
+- native profiles
+- generic vendor profiles
+
+Native profiles currently include:
+
+- `insta`
+- `admax`
+
+Generic vendor-ready profiles currently include:
+
+- `cinegy_air`
+- `playbox_neo`
+- `grass_valley_itx`
+- `imagine_versio`
+- `broadstream_oasys`
+- `pebble_marina`
+- `evertz_streampro`
+- `generic_windows`
+
+The local UI now stores the selected profile explicitly. Native profiles keep their deep path/state parsing. Non-native profiles use:
+
+- process selectors
+- log selectors
+- optional `paths.log_path`
+- UDP/output monitoring
+
+That means the installer is now ready for broader playout estates without falsely treating every unsupported vendor as `Insta`.
 
 ### Hub is authoritative for central operational state
 
@@ -164,6 +202,10 @@ install.bat
 ```
 
 This keeps the one-click operator path while reducing time spent inside an elevated session.
+
+Current generic release baseline:
+
+- `pulse-generic-v1.8`
 
 ---
 

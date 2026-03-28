@@ -1,7 +1,7 @@
 # Pulse Release Knowledge Base - 2026-03-27
 
-**Prepared**: `2026-03-27 20:43:51 -04:00`  
-**Scope**: PostgreSQL refactor, dynamic enrollment, generic installer, release bundle refresh, and documentation closure
+**Prepared**: `2026-03-28 06:25:19 -04:00`  
+**Scope**: PostgreSQL refactor, dynamic enrollment, generic installer, playout-profile expansion, release bundle refresh, and documentation closure
 
 ## Executive Summary
 
@@ -15,10 +15,13 @@ Key outcomes:
 - node / player / token inventory is DB-backed
 - generic node self-enrollment exists through `POST /api/config/enroll`
 - local UI now exposes process selectors and log selectors
+- local UI now exposes playout vendor profiles beyond Insta and Admax
+- generic vendor profiles now exist for Cinegy Air, PlayBox Neo, Grass Valley iTX, Imagine Versio, BroadStream OASYS, Pebble Marina, Evertz StreamPro / Overture, and Generic Windows Playout
 - installer now defers admin until the final service install phase
 - thumbnail blobs moved out of the main state DB path
-- bundles rebuilt to `v1.6`
+- bundles rebuilt to `v1.8`
 - generic bundle added to the release manifest
+- Optimum PC was later cleanly reinstalled onto the `v1.8` generic bundle with node identity preserved
 
 Important execution note:
 
@@ -35,22 +38,22 @@ Release folder:
 
 ### Common Agent Runtime Hash
 
-All `v1.6` bundles contain the same agent executable:
+All `v1.8` bundles contain the same agent executable:
 
 ```text
 clarix-agent.exe SHA256
-485E23B24EC290C4156234A80C33F176AA4D9B5F3E0EAD1D7D64803E44B520FB
+D44984D6E7786F5CA071A5D8D6BBF21CDBE378DD70767BAE52A01AAE122B1BD9
 ```
 
 ### Bundle Zip Hashes
 
 | Bundle | Zip Path | SHA256 |
 |---|---|---|
-| `pulse-generic-v1.6` | [pulse-generic-v1.6.zip](/D:/monitoring/packages/agent/release/pulse-generic-v1.6.zip) | `F36671DD1DB131E511EAA5C1950E3B2FDA0A1A69A88F87B695FFABF16F8B5AB7` |
-| `nj-optimum-v1.6` | [nj-optimum-v1.6.zip](/D:/monitoring/packages/agent/release/nj-optimum-v1.6.zip) | `4B0F5426F65FC17298BB05551F92498DE55D9EFA80F270F51F72B25C3C64A7F8` |
-| `ny-main-v1.6` | [ny-main-v1.6.zip](/D:/monitoring/packages/agent/release/ny-main-v1.6.zip) | `1D6250217611F7794EA510F6AF59B459373077DF8F1AAA77165E797FC63CC7A0` |
-| `ny-backup-v1.6` | [ny-backup-v1.6.zip](/D:/monitoring/packages/agent/release/ny-backup-v1.6.zip) | `8323DD21BBB18BD907956895E90EB376B0A557FF7E7654BFCEA241500AF21172` |
-| `digicel-v1.6` | [digicel-v1.6.zip](/D:/monitoring/packages/agent/release/digicel-v1.6.zip) | `D5C5A417EF9EA472B71BB9F07D0112D7CB671BE1F3F50F663D61B26F845F9D7B` |
+| `pulse-generic-v1.8` | [pulse-generic-v1.8.zip](/D:/monitoring/packages/agent/release/pulse-generic-v1.8.zip) | `D70C0BF4ADE54939410C052570DCAFD11EB26E92EC6BD76C0627C1118694FEFD` |
+| `nj-optimum-v1.8` | [nj-optimum-v1.8.zip](/D:/monitoring/packages/agent/release/nj-optimum-v1.8.zip) | `FB37B72E8382FC4DB3560509A376026B381A16E96A4A0A766E148B41A48079E1` |
+| `ny-main-v1.8` | [ny-main-v1.8.zip](/D:/monitoring/packages/agent/release/ny-main-v1.8.zip) | `A39195DB51C5CC6BC9B9EA836C81CEC1EFFF880B68685D8BE0D069BA7F712363` |
+| `ny-backup-v1.8` | [ny-backup-v1.8.zip](/D:/monitoring/packages/agent/release/ny-backup-v1.8.zip) | `ED5E03013970885D8AC9934EC176220ECDB897762ABDB0B82189A7F81F6A10A8` |
+| `digicel-v1.8` | [digicel-v1.8.zip](/D:/monitoring/packages/agent/release/digicel-v1.8.zip) | `2F032219F860F9D86C6508316DC3E336B8C1A5ECF9AA5A160110CB19C277828C` |
 
 ### Release Manifest
 
@@ -60,7 +63,7 @@ Manifest:
 
 Current default version:
 
-- `v1.6`
+- `v1.8`
 
 ---
 
@@ -85,7 +88,7 @@ Verified in this pass:
 
 Result:
 
-- parity passed for the `v1.6` bundle set, including the new generic installer bundle
+- parity passed for the `v1.8` bundle set, including the generic installer bundle
 
 ---
 
@@ -97,6 +100,7 @@ Machine-specific settings remain node-owned:
 
 - paths
 - playout type
+- playout vendor profile
 - player count
 - process selectors
 - log selectors
@@ -179,6 +183,7 @@ The refactor did not alter:
 ### Agent
 
 - installer flow and local UI: [agent.py](/D:/monitoring/packages/agent/agent.py)
+- playout profile registry: [playout_profiles.py](/D:/monitoring/packages/agent/playout_profiles.py)
 - generic config template: [config.example.yaml](/D:/monitoring/packages/agent/config.example.yaml)
 - bundle manifest text: [build-node-bundle.ps1](/D:/monitoring/packages/agent/build-node-bundle.ps1)
 
@@ -232,3 +237,8 @@ Why it still matters:
 - Deployment: [DEPLOYMENT.md](/D:/monitoring/docs/DEPLOYMENT.md)
 - Agent install: [AGENT_INSTALL.md](/D:/monitoring/docs/AGENT_INSTALL.md)
 - Handover: [HANDOVER.txt](/C:/Users/owner/Desktop/HANDOVER.txt)
+| `2026-03-28 06:23:27 -04:00` | The generic installer needed a broader playout model because real broadcaster estates span many vendors beyond the two native profiles | playout profile registry and safe generic vendor mode were added, then bundled into `v1.8` |
+| `2026-03-28 06:23:27 -04:00` | The Optimum PC needed a clean local reinstall onto the new generic runtime without losing its existing node token and live config | service was removed and reinstalled from the `v1.8` generic bundle with the saved config restored |
+| `2026-03-28 05:55:24 -04:00` | `pulse-generic-v1.8`, `nj-optimum-v1.8`, `ny-main-v1.8`, `ny-backup-v1.8`, and `digicel-v1.8` rebuilt |
+| `2026-03-28 06:23:27 -04:00` | Optimum PC clean reinstall completed from the `v1.8` generic bundle |
+| `2026-03-28 06:23:44 -04:00` | live API confirmed Optimum back online with `udpMonitoringEnabled=true` and `udpInputCount=1` |

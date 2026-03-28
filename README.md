@@ -14,6 +14,7 @@ The product is built for environments where every machine may be slightly differ
 - Faster rollout with a generic installer instead of endless per-node rebuilds
 - Lower setup friction by delaying admin permission until the final service install step
 - Support for the real signals operators care about: logs, process state, runtime health, and UDP stream inputs
+- Playout-profile driven onboarding that can handle native and generic vendor shapes from the same installer
 
 ## What Makes It Different
 
@@ -57,6 +58,7 @@ The architecture is intentionally simple to reason about:
 
 - PostgreSQL-backed hub persistence
 - Generic Windows installer as the default deployment path
+- Expanded playout profile model for native and generic vendor onboarding
 - Local UI as the source of truth for machine-specific configuration
 - Hub as the source of truth for central operational state
 

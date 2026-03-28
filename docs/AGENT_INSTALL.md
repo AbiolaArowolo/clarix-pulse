@@ -1,7 +1,7 @@
 # Pulse - Agent Installation Guide
 
-**Document Date**: `2026-03-27 20:43:51 -04:00`  
-**Current Bundle Baseline**: `v1.6`
+**Document Date**: `2026-03-28 06:25:19 -04:00`  
+**Current Bundle Baseline**: `v1.8`
 
 ## Purpose
 
@@ -36,21 +36,24 @@ Release folder:
 
 Current bundles:
 
-- `pulse-generic-v1.6`
-- `nj-optimum-v1.6`
-- `ny-main-v1.6`
-- `ny-backup-v1.6`
-- `digicel-v1.6`
+- `pulse-generic-v1.8`
+- `nj-optimum-v1.8`
+- `ny-main-v1.8`
+- `ny-backup-v1.8`
+- `digicel-v1.8`
 
 ---
 
-## What Changed In `v1.6`
+## What Changed In `v1.8`
 
 - install now gathers or validates config before the final admin prompt
 - local UI still stays fixed at `http://127.0.0.1:3210/`
 - local UI now exposes process selectors and log selectors
 - node can enroll itself through the hub if you provide an enrollment key
 - prepared bundles remain available, but generic rollout is now first-class
+- playout type is now profile-driven instead of being limited to just `Insta` and `Admax`
+- new profile choices now include `Cinegy Air`, `PlayBox Neo`, `Grass Valley iTX`, `Imagine Versio`, `BroadStream OASYS`, `Pebble Marina`, `Evertz StreamPro / Overture`, and `Generic Windows Playout`
+- non-native vendor profiles now save generic log/process settings safely instead of falling back to `Insta` assumptions
 
 Unchanged by design:
 
@@ -124,11 +127,49 @@ Machine-local config belongs on the node. That includes:
 - paths
 - player list
 - playout type
+- playout vendor profile
 - process selectors
 - log selectors
 - UDP inputs
 
 The hub mirrors this config for visibility, but it is not the primary live editor for these fields.
+
+---
+
+## What You Can Rename
+
+If you only want the label in the UI to look different, change `node_name`.
+
+Safe to change:
+
+- `node_name`: display label only
+- local paths
+- playout vendor profile
+- process selectors
+- log selectors
+- UDP inputs
+- `poll_interval_seconds`
+
+Change with intent:
+
+- `site_id`: moves the node under a different site grouping in the dashboard
+- `playout_type`: valid when you are intentionally switching the player to a different vendor profile and updating its paths/selectors to match
+
+Keep stable unless you mean to create a new identity:
+
+- `node_id`: this is the node identity used by the hub
+- `player_id`: this is the player identity used for state, alerts, and history
+
+Do not casually edit:
+
+- `hub_url`: only change if the node should report to a different hub
+- `agent_token`: only change if you are rotating or replacing the node registration
+- `enrollment_key`: bootstrap-only field used when `agent_token` is blank
+
+Practical rule:
+
+- rename `node_name` if you want a nicer label
+- leave `node_id` and `player_id` alone unless you intentionally want Pulse to treat them as different objects
 
 ---
 
@@ -156,6 +197,18 @@ players:
       include_contains:
         - Insta 1
       paused_regex: (?i)paused
+    udp_inputs: []
+
+  - player_id: site-a-cinegy-1
+    playout_type: cinegy_air
+    paths:
+      log_path: C:\Cinegy\Logs
+    process_selectors:
+      process_names:
+        - CinegyAirEngine.exe
+    log_selectors:
+      paused_regex: (?i)pause
+      exited_regex: (?i)stop|shutdown|exit
     udp_inputs: []
 ```
 
@@ -200,10 +253,11 @@ Monitoring N player(s): [...]
 | `403 Player not allowed for this node` | node and player inventory is wrong on the hub |
 | Local UI does not open from `configure.bat` | open `http://127.0.0.1:3210/` directly |
 | UDP probe not working | verify stream URL and bundled `ffmpeg.exe` / `ffprobe.exe` |
+| Non-native playout profile shows little runtime detail | add vendor-specific `process_selectors` and `log_selectors`, plus `paths.log_path` if the system writes local text logs |
 | Dashboard does not reflect new local settings yet | wait for the next heartbeat / mirror refresh |
 
 ---
 
 ## Operational Note
 
-Prepared per-node bundles still exist in `v1.6`, but they are now optional convenience artifacts. The architecture target is that any machine can take the generic bundle, be configured locally, enroll itself, and start reporting without a special installer build for that one node.
+Prepared per-node bundles still exist in `v1.8`, but they are now optional convenience artifacts. The architecture target is that any machine can take the generic bundle, be configured locally, enroll itself, and start reporting without a special installer build for that one node.
