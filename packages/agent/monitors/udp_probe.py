@@ -13,6 +13,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional, Sequence
 
@@ -441,9 +442,15 @@ def sample_udp_source(source: UDPInput, duration: int = 10) -> UDPProbeSample:
     if not presence:
         return UDPProbeSample(source=source, present=0)
 
-    freeze = check_freeze(source.url, duration=duration)
-    black = check_black(source.url, duration=duration)
-    silence = check_silence(source.url, duration=duration)
+    # These ffmpeg passes are independent, so run them concurrently to keep
+    # the per-input probe closer to one sample window instead of three.
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        freeze_future = executor.submit(check_freeze, source.url, duration)
+        black_future = executor.submit(check_black, source.url, duration)
+        silence_future = executor.submit(check_silence, source.url, duration)
+        freeze = freeze_future.result()
+        black = black_future.result()
+        silence = silence_future.result()
 
     return UDPProbeSample(
         source=source,

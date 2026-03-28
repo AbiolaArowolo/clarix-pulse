@@ -22,6 +22,7 @@ import threading
 import traceback
 import webbrowser
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -2345,31 +2346,78 @@ def post_thumbnail(
 # --- Player polling ------------------------------------------------------------
 
 _last_thumbnail_at: dict[str, float] = {}
+UDP_PROBE_MAX_WORKERS = 4
 
 
 def _thumbnail_key(node_id: str, player_id: str, udp_input_id: str) -> str:
     return f"{node_id}:{player_id}:{udp_input_id}"
 
 
-def _udp_rank(result: dict[str, Any]) -> tuple[int, float, float, float]:
+def _udp_rank(result: dict[str, Any]) -> tuple[int, float, float, float, int]:
     metrics = result.get("metrics", {})
     present = 1 if metrics.get("output_signal_present") == 1 else 0
     freeze = float(metrics.get("output_freeze_seconds") or 0.0)
     black = float(metrics.get("output_black_ratio") or 0.0)
     silence = float(metrics.get("output_audio_silence_seconds") or 0.0)
-    return (present, -freeze, -black, -silence)
+    source_order = int(result.get("source_order") or 0)
+    return (present, -freeze, -black, -silence, -source_order)
+
+
+def _probe_udp_input(
+    player_id: str,
+    udp_input_id: str,
+    stream_url: str,
+    thumbnail_interval: int,
+    source_order: int,
+) -> tuple[dict[str, Any], dict[str, Any] | None, bool]:
+    entry: dict[str, Any] = {
+        "udp_input_id": udp_input_id,
+        "enabled": True,
+        "stream_url_present": True,
+    }
+
+    try:
+        probe_result = udp_probe.check(stream_url)
+        metrics = {
+            "output_signal_present": int(probe_result.get("output_signal_present", 0) or 0),
+            "output_freeze_seconds": float(probe_result.get("output_freeze_seconds") or 0.0),
+            "output_black_ratio": float(probe_result.get("output_black_ratio") or 0.0),
+            "output_audio_silence_seconds": float(probe_result.get("output_audio_silence_seconds") or 0.0),
+        }
+        healthy = (
+            metrics["output_signal_present"] == 1
+            and metrics["output_freeze_seconds"] < 20
+            and metrics["output_black_ratio"] < 0.98
+        )
+
+        entry.update(metrics)
+        entry["healthy"] = healthy
+
+        candidate = {
+            "udp_input_id": udp_input_id,
+            "stream_url": stream_url,
+            "thumbnail_interval_s": thumbnail_interval,
+            "metrics": metrics,
+            "source_order": source_order,
+        }
+        return entry, candidate, healthy
+    except Exception as e:
+        entry["error"] = str(e)
+        log.debug(f"[{player_id}/{udp_input_id}] UDP probe error: {e}")
+        return entry, None, False
 
 
 def _collect_udp_matrix(
     player_id: str,
     udp_inputs: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, int, int]:
-    matrix: list[dict[str, Any]] = []
+    matrix: list[dict[str, Any] | None] = [None] * len(udp_inputs)
     candidates: list[dict[str, Any]] = []
     configured_count = 0
     healthy_count = 0
+    probe_jobs: list[tuple[int, str, str, int]] = []
 
-    for udp_input in udp_inputs:
+    for index, udp_input in enumerate(udp_inputs):
         udp_input_id = udp_input["udp_input_id"]
         enabled = _as_bool(udp_input.get("enabled"), False)
         stream_url = _as_str(udp_input.get("stream_url"))
@@ -2383,54 +2431,38 @@ def _collect_udp_matrix(
 
         if not enabled:
             entry["skipped"] = True
-            matrix.append(entry)
+            matrix[index] = entry
             continue
 
         if not stream_url:
             entry["error"] = "missing stream_url"
-            matrix.append(entry)
+            matrix[index] = entry
             continue
 
         configured_count += 1
+        probe_jobs.append((index, udp_input_id, stream_url, thumbnail_interval))
 
-        try:
-            probe_result = udp_probe.check(stream_url)
-            metrics = {
-                "output_signal_present": int(probe_result.get("output_signal_present", 0) or 0),
-                "output_freeze_seconds": float(probe_result.get("output_freeze_seconds") or 0.0),
-                "output_black_ratio": float(probe_result.get("output_black_ratio") or 0.0),
-                "output_audio_silence_seconds": float(probe_result.get("output_audio_silence_seconds") or 0.0),
+    if probe_jobs:
+        max_workers = min(UDP_PROBE_MAX_WORKERS, len(probe_jobs))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {
+                executor.submit(_probe_udp_input, player_id, udp_input_id, stream_url, thumbnail_interval, index): index
+                for index, udp_input_id, stream_url, thumbnail_interval in probe_jobs
             }
-            healthy = (
-                metrics["output_signal_present"] == 1
-                and metrics["output_freeze_seconds"] < 20
-                and metrics["output_black_ratio"] < 0.98
-            )
-
-            entry.update(metrics)
-            entry["healthy"] = healthy
-            if healthy:
-                healthy_count += 1
-
-            candidates.append(
-                {
-                    "udp_input_id": udp_input_id,
-                    "stream_url": stream_url,
-                    "thumbnail_interval_s": thumbnail_interval,
-                    "metrics": metrics,
-                }
-            )
-        except Exception as e:
-            entry["error"] = str(e)
-            log.debug(f"[{player_id}/{udp_input_id}] UDP probe error: {e}")
-
-        matrix.append(entry)
+            for future in as_completed(future_map):
+                index = future_map[future]
+                entry, candidate, healthy = future.result()
+                matrix[index] = entry
+                if candidate:
+                    candidates.append(candidate)
+                if healthy:
+                    healthy_count += 1
 
     primary: dict[str, Any] | None = None
     if candidates:
         primary = max(candidates, key=_udp_rank)
 
-    return matrix, primary, configured_count, healthy_count
+    return [entry for entry in matrix if entry is not None], primary, configured_count, healthy_count
 
 
 def _maybe_capture_thumbnail(
@@ -2536,15 +2568,6 @@ def poll_player(
     if primary_udp:
         observations.update(primary_udp.get("metrics", {}))
 
-        thumbnail_udp_input_id = primary_udp["udp_input_id"]
-        thumbnail_data_url = _maybe_capture_thumbnail(
-            node_id,
-            player_id,
-            thumbnail_udp_input_id,
-            primary_udp["stream_url"],
-            _as_int(primary_udp.get("thumbnail_interval_s"), 10),
-        )
-
     # POST heartbeat
     response_payload = post_heartbeat(
         hub_url,
@@ -2558,6 +2581,16 @@ def poll_player(
         log.debug(f"[{player_id}] heartbeat OK — {observations}")
 
     # POST thumbnail if captured
+    if primary_udp:
+        thumbnail_udp_input_id = primary_udp["udp_input_id"]
+        thumbnail_data_url = _maybe_capture_thumbnail(
+            node_id,
+            player_id,
+            thumbnail_udp_input_id,
+            primary_udp["stream_url"],
+            _as_int(primary_udp.get("thumbnail_interval_s"), 10),
+        )
+
     if thumbnail_data_url and thumbnail_udp_input_id:
         post_thumbnail(hub_url, token, node_id, player_id, thumbnail_udp_input_id, thumbnail_data_url)
 
