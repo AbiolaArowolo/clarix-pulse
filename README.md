@@ -1,141 +1,74 @@
 # Pulse
 
-Multi-site playout monitoring with a Windows node agent, a central hub, and a live dashboard.
+Operational monitoring for modern playout environments.
 
-## Current Codebase Status
+Pulse gives operators a cleaner way to monitor broadcast and playout machines across multiple locations without turning every deployment into a custom engineering project. It combines a lightweight node agent on each Windows PC, a central hub for oversight and alerting, and a live dashboard that helps teams spot issues quickly, understand what changed, and respond with confidence.
 
-As of `2026-03-27 20:43:51 -04:00`:
+The product is built for environments where every machine may be slightly different, but the operational standard still needs to be consistent. That is where Pulse is strongest: flexible at the node, centralized at the hub, and practical in day-to-day use.
 
-- play / pause / stop runtime logic is unchanged from the accepted live behavior
-- the hub has been moved in code from SQLite to PostgreSQL
-- static runtime registry usage has been replaced with DB-backed `sites`, `nodes`, `players`, and `agent_tokens`
-- the hub now supports generic node enrollment through `POST /api/config/enroll`
-- the Windows installer now prepares local config first and asks for admin only for the final service install step
-- the local node UI at `http://127.0.0.1:3210/` now exposes process selectors and log selectors
-- thumbnails are no longer stored inline in the main hub state database; they are written to a thumbnail file cache
-- release bundles have been rebuilt to `v1.6`, including a new generic installer bundle
-- the production VPS hub was cut over to PostgreSQL on `2026-03-27` and is now running commit `298f858`
+## Why Pulse
 
-Important operational note:
+- One monitoring view across multiple sites and playout machines
+- Local node setup that adapts to the realities of each PC
+- Centralized monitoring state, alerting, and operational control
+- Faster rollout with a generic installer instead of endless per-node rebuilds
+- Lower setup friction by delaying admin permission until the final service install step
+- Support for the real signals operators care about: logs, process state, runtime health, and UDP stream inputs
 
-- this workstation does not currently have `docker` or `psql`, so the codebase and bundles were fully rebuilt and verified, but a live Postgres server was not stood up locally in this turn
+## What Makes It Different
 
-For the timestamped engineering and release record, see [RELEASE_KB_2026-03-27.md](/D:/monitoring/docs/RELEASE_KB_2026-03-27.md).
+Most monitoring tools force a choice between rigid central configuration and fragile one-off machine setups.
 
----
+Pulse takes a more practical approach:
 
-## Overview
+- The node owns machine-specific details such as log paths, selectors, playout type, and stream inputs
+- The hub owns the shared operational layer such as alert routing, maintenance mode, monitoring status, tokens, and inventory
 
-Pulse now follows this model:
+That split makes the platform easier to deploy, easier to scale, and easier to support over time. New machines can be brought online without redesigning the whole system, while operators still get one grounded view of what is happening across the estate.
 
-```text
-[Windows node / local UI]
-  -> [Pulse agent service]
-  -> [Hub API + PostgreSQL control plane + thumbnail file cache]
-  -> [Dashboard / PWA]
+## Built For Real Operations
+
+Pulse is designed for teams that need monitoring to be useful under real pressure, not just technically correct on paper.
+
+- It stays close to the machine by reading the local signals that actually describe player behavior
+- It keeps the operator experience simple by presenting that state centrally
+- It supports a generic installer flow for flexible deployment on new machines
+- It still allows prepared bundles where a pre-configured rollout is useful
+
+This makes Pulse a good fit for environments where rollout speed, supportability, and clarity matter just as much as raw monitoring depth.
+
+## Architecture At A Glance
+
+```mermaid
+flowchart LR
+    A["Windows Node<br/>Pulse Agent + Local UI"] --> B["Machine-Specific Signals<br/>Logs, Processes, UDP"]
+    A --> C["Pulse Hub<br/>PostgreSQL Control Plane"]
+    C --> D["Live Dashboard"]
+    C --> E["Alerts and Operational Controls"]
 ```
 
-### Configuration ownership
+The architecture is intentionally simple to reason about:
 
-Local node UI is the source of truth for:
+- the agent stays close to the machine
+- the hub centralizes control and persistence
+- the dashboard gives operators one place to watch the estate
 
-- log paths
-- playout type
-- player count
-- process selectors
-- log selectors
-- UDP URLs
+## Current Product Direction
 
-Hub is the source of truth for:
+- PostgreSQL-backed hub persistence
+- Generic Windows installer as the default deployment path
+- Local UI as the source of truth for machine-specific configuration
+- Hub as the source of truth for central operational state
 
-- monitoring enabled / disabled
-- maintenance mode
-- alert routing
-- tokens
-- node / player inventory
-- mirrored read-only node config
+## Learn More
 
-### Alerting rule
+The README is intentionally high-level. Detailed implementation and operational documents live in the `docs` folder.
 
-The current way alerts are generated was intentionally left alone in this architecture pass. The refactor changed persistence, registration, installer flow, and config ownership, but not the accepted play / pause / stop alert semantics.
-
----
-
-## What Changed In This Release
-
-### Hub
-
-- PostgreSQL now replaces SQLite in [db.ts](/D:/monitoring/packages/hub/src/store/db.ts)
-- dynamic registry tables are managed through [registry.ts](/D:/monitoring/packages/hub/src/store/registry.ts)
-- node heartbeat auth now resolves against DB-backed `agent_tokens`
-- node/player ownership now resolves from DB-backed `players`
-- mirrored node config stays read-only in [nodeConfigMirror.ts](/D:/monitoring/packages/hub/src/store/nodeConfigMirror.ts)
-- thumbnail blobs moved out of the main state store into [thumbnails.ts](/D:/monitoring/packages/hub/src/store/thumbnails.ts)
-
-### Agent
-
-- installer now minimizes admin time in [agent.py](/D:/monitoring/packages/agent/agent.py)
-- generic enrollment can mint an `agent_token` from an `enrollment_key`
-- local setup UI now exposes advanced selectors
-- fixed local UI access remains `http://127.0.0.1:3210/`
-
-### Release tooling
-
-- bundle manifest now includes `pulse-generic-v1.6`
-- bundle rebuild and parity scripts understand bundles without a dedicated node config file
-
----
-
-## Release Artifacts
-
-Release folder:
-
-- [packages/agent/release](/D:/monitoring/packages/agent/release)
-
-Current bundles:
-
-- `pulse-generic-v1.6`
-- `nj-optimum-v1.6`
-- `ny-main-v1.6`
-- `ny-backup-v1.6`
-- `digicel-v1.6`
-
-Bundle verification:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\rebuild-node-bundles.ps1 -PruneReleaseRoot
-powershell -ExecutionPolicy Bypass -File scripts\verify-bundle-parity.ps1
-```
-
----
-
-## Environment Model
-
-The hub now expects PostgreSQL:
-
-```env
-PULSE_DATABASE_URL=postgres://pulse_user:password@127.0.0.1:5432/clarix_pulse
-PULSE_ENROLLMENT_KEY=REPLACE_ME
-PULSE_THUMBNAIL_DIR=/var/lib/clarix-pulse/thumbnails
-```
-
-See the full template in [/.env.example](/D:/monitoring/.env.example).
-
----
-
-## Documentation Index
-
-- Architecture: [ARCHITECTURE.md](/D:/monitoring/docs/ARCHITECTURE.md)
-- Deployment: [DEPLOYMENT.md](/D:/monitoring/docs/DEPLOYMENT.md)
-- Agent install: [AGENT_INSTALL.md](/D:/monitoring/docs/AGENT_INSTALL.md)
-- Monitoring rules: [MONITORING_SPEC.md](/D:/monitoring/docs/MONITORING_SPEC.md)
-- Decisions: [DECISIONS.md](/D:/monitoring/docs/DECISIONS.md)
-- Product summary: [PRD.md](/D:/monitoring/docs/PRD.md)
-- Tech stack: [TECH_STACK.md](/D:/monitoring/docs/TECH_STACK.md)
-- Release KB: [RELEASE_KB_2026-03-27.md](/D:/monitoring/docs/RELEASE_KB_2026-03-27.md)
-
----
-
-## Current Next Step
-
-The next operational step is rolling the generic installer to additional PCs, validating enrollment from the local UI, and replacing the legacy Telegram username recipient with a discovered numeric chat ID.
+- Product summary: [docs/PRD.md](docs/PRD.md)
+- Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Deployment guide: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+- Agent install guide: [docs/AGENT_INSTALL.md](docs/AGENT_INSTALL.md)
+- Monitoring rules: [docs/MONITORING_SPEC.md](docs/MONITORING_SPEC.md)
+- Technical decisions: [docs/DECISIONS.md](docs/DECISIONS.md)
+- Tech stack: [docs/TECH_STACK.md](docs/TECH_STACK.md)
+- Release record: [docs/RELEASE_KB_2026-03-27.md](docs/RELEASE_KB_2026-03-27.md)
