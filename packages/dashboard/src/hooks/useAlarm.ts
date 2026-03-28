@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { SiteState, isAlarmState } from '../lib/types';
 
 const ALARM_SOUND_ENABLED_KEY = 'pulse.alarm_sound_enabled';
+const AUDIO_UNLOCK_EVENTS = ['pointerdown', 'keydown', 'touchstart'] as const;
 
 type BrowserWindow = Window & {
   webkitAudioContext?: typeof AudioContext;
@@ -25,6 +26,7 @@ export function useAlarm(sites: SiteState[]) {
     }
   });
   const [alarmActive, setAlarmActive] = useState(false);
+  const [audioBlocked, setAudioBlocked] = useState(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
   const gainRef = useRef<GainNode | null>(null);
@@ -46,52 +48,37 @@ export function useAlarm(sites: SiteState[]) {
     }
   }, [muted]);
 
-  useEffect(() => {
-    if (alarmActive && !muted) {
-      startAlarm();
-      startVibration();
-    } else {
-      stopAlarm();
-      stopVibration();
+  const ensureAudioContext = useCallback(() => {
+    const existing = audioCtxRef.current;
+    if (existing && existing.state !== 'closed') {
+      return existing;
     }
 
-    return () => {
-      stopAlarm();
-      stopVibration();
-    };
-  }, [alarmActive, muted]);
-
-  function startAlarm() {
-    if (oscillatorRef.current) return;
-
     const ctx = createAudioContext();
-    if (!ctx) return;
+    if (!ctx) return null;
 
     audioCtxRef.current = ctx;
-    void ctx.resume().catch(() => {});
+    return ctx;
+  }, []);
 
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.3, ctx.currentTime);
-    gain.connect(ctx.destination);
-    gainRef.current = gain;
+  const unlockAudio = useCallback(async () => {
+    const ctx = ensureAudioContext();
+    if (!ctx) return false;
 
-    const osc = ctx.createOscillator();
-    osc.type = 'square';
-    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    try {
+      if (ctx.state !== 'running') {
+        await ctx.resume();
+      }
+    } catch {
+      // Ignore resume failures and report blocked state below.
+    }
 
-    let toggle = false;
-    const interval = window.setInterval(() => {
-      toggle = !toggle;
-      osc.frequency.setValueAtTime(toggle ? 660 : 880, ctx.currentTime);
-    }, 500);
+    const running = ctx.state === 'running';
+    setAudioBlocked(!running);
+    return running;
+  }, [ensureAudioContext]);
 
-    osc.connect(gain);
-    osc.start();
-    oscillatorRef.current = osc;
-    freqIntervalRef.current = interval;
-  }
-
-  function stopAlarm() {
+  const stopAlarm = useCallback(() => {
     if (freqIntervalRef.current !== null) {
       window.clearInterval(freqIntervalRef.current);
       freqIntervalRef.current = null;
@@ -101,27 +88,61 @@ export function useAlarm(sites: SiteState[]) {
       try {
         oscillatorRef.current.stop();
       } catch {
-        // Ignore stop errors from already-closed contexts.
+        // Ignore stop errors from already-stopped oscillators.
       }
+      oscillatorRef.current.disconnect();
       oscillatorRef.current = null;
     }
 
-    if (audioCtxRef.current) {
-      audioCtxRef.current.close().catch(() => {});
-      audioCtxRef.current = null;
+    if (gainRef.current) {
+      gainRef.current.disconnect();
+      gainRef.current = null;
     }
-  }
+  }, []);
 
-  function startVibration() {
+  const startAlarm = useCallback(async () => {
+    if (oscillatorRef.current) return;
+
+    const ready = await unlockAudio();
+    if (!ready) return;
+
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.24, ctx.currentTime + 0.04);
+    gain.connect(ctx.destination);
+    gainRef.current = gain;
+
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+
+    let toggle = false;
+    const interval = window.setInterval(() => {
+      if (audioCtxRef.current?.state !== 'running') return;
+      toggle = !toggle;
+      osc.frequency.setValueAtTime(toggle ? 660 : 880, audioCtxRef.current.currentTime);
+    }, 500);
+
+    osc.connect(gain);
+    osc.start();
+    oscillatorRef.current = osc;
+    freqIntervalRef.current = interval;
+    setAudioBlocked(false);
+  }, [unlockAudio]);
+
+  const startVibration = useCallback(() => {
     if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
     if (vibrationTimerRef.current !== null) return;
 
     const pulse = () => navigator.vibrate([250, 150, 250, 700]);
     pulse();
     vibrationTimerRef.current = window.setInterval(pulse, 2500);
-  }
+  }, []);
 
-  function stopVibration() {
+  const stopVibration = useCallback(() => {
     if (vibrationTimerRef.current !== null) {
       window.clearInterval(vibrationTimerRef.current);
       vibrationTimerRef.current = null;
@@ -130,9 +151,78 @@ export function useAlarm(sites: SiteState[]) {
     if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
       navigator.vibrate(0);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const primeAudio = () => {
+      void unlockAudio();
+    };
+
+    for (const eventName of AUDIO_UNLOCK_EVENTS) {
+      window.addEventListener(eventName, primeAudio, { passive: true });
+    }
+
+    return () => {
+      for (const eventName of AUDIO_UNLOCK_EVENTS) {
+        window.removeEventListener(eventName, primeAudio);
+      }
+    };
+  }, [unlockAudio]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const resumeOnFocus = () => {
+      if (document.visibilityState === 'hidden') return;
+      if (alarmActive && !muted) {
+        void startAlarm();
+      }
+    };
+
+    window.addEventListener('focus', resumeOnFocus);
+    document.addEventListener('visibilitychange', resumeOnFocus);
+
+    return () => {
+      window.removeEventListener('focus', resumeOnFocus);
+      document.removeEventListener('visibilitychange', resumeOnFocus);
+    };
+  }, [alarmActive, muted, startAlarm]);
+
+  useEffect(() => {
+    if (alarmActive && !muted) {
+      void startAlarm();
+      startVibration();
+    } else {
+      stopAlarm();
+      stopVibration();
+      setAudioBlocked(false);
+    }
+
+    return () => {
+      stopAlarm();
+      stopVibration();
+    };
+  }, [alarmActive, muted, startAlarm, startVibration, stopAlarm, stopVibration]);
+
+  useEffect(() => {
+    return () => {
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(() => {});
+        audioCtxRef.current = null;
+      }
+    };
+  }, []);
 
   const toggleMute = useCallback(() => setMuted((value) => !value), []);
+  const enableSound = useCallback(() => {
+    void unlockAudio().then((ready) => {
+      if (ready && alarmActive && !muted) {
+        void startAlarm();
+      }
+    });
+  }, [alarmActive, muted, startAlarm, unlockAudio]);
 
-  return { alarmActive, muted, toggleMute };
+  return { alarmActive, muted, audioBlocked, toggleMute, enableSound };
 }

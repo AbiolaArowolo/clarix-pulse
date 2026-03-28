@@ -23,7 +23,7 @@ function readStoredBoolean(key: string, fallback = false): boolean {
 
 export default function App() {
   const { sites, connectionStatus } = useMonitoring();
-  const { alarmActive, muted, toggleMute } = useAlarm(sites);
+  const { alarmActive, muted, audioBlocked, toggleMute, enableSound } = useAlarm(sites);
   const [showInactive, setShowInactive] = useState(() => readStoredBoolean(SHOW_INACTIVE_KEY));
   const [installBarMode, setInstallBarMode] = useState<InstallBarMode>('expanded');
   const [now, setNow] = useState(() => new Date());
@@ -83,7 +83,13 @@ export default function App() {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(20,184,166,0.15),transparent_32%),radial-gradient(circle_at_top_right,rgba(59,130,246,0.1),transparent_24%),linear-gradient(180deg,#020617_0%,#0f172a_55%,#111827_100%)]" />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-56 bg-[linear-gradient(180deg,rgba(15,118,110,0.14),transparent)]" />
 
-      <AlarmBanner sites={sites} muted={muted} onToggleMute={toggleMute} />
+      <AlarmBanner
+        sites={sites}
+        muted={muted}
+        audioBlocked={audioBlocked}
+        onToggleMute={toggleMute}
+        onEnableSound={enableSound}
+      />
 
       <header className={`sticky top-0 z-40 border-b border-slate-800/80 bg-slate-950/82 backdrop-blur-xl ${alarmActive ? 'mt-[60px]' : ''}`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
