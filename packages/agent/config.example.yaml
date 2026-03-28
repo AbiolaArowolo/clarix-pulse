@@ -26,6 +26,10 @@ poll_interval_seconds: 10
 
 players:
   - player_id: primary-insta-1
+    # playout_type may be one of:
+    # insta, admax, cinegy_air, playbox_neo, grass_valley_itx,
+    # imagine_versio, broadstream_oasys, pebble_marina,
+    # evertz_streampro, generic_windows
     playout_type: insta
     paths:
       shared_log_dir: C:\Program Files\Indytek\Insta log
@@ -62,6 +66,20 @@ players:
         - C:\Program Files\Unimedia\Admax One*\admax
     udp_inputs: []
 
+# Example: vendor profile using generic log/process selectors
+# players:
+#   - player_id: cinegy-air-1
+#     playout_type: cinegy_air
+#     paths:
+#       log_path: C:\Cinegy\Logs
+#     process_selectors:
+#       process_names:
+#         - CinegyAirEngine.exe
+#     log_selectors:
+#       paused_regex: '(?i)pause'
+#       exited_regex: '(?i)stop|shutdown|exit'
+#     udp_inputs: []
+#
 # Example: a node with multiple UDP inputs on one player
 # players:
 #   - player_id: backup-admax-1

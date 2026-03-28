@@ -11,6 +11,7 @@ import re
 import configparser
 from datetime import datetime, date
 from typing import Dict, Optional, Tuple
+from playout_profiles import playout_family
 
 # Track previous position values for delta computation
 _prev_position: Dict[str, float] = {}
@@ -225,8 +226,9 @@ def check(instance_id: str, playout_type: str, paths: dict) -> dict:
         playlistscan_new_entries: int
     """
     result: dict = {}
+    family = playout_family(playout_type)
 
-    if playout_type == "insta":
+    if family == "insta":
         instance_root = paths.get("instance_root", "")
         mainplaylist_path = _resolve_insta_mainplaylist_path(instance_root)
         running_flag, pause_flag, raw_status = _read_insta_runtime_status(instance_root)
@@ -261,7 +263,7 @@ def check(instance_id: str, playout_type: str, paths: dict) -> dict:
                 result["filebar_position_delta_poll"] = round(dpoll, 3)
             result["filebar_position_delta_30s"] = round(d30, 3)
             result["filebar_position_delta_60s"] = round(d60, 3)
-    else:
+    elif family == "admax":
         frame = _read_admax_frame(paths)
         if frame is not None:
             dpoll, d30, d60 = _compute_delta(instance_id, float(frame))

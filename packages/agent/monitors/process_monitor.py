@@ -13,6 +13,7 @@ from typing import Deque, Dict, Iterable
 import psutil
 import win32gui
 import win32process
+from playout_profiles import playout_family
 
 ADMAX_PROCESS_ALLOWLIST = {
     "admax-one playout2.0.exe",
@@ -43,7 +44,12 @@ def _as_list(value: object) -> list[str]:
 
 
 def _default_process_names(playout_type: str) -> set[str]:
-    return ADMAX_PROCESS_ALLOWLIST if playout_type == "admax" else INSTA_PROCESS_ALLOWLIST
+    family = playout_family(playout_type)
+    if family == "admax":
+        return ADMAX_PROCESS_ALLOWLIST
+    if family == "insta":
+        return INSTA_PROCESS_ALLOWLIST
+    return set()
 
 
 def _matches_process(name: str, selectors: dict, playout_type: str) -> bool:

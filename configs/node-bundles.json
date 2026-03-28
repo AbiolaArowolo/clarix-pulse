@@ -1,5 +1,5 @@
 {
-  "defaultVersion": "v1.7",
+  "defaultVersion": "v1.8",
   "bundles": [
     {
       "displayName": "Generic Installer",

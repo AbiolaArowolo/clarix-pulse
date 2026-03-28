@@ -32,6 +32,13 @@ import requests
 import psutil
 
 from monitors import process_monitor, log_monitor, file_monitor, connectivity, udp_probe
+from playout_profiles import (
+    DEFAULT_PLAYOUT_TYPE,
+    get_playout_profile,
+    normalize_playout_type,
+    playout_family,
+    playout_profiles_for_ui,
+)
 
 # --- Logging ------------------------------------------------------------------
 
@@ -305,6 +312,8 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
 
   <script>
     const INITIAL_STATE = __INITIAL_CONFIG__;
+    const PLAYOUT_PROFILES = __PLAYOUT_PROFILES__;
+    const PLAYOUT_PROFILE_MAP = Object.fromEntries(PLAYOUT_PROFILES.map((profile) => [profile.id, profile]));
     const MAX_PLAYERS = 10;
     const MAX_UDP = 5;
     const DEFAULTS = {
@@ -334,16 +343,44 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
       target.style.display = "block";
     }
 
+    function profileFor(playoutType) {
+      return PLAYOUT_PROFILE_MAP[playoutType] || PLAYOUT_PROFILE_MAP.generic_windows;
+    }
+
+    function defaultPaths(playoutType, existingPaths = {}) {
+      const profile = profileFor(playoutType);
+      const uiMode = profile.ui_mode || "generic";
+      if (uiMode === "admax") {
+        return {
+          admax_root_candidates: [
+            (existingPaths.admax_root_candidates && existingPaths.admax_root_candidates[0]) || existingPaths.admax_root || ""
+          ],
+          fnf_log: existingPaths.fnf_log || "",
+          playlistscan_log: existingPaths.playlistscan_log || ""
+        };
+      }
+      if (uiMode === "insta") {
+        return {
+          shared_log_dir: existingPaths.shared_log_dir || DEFAULTS.instaLogDir,
+          instance_root: existingPaths.instance_root || DEFAULTS.instaRoot,
+          fnf_log: existingPaths.fnf_log || "",
+          playlistscan_log: existingPaths.playlistscan_log || ""
+        };
+      }
+      return {
+        log_path: existingPaths.log_path || existingPaths.log_file || existingPaths.activity_log || "",
+        fnf_log: existingPaths.fnf_log || "",
+        playlistscan_log: existingPaths.playlistscan_log || ""
+      };
+    }
+
     function defaultPlayer(index) {
       const playoutType = "insta";
       const playerId = `${state.node_id || "node"}-${playoutType}-${index + 1}`;
       return {
         player_id: playerId,
         playout_type: playoutType,
-        paths: {
-          shared_log_dir: DEFAULTS.instaLogDir,
-          instance_root: DEFAULTS.instaRoot
-        },
+        paths: defaultPaths(playoutType),
         process_selectors: {},
         log_selectors: {},
         udp_inputs: []
@@ -391,6 +428,63 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
       player.log_selectors = player.log_selectors || {};
     }
 
+    function playoutOptionsHtml(selectedType) {
+      return PLAYOUT_PROFILES.map((profile) => `
+        <option value="${escapeHtml(profile.id)}" ${profile.id === selectedType ? "selected" : ""}>${escapeHtml(profile.label)}</option>
+      `).join("");
+    }
+
+    function renderPathFields(player, playerIndex, profile) {
+      const paths = player.paths || {};
+      const uiMode = profile.ui_mode || "generic";
+      if (uiMode === "insta") {
+        return `
+          <div class="grid">
+            <label>Shared Log Dir
+              <input value="${escapeHtml(paths.shared_log_dir || DEFAULTS.instaLogDir)}" oninput="PulseUi.updatePlayerPath(${playerIndex}, 'shared_log_dir', this.value)">
+            </label>
+            <label>Instance Root
+              <input value="${escapeHtml(paths.instance_root || DEFAULTS.instaRoot)}" oninput="PulseUi.updatePlayerPath(${playerIndex}, 'instance_root', this.value)">
+            </label>
+            <label>FNF Log
+              <input value="${escapeHtml(paths.fnf_log || '')}" oninput="PulseUi.updatePlayerPath(${playerIndex}, 'fnf_log', this.value)">
+            </label>
+            <label>Playlist Scan Log
+              <input value="${escapeHtml(paths.playlistscan_log || '')}" oninput="PulseUi.updatePlayerPath(${playerIndex}, 'playlistscan_log', this.value)">
+            </label>
+          </div>
+        `;
+      }
+      if (uiMode === "admax") {
+        return `
+          <div class="grid">
+            <label>Admax Root
+              <input value="${escapeHtml((paths.admax_root_candidates && paths.admax_root_candidates[0]) || paths.admax_root || '')}" oninput="PulseUi.updatePlayerPath(${playerIndex}, 'admax_root', this.value)">
+            </label>
+            <label>FNF Log
+              <input value="${escapeHtml(paths.fnf_log || '')}" oninput="PulseUi.updatePlayerPath(${playerIndex}, 'fnf_log', this.value)">
+            </label>
+            <label>Playlist Scan Log
+              <input value="${escapeHtml(paths.playlistscan_log || '')}" oninput="PulseUi.updatePlayerPath(${playerIndex}, 'playlistscan_log', this.value)">
+            </label>
+          </div>
+        `;
+      }
+      return `
+        <div class="grid">
+          <label>Primary Log File / Folder
+            <input value="${escapeHtml(paths.log_path || '')}" oninput="PulseUi.updatePlayerPath(${playerIndex}, 'log_path', this.value)">
+          </label>
+          <label>Content Error Log
+            <input value="${escapeHtml(paths.fnf_log || '')}" oninput="PulseUi.updatePlayerPath(${playerIndex}, 'fnf_log', this.value)">
+          </label>
+          <label>Secondary / Scan Log
+            <input value="${escapeHtml(paths.playlistscan_log || '')}" oninput="PulseUi.updatePlayerPath(${playerIndex}, 'playlistscan_log', this.value)">
+          </label>
+        </div>
+      `;
+    }
+
     function renderPlayers() {
       const container = document.getElementById("players");
       const players = Array.isArray(state.players) ? state.players : [];
@@ -401,25 +495,9 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
 
       container.innerHTML = players.map((player, playerIndex) => {
         const udpInputs = Array.isArray(player.udp_inputs) ? player.udp_inputs : [];
-        const isInsta = (player.playout_type || "insta") === "insta";
-        const pathHtml = isInsta
-          ? `
-            <div class="grid">
-              <label>Shared Log Dir
-                <input value="${escapeHtml(player.paths?.shared_log_dir || DEFAULTS.instaLogDir)}" oninput="PulseUi.updatePlayerPath(${playerIndex}, 'shared_log_dir', this.value)">
-              </label>
-              <label>Instance Root
-                <input value="${escapeHtml(player.paths?.instance_root || DEFAULTS.instaRoot)}" oninput="PulseUi.updatePlayerPath(${playerIndex}, 'instance_root', this.value)">
-              </label>
-            </div>
-          `
-          : `
-            <div class="grid">
-              <label>Admax Root
-                <input value="${escapeHtml((player.paths?.admax_root_candidates && player.paths.admax_root_candidates[0]) || player.paths?.admax_root || '')}" oninput="PulseUi.updatePlayerPath(${playerIndex}, 'admax_root', this.value)">
-              </label>
-            </div>
-          `;
+        const selectedType = player.playout_type || "insta";
+        const profile = profileFor(selectedType);
+        const pathHtml = renderPathFields(player, playerIndex, profile);
 
         const processSelectors = player.process_selectors || {};
         const logSelectors = player.log_selectors || {};
@@ -514,11 +592,11 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
               </label>
               <label>Playout Type
                 <select onchange="PulseUi.updatePlayer(${playerIndex}, 'playout_type', this.value)">
-                  <option value="insta" ${(player.playout_type || "insta") === "insta" ? "selected" : ""}>Insta</option>
-                  <option value="admax" ${player.playout_type === "admax" ? "selected" : ""}>Admax</option>
+                  ${playoutOptionsHtml(selectedType)}
                 </select>
               </label>
             </div>
+            <div class="status-note">${escapeHtml(profile.description || "")}</div>
             <div style="margin-top:14px;">${pathHtml}</div>
             ${advancedHtml}
             <div class="row" style="margin-top:16px;">
@@ -548,9 +626,7 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
       updatePlayer(index, key, value) {
         state.players[index][key] = value;
         if (key === "playout_type") {
-          state.players[index].paths = value === "admax"
-            ? { admax_root_candidates: [""] }
-            : { shared_log_dir: DEFAULTS.instaLogDir, instance_root: DEFAULTS.instaRoot };
+          state.players[index].paths = defaultPaths(value, state.players[index].paths || {});
         }
         renderPlayers();
       },
@@ -909,6 +985,7 @@ def _normalize_udp_input(player_id: str, udp_input: Any, index: int) -> dict[str
 
 def _normalize_paths(player: dict[str, Any], playout_type: str) -> dict[str, Any]:
     paths = _as_mapping(player.get("paths"))
+    family = playout_family(playout_type)
 
     instance_root = _as_str(paths.get("instance_root"))
     if not instance_root:
@@ -917,7 +994,7 @@ def _normalize_paths(player: dict[str, Any], playout_type: str) -> dict[str, Any
             paths["instance_root"] = legacy_player_root
 
     admax_root = _as_str(paths.get("admax_root"))
-    if not admax_root:
+    if family == "admax" and not admax_root:
         log_dir = _as_str(paths.get("log_dir")).rstrip("\\/")
         if log_dir:
             derived_root = log_dir
@@ -926,7 +1003,18 @@ def _normalize_paths(player: dict[str, Any], playout_type: str) -> dict[str, Any
             if derived_root:
                 paths["admax_root"] = derived_root
 
-    if playout_type == "admax":
+    if family == "generic":
+        log_path = _as_str(
+            paths.get("log_path")
+            or paths.get("activity_log")
+            or paths.get("log_file")
+            or paths.get("shared_log_dir")
+            or paths.get("log_dir")
+        )
+        if log_path:
+            paths["log_path"] = log_path
+
+    if family == "admax":
         paths = _resolve_admax_paths(paths)
 
     return paths
@@ -1038,7 +1126,7 @@ def _normalize_player(player: Any, index: int) -> dict[str, Any] | None:
     if not player_id:
         return None
 
-    playout_type = _as_str(player.get("playout_type") or player.get("software") or "insta").lower()
+    playout_type = normalize_playout_type(player.get("playout_type") or player.get("software") or DEFAULT_PLAYOUT_TYPE)
     paths = _normalize_paths(player, playout_type)
 
     udp_inputs_raw = player.get("udp_inputs")
@@ -1440,7 +1528,10 @@ def _contains_placeholder(value: Any) -> bool:
 
 def _default_player_paths(playout_type: str, existing_paths: dict[str, Any] | None = None) -> dict[str, Any]:
     existing_paths = existing_paths or {}
-    if playout_type == "admax":
+    profile = get_playout_profile(playout_type)
+    ui_mode = str(profile.get("ui_mode") or "generic")
+
+    if ui_mode == "admax":
         admax_root = _as_str(existing_paths.get("admax_root"))
         if not admax_root:
             candidates = existing_paths.get("admax_root_candidates")
@@ -1448,18 +1539,32 @@ def _default_player_paths(playout_type: str, existing_paths: dict[str, Any] | No
                 admax_root = _as_str(candidates[0])
         return {
             "admax_root_candidates": [admax_root],
+            "fnf_log": _as_str(existing_paths.get("fnf_log")),
+            "playlistscan_log": _as_str(existing_paths.get("playlistscan_log")),
+        }
+
+    if ui_mode == "insta":
+        return {
+            "shared_log_dir": _as_str(existing_paths.get("shared_log_dir"), DEFAULT_INSTA_LOG_DIR),
+            "instance_root": _as_str(existing_paths.get("instance_root"), DEFAULT_INSTA_INSTANCE_ROOT),
+            "fnf_log": _as_str(existing_paths.get("fnf_log")),
+            "playlistscan_log": _as_str(existing_paths.get("playlistscan_log")),
         }
 
     return {
-        "shared_log_dir": _as_str(existing_paths.get("shared_log_dir"), DEFAULT_INSTA_LOG_DIR),
-        "instance_root": _as_str(existing_paths.get("instance_root"), DEFAULT_INSTA_INSTANCE_ROOT),
+        "log_path": _as_str(
+            existing_paths.get("log_path")
+            or existing_paths.get("activity_log")
+            or existing_paths.get("log_file")
+        ),
+        "fnf_log": _as_str(existing_paths.get("fnf_log")),
+        "playlistscan_log": _as_str(existing_paths.get("playlistscan_log")),
     }
 
 
 def _build_default_player_for_ui(index: int, node_id: str, existing_player: dict[str, Any] | None = None) -> dict[str, Any]:
     existing_player = existing_player or {}
-    existing_type = _as_str(existing_player.get("playout_type"), "insta").lower()
-    playout_type = existing_type if existing_type in {"insta", "admax"} else "insta"
+    playout_type = normalize_playout_type(existing_player.get("playout_type") or DEFAULT_PLAYOUT_TYPE)
     player_id = _as_str(existing_player.get("player_id"), _default_player_id(node_id, playout_type, index))
     existing_paths = _as_mapping(existing_player.get("paths"))
 
@@ -1538,9 +1643,9 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
         if not isinstance(raw_player, dict):
             continue
 
-        playout_type = _as_str(raw_player.get("playout_type"), "insta").lower()
-        if playout_type not in {"insta", "admax"}:
-            playout_type = "insta"
+        playout_type = normalize_playout_type(raw_player.get("playout_type") or DEFAULT_PLAYOUT_TYPE)
+        profile = get_playout_profile(playout_type)
+        ui_mode = str(profile.get("ui_mode") or "generic")
 
         player_id = _as_str(raw_player.get("player_id"), _default_player_id(node_id, playout_type, index))
         if not player_id:
@@ -1558,7 +1663,7 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
         merged_player["playout_type"] = playout_type
 
         raw_paths = _as_mapping(raw_player.get("paths"))
-        if playout_type == "admax":
+        if ui_mode == "admax":
             admax_root = _as_str(raw_paths.get("admax_root"))
             if not admax_root:
                 candidates = raw_paths.get("admax_root_candidates")
@@ -1567,19 +1672,33 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
             if not admax_root:
                 raise ValueError(f"{player_id} needs an Admax root.")
             merged_player["paths"] = {
-                **_as_mapping(merged_player.get("paths")),
                 "admax_root_candidates": [admax_root],
+                "fnf_log": _as_str(raw_paths.get("fnf_log")),
+                "playlistscan_log": _as_str(raw_paths.get("playlistscan_log")),
             }
-        else:
+        elif ui_mode == "insta":
             shared_log_dir = _as_str(raw_paths.get("shared_log_dir"), DEFAULT_INSTA_LOG_DIR)
             instance_root = _as_str(raw_paths.get("instance_root"), DEFAULT_INSTA_INSTANCE_ROOT)
             if not shared_log_dir or not instance_root:
                 raise ValueError(f"{player_id} needs both Insta paths.")
             merged_player["paths"] = {
-                **_as_mapping(merged_player.get("paths")),
                 "shared_log_dir": shared_log_dir,
                 "instance_root": instance_root,
+                "fnf_log": _as_str(raw_paths.get("fnf_log")),
+                "playlistscan_log": _as_str(raw_paths.get("playlistscan_log")),
             }
+        else:
+            generic_paths = {
+                "log_path": _as_str(
+                    raw_paths.get("log_path")
+                    or raw_paths.get("activity_log")
+                    or raw_paths.get("log_file")
+                ),
+                "fnf_log": _as_str(raw_paths.get("fnf_log")),
+                "playlistscan_log": _as_str(raw_paths.get("playlistscan_log")),
+            }
+            generic_paths = {key: value for key, value in generic_paths.items() if value}
+            merged_player["paths"] = generic_paths
 
         udp_inputs_raw = raw_player.get("udp_inputs")
         if udp_inputs_raw is None:
@@ -1631,7 +1750,13 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
 
 def _render_local_config_ui_html(initial_config: dict[str, Any]) -> bytes:
     initial_json = json.dumps(initial_config, ensure_ascii=True)
-    return LOCAL_CONFIG_UI_TEMPLATE.replace("__INITIAL_CONFIG__", initial_json).encode("utf-8")
+    profiles_json = json.dumps(playout_profiles_for_ui(), ensure_ascii=True)
+    return (
+        LOCAL_CONFIG_UI_TEMPLATE
+        .replace("__INITIAL_CONFIG__", initial_json)
+        .replace("__PLAYOUT_PROFILES__", profiles_json)
+        .encode("utf-8")
+    )
 
 
 _persistent_local_ui_lock = threading.Lock()
@@ -2016,11 +2141,12 @@ def _build_udp_inputs(player_id: str, existing_inputs: list[dict[str, Any]]) -> 
 
 
 def _prompt_player(index: int, existing_player: dict[str, Any], node_id: str) -> dict[str, Any]:
-    existing_type = _as_str(existing_player.get("playout_type"), "insta").lower()
+    playout_choices = [profile["id"] for profile in playout_profiles_for_ui()]
+    existing_type = normalize_playout_type(existing_player.get("playout_type") or DEFAULT_PLAYOUT_TYPE)
     playout_type = _prompt_choice(
         f"Player {index + 1} playout type",
-        ["insta", "admax"],
-        existing_type if existing_type in {"insta", "admax"} else "insta",
+        playout_choices,
+        existing_type if existing_type in playout_choices else DEFAULT_PLAYOUT_TYPE,
     )
     player_id = _prompt(
         f"Player {index + 1} ID",
@@ -2029,7 +2155,8 @@ def _prompt_player(index: int, existing_player: dict[str, Any], node_id: str) ->
     )
 
     existing_paths = _as_mapping(existing_player.get("paths"))
-    if playout_type == "insta":
+    ui_mode = str(get_playout_profile(playout_type).get("ui_mode") or "generic")
+    if ui_mode == "insta":
         paths = {
             "shared_log_dir": _prompt(
                 f"{player_id} shared_log_dir",
@@ -2041,8 +2168,18 @@ def _prompt_player(index: int, existing_player: dict[str, Any], node_id: str) ->
                 _as_str(existing_paths.get("instance_root"), DEFAULT_INSTA_INSTANCE_ROOT),
                 required=True,
             ),
+            "fnf_log": _prompt(
+                f"{player_id} fnf_log",
+                _as_str(existing_paths.get("fnf_log")),
+                required=False,
+            ),
+            "playlistscan_log": _prompt(
+                f"{player_id} playlistscan_log",
+                _as_str(existing_paths.get("playlistscan_log")),
+                required=False,
+            ),
         }
-    else:
+    elif ui_mode == "admax":
         detected_root = _best_existing_dir(_default_admax_root_patterns())
         paths = {
             "admax_root_candidates": [
@@ -2051,7 +2188,35 @@ def _prompt_player(index: int, existing_player: dict[str, Any], node_id: str) ->
                     _as_str(existing_paths.get("admax_root"), detected_root),
                     required=True,
                 )
-            ]
+            ],
+            "fnf_log": _prompt(
+                f"{player_id} fnf_log",
+                _as_str(existing_paths.get("fnf_log")),
+                required=False,
+            ),
+            "playlistscan_log": _prompt(
+                f"{player_id} playlistscan_log",
+                _as_str(existing_paths.get("playlistscan_log")),
+                required=False,
+            ),
+        }
+    else:
+        paths = {
+            "log_path": _prompt(
+                f"{player_id} primary log file/folder",
+                _as_str(existing_paths.get("log_path")),
+                required=False,
+            ),
+            "fnf_log": _prompt(
+                f"{player_id} content error log",
+                _as_str(existing_paths.get("fnf_log")),
+                required=False,
+            ),
+            "playlistscan_log": _prompt(
+                f"{player_id} secondary/scan log",
+                _as_str(existing_paths.get("playlistscan_log")),
+                required=False,
+            ),
         }
 
     return {

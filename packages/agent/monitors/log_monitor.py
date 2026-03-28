@@ -5,10 +5,12 @@ Shared logs can be narrowed to the correct player via include/exclude selectors.
 
 from __future__ import annotations
 
+import glob
 import os
 import re
 from datetime import date
 from typing import Dict, Iterable, Optional
+from playout_profiles import playout_family
 
 _file_positions: Dict[str, int] = {}
 _last_log_path: Dict[str, str] = {}
@@ -73,6 +75,43 @@ def _get_log_path_admax(paths: dict) -> str:
             return os.path.join(candidate, f"{today}.txt")
 
     return os.path.join(admax_root, "logs", "logs", "Playout", f"{today}.txt")
+
+
+def _latest_log_path(path_hint: str) -> str:
+    if not path_hint:
+        return ""
+    if os.path.isfile(path_hint):
+        return path_hint
+    if not os.path.isdir(path_hint):
+        return ""
+
+    candidates = []
+    for pattern in ("*.log", "*.txt"):
+        candidates.extend(glob.glob(os.path.join(path_hint, pattern)))
+    if not candidates:
+        return ""
+
+    try:
+        return max(candidates, key=os.path.getmtime)
+    except OSError:
+        return ""
+
+
+def _get_log_path_generic(paths: dict) -> str:
+    direct_hint = str(
+        paths.get("log_path")
+        or paths.get("activity_log")
+        or paths.get("log_file")
+        or ""
+    ).strip()
+    if direct_hint:
+        return _latest_log_path(direct_hint)
+
+    folder_hint = str(paths.get("log_dir") or "").strip()
+    if folder_hint:
+        return _latest_log_path(folder_hint)
+
+    return ""
 
 
 def _read_new_lines(path: str, instance_id: str) -> list[str]:
@@ -143,6 +182,16 @@ def _pattern(selectors: dict, key: str, default_key: str) -> re.Pattern[str]:
     return DEFAULT_PATTERNS[default_key]
 
 
+def _optional_pattern(selectors: dict, key: str) -> Optional[re.Pattern[str]]:
+    direct = str(selectors.get(f"{key}_regex", "")).strip()
+    token_patterns = selectors.get("token_patterns", {}) or {}
+    nested = str(token_patterns.get(key, "")).strip() if isinstance(token_patterns, dict) else ""
+    pattern = nested or direct
+    if not pattern:
+        return None
+    return re.compile(pattern, re.IGNORECASE)
+
+
 def _classify_admax_lines(lines: list[str], selectors: dict) -> Optional[str]:
     paused = _pattern(selectors, "paused", "admax_paused")
     exited = _pattern(selectors, "exited", "admax_exited")
@@ -175,21 +224,48 @@ def _classify_insta_lines(lines: list[str], selectors: dict) -> Optional[str]:
     return token
 
 
+def _classify_generic_lines(lines: list[str], selectors: dict) -> Optional[str]:
+    paused = _optional_pattern(selectors, "paused")
+    played = _optional_pattern(selectors, "played")
+    skipped = _optional_pattern(selectors, "skipped")
+    exited = _optional_pattern(selectors, "exited")
+    reinit = _optional_pattern(selectors, "reinit")
+
+    token = None
+    for line in lines:
+        if exited and exited.search(line):
+            return "app_exited"
+        if paused and paused.search(line):
+            token = "paused"
+        elif skipped and skipped.search(line) and token != "paused":
+            token = "skipped"
+        elif played and played.search(line) and token != "paused":
+            token = "fully_played"
+        elif reinit and reinit.search(line) and token != "paused":
+            token = "reinit"
+    return token
+
+
 def check(instance_id: str, playout_type: str, paths: dict, selectors: dict | None = None) -> dict:
     selectors = selectors or {}
+    family = playout_family(playout_type)
 
-    if playout_type == "admax":
+    if family == "admax":
         log_path = _get_log_path_admax(paths)
-    else:
+    elif family == "insta":
         log_path = _get_log_path_insta(paths.get("shared_log_dir", ""))
+    else:
+        log_path = _get_log_path_generic(paths)
 
     log_exists = os.path.exists(log_path)
     new_lines = _select_lines(_read_new_lines(log_path, instance_id), selectors)
 
-    if playout_type == "admax":
+    if family == "admax":
         classified_token = _classify_admax_lines(new_lines, selectors)
-    else:
+    elif family == "insta":
         classified_token = _classify_insta_lines(new_lines, selectors)
+    else:
+        classified_token = _classify_generic_lines(new_lines, selectors)
 
     token = classified_token
     token_fresh = 1 if classified_token is not None else 0
