@@ -1,19 +1,19 @@
-import express from 'express';
 import cors from 'cors';
-import { createServer } from 'http';
-import { Server as SocketServer } from 'socket.io';
 import dotenv from 'dotenv';
+import express from 'express';
+import { createServer } from 'http';
 import path from 'path';
-
-import { initState, getAllStates, setConnectivity, markInstanceOffline } from './store/state';
-import { DB_PATH } from './store/db';
-import { getInstanceControls, initInstanceControls, isAlertingSuppressed } from './store/instanceControls';
-import { createHeartbeatRouter } from './routes/heartbeat';
+import { Server as SocketServer } from 'socket.io';
 import { createConfigRouter } from './routes/config';
+import { createHeartbeatRouter } from './routes/heartbeat';
+import { buildStatusPayload, createStatusRouter } from './routes/status';
 import { createThumbnailRouter } from './routes/thumbnail';
-import { createStatusRouter, buildStatusPayload } from './routes/status';
 import { sendNetworkIssueAlert } from './services/alerting';
-import { INSTANCE_MAP } from './config/instances';
+import { DATABASE_URL_DISPLAY, initDb } from './store/db';
+import { getInstanceControls, initInstanceControls, isAlertingSuppressed } from './store/instanceControls';
+import { getPlayer, initRegistry } from './store/registry';
+import { getAllStates, initState, markInstanceOffline, setConnectivity } from './store/state';
+import { getThumbnailStorePath } from './store/thumbnails';
 
 const repoRoot = path.resolve(__dirname, '../../../..');
 dotenv.config({ path: path.join(repoRoot, '.env') });
@@ -30,7 +30,6 @@ const io = new SocketServer(httpServer, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
 });
 
-// Routes
 app.use('/api/heartbeat', createHeartbeatRouter(io));
 app.use('/api/config', createConfigRouter());
 app.use('/api/thumbnail', createThumbnailRouter(io));
@@ -38,19 +37,14 @@ app.use('/api/status', createStatusRouter());
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 
-// WebSocket connection
-io.on('connection', (socket) => {
+io.on('connection', async (socket) => {
   console.log(`[ws] client connected: ${socket.id}`);
-  // Send full current state on connect.
-  socket.emit('full_state', buildStatusPayload());
+  socket.emit('full_state', await buildStatusPayload());
   socket.on('disconnect', () => console.log(`[ws] client disconnected: ${socket.id}`));
 });
 
-// ─── Heartbeat timeout monitor ────────────────────────────────────────────────
-// Runs every 5s, marks stale/offline instances and emits dashboard updates
-
-const STALE_THRESHOLD_MS = 45_000;   // 45s → stale (orange)
-const OFFLINE_THRESHOLD_MS = 90_000; // 90s → offline (gray)
+const STALE_THRESHOLD_MS = 45_000;
+const OFFLINE_THRESHOLD_MS = 90_000;
 
 const networkIssueSentAt = new Map<string, number>();
 
@@ -79,12 +73,13 @@ setInterval(async () => {
         updatedAt: updated?.updatedAt ?? new Date().toISOString(),
       });
 
-      // Send network issue alert (once per incident, debounced 5 min)
       const lastSent = networkIssueSentAt.get(state.instanceId) ?? 0;
       if (now - lastSent > 300_000 && !isAlertingSuppressed(state.instanceId)) {
         networkIssueSentAt.set(state.instanceId, now);
-        const inst = INSTANCE_MAP.get(state.instanceId);
-        if (inst) sendNetworkIssueAlert(state.instanceId, inst.label).catch(console.error);
+        const player = await getPlayer(state.instanceId);
+        if (player) {
+          sendNetworkIssueAlert(state.instanceId, player.label).catch(console.error);
+        }
       }
     } else if (ageMs >= STALE_THRESHOLD_MS && state.connectivityHealth === 'online') {
       setConnectivity(state.instanceId, 'stale').catch(console.error);
@@ -104,13 +99,16 @@ setInterval(async () => {
 }, 5_000);
 
 async function start() {
+  await initDb();
+  await initRegistry();
   await initState();
   await initInstanceControls();
 
   httpServer.listen(PORT, () => {
     console.log(`[hub] Pulse hub running on port ${PORT}`);
-    console.log(`[hub] SQLite state initialised for ${getAllStates().length} instances`);
-    console.log(`[hub] State DB path: ${DB_PATH}`);
+    console.log(`[hub] PostgreSQL state initialised for ${getAllStates().length} tracked instances`);
+    console.log(`[hub] Database: ${DATABASE_URL_DISPLAY}`);
+    console.log(`[hub] Thumbnail cache: ${getThumbnailStorePath()}`);
   });
 }
 

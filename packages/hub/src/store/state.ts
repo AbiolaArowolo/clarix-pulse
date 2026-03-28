@@ -1,57 +1,81 @@
-// State store — SQLite via @libsql/client (async, WASM-based, no native deps)
-// In-memory cache sits on top for fast Socket.io broadcasts.
-// SQLite is the source of truth.
+import {
+  BroadcastHealth,
+  ConnectivityHealth,
+  InstanceState,
+  RuntimeHealth,
+  exec,
+  query,
+  queryOne,
+} from './db';
 
-import { db, initDb, BroadcastHealth, RuntimeHealth, ConnectivityHealth, InstanceState } from './db';
-import { INSTANCES } from '../config/instances';
-
-// In-memory cache
 const cache = new Map<string, InstanceState>();
 
-const now = () => new Date().toISOString();
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function toIso(value: Date | string | null | undefined): string | null {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toISOString();
+}
+
+function asObservationMap(value: unknown): Record<string, unknown> | null {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
 
 function rowToState(row: Record<string, unknown>): InstanceState {
-  const updatedAt = row.updated_at as string;
   return {
-    instanceId: row.instance_id as string,
-    agentId: row.agent_id as string,
+    instanceId: String(row.instance_id),
+    agentId: String(row.agent_id ?? ''),
     broadcastHealth: row.broadcast_health as BroadcastHealth,
     runtimeHealth: row.runtime_health as RuntimeHealth,
     connectivityHealth: row.connectivity_health as ConnectivityHealth,
-    lastHeartbeatAt: (row.last_heartbeat_at as string) ?? null,
-    lastObservations: row.last_observations ? JSON.parse(row.last_observations as string) : null,
-    thumbnailData: (row.thumbnail_data as string) ?? null,
-    thumbnailAt: (row.thumbnail_at as string) ?? null,
-    broadcastStartedAt: (row.broadcast_started_at as string) ?? updatedAt,
-    runtimeStartedAt: (row.runtime_started_at as string) ?? updatedAt,
-    updatedAt,
+    lastHeartbeatAt: toIso(row.last_heartbeat_at as Date | string | null | undefined),
+    lastObservations: asObservationMap(row.last_observations),
+    thumbnailAt: toIso(row.thumbnail_at as Date | string | null | undefined),
+    broadcastStartedAt: toIso(row.broadcast_started_at as Date | string | null | undefined) ?? nowIso(),
+    runtimeStartedAt: toIso(row.runtime_started_at as Date | string | null | undefined) ?? nowIso(),
+    updatedAt: toIso(row.updated_at as Date | string | null | undefined) ?? nowIso(),
   };
 }
 
 export async function initState(): Promise<void> {
-  await initDb();
+  const rows = await query<Record<string, unknown>>(`
+    SELECT
+      instance_id,
+      agent_id,
+      broadcast_health,
+      runtime_health,
+      connectivity_health,
+      last_heartbeat_at,
+      last_observations,
+      thumbnail_at,
+      broadcast_started_at,
+      runtime_started_at,
+      updated_at
+    FROM instance_state
+  `);
 
-  // Seed rows for all known instances (if not already present)
-  const result = await db.execute('SELECT instance_id FROM instance_state');
-  const existingIds = new Set(result.rows.map((r) => r.instance_id as string));
-
-  for (const inst of INSTANCES) {
-    if (!existingIds.has(inst.id)) {
-      const timestamp = now();
-      await db.execute({
-        sql: `INSERT OR IGNORE INTO instance_state
-              (instance_id, agent_id, broadcast_health, runtime_health, connectivity_health,
-               last_heartbeat_at, last_observations, broadcast_started_at, runtime_started_at, updated_at)
-              VALUES (?, '', 'unknown', 'unknown', 'offline', NULL, NULL, ?, ?, ?)`,
-        args: [inst.id, timestamp, timestamp, timestamp],
-      });
-    }
-  }
-
-  // Load all into cache
-  const rows = await db.execute('SELECT * FROM instance_state');
-  for (const row of rows.rows) {
-    const state = rowToState(row as Record<string, unknown>);
+  cache.clear();
+  for (const row of rows) {
+    const state = rowToState(row);
     cache.set(state.instanceId, state);
   }
 }
@@ -70,10 +94,10 @@ export async function updateState(
   broadcastHealth: BroadcastHealth,
   runtimeHealth: RuntimeHealth,
   connectivityHealth: ConnectivityHealth,
-  observations: Record<string, unknown>
+  observations: Record<string, unknown>,
 ): Promise<{ previous: InstanceState | undefined; current: InstanceState }> {
   const previous = cache.get(instanceId);
-  const timestamp = now();
+  const timestamp = nowIso();
   const broadcastStartedAt = previous?.broadcastHealth === broadcastHealth
     ? previous.broadcastStartedAt
     : timestamp;
@@ -81,31 +105,51 @@ export async function updateState(
     ? previous.runtimeStartedAt
     : timestamp;
 
-  await db.execute({
-    sql: `INSERT INTO instance_state
-            (instance_id, agent_id, broadcast_health, runtime_health, connectivity_health,
-             last_heartbeat_at, last_observations, broadcast_started_at, runtime_started_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(instance_id) DO UPDATE SET
-            agent_id = excluded.agent_id,
-            broadcast_health = excluded.broadcast_health,
-            runtime_health = excluded.runtime_health,
-            connectivity_health = excluded.connectivity_health,
-            last_heartbeat_at = excluded.last_heartbeat_at,
-            last_observations = excluded.last_observations,
-            broadcast_started_at = excluded.broadcast_started_at,
-            runtime_started_at = excluded.runtime_started_at,
-            updated_at = excluded.updated_at`,
-    args: [
-      instanceId, agentId, broadcastHealth, runtimeHealth, connectivityHealth,
-      timestamp, JSON.stringify(observations), broadcastStartedAt, runtimeStartedAt, timestamp,
-    ],
-  });
+  await exec(`
+    INSERT INTO instance_state (
+      instance_id,
+      agent_id,
+      broadcast_health,
+      runtime_health,
+      connectivity_health,
+      last_heartbeat_at,
+      last_observations,
+      broadcast_started_at,
+      runtime_started_at,
+      updated_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10)
+    ON CONFLICT (instance_id) DO UPDATE SET
+      agent_id = EXCLUDED.agent_id,
+      broadcast_health = EXCLUDED.broadcast_health,
+      runtime_health = EXCLUDED.runtime_health,
+      connectivity_health = EXCLUDED.connectivity_health,
+      last_heartbeat_at = EXCLUDED.last_heartbeat_at,
+      last_observations = EXCLUDED.last_observations,
+      broadcast_started_at = EXCLUDED.broadcast_started_at,
+      runtime_started_at = EXCLUDED.runtime_started_at,
+      updated_at = EXCLUDED.updated_at
+  `, [
+    instanceId,
+    agentId,
+    broadcastHealth,
+    runtimeHealth,
+    connectivityHealth,
+    timestamp,
+    JSON.stringify(observations),
+    broadcastStartedAt,
+    runtimeStartedAt,
+    timestamp,
+  ]);
 
   const current: InstanceState = {
-    instanceId, agentId, broadcastHealth, runtimeHealth, connectivityHealth,
-    lastHeartbeatAt: timestamp, lastObservations: observations,
-    thumbnailData: previous?.thumbnailData ?? null,
+    instanceId,
+    agentId,
+    broadcastHealth,
+    runtimeHealth,
+    connectivityHealth,
+    lastHeartbeatAt: timestamp,
+    lastObservations: observations,
     thumbnailAt: previous?.thumbnailAt ?? null,
     broadcastStartedAt,
     runtimeStartedAt,
@@ -116,26 +160,54 @@ export async function updateState(
   return { previous, current };
 }
 
-export async function updateThumbnail(instanceId: string, dataUrl: string): Promise<void> {
-  const timestamp = now();
-  await db.execute({
-    sql: `UPDATE instance_state SET thumbnail_data = ?, thumbnail_at = ?, updated_at = ? WHERE instance_id = ?`,
-    args: [dataUrl, timestamp, timestamp, instanceId],
-  });
+export async function updateThumbnailMeta(instanceId: string, capturedAt = nowIso()): Promise<void> {
+  await exec(`
+    INSERT INTO instance_state (
+      instance_id,
+      agent_id,
+      broadcast_health,
+      runtime_health,
+      connectivity_health,
+      thumbnail_at,
+      broadcast_started_at,
+      runtime_started_at,
+      updated_at
+    )
+    VALUES ($1, '', 'unknown', 'unknown', 'offline', $2, $2, $2, $2)
+    ON CONFLICT (instance_id) DO UPDATE SET
+      thumbnail_at = EXCLUDED.thumbnail_at,
+      updated_at = EXCLUDED.updated_at
+  `, [instanceId, capturedAt]);
+
   const existing = cache.get(instanceId);
   if (existing) {
-    existing.thumbnailData = dataUrl;
-    existing.thumbnailAt = timestamp;
-    existing.updatedAt = timestamp;
+    existing.thumbnailAt = capturedAt;
+    existing.updatedAt = capturedAt;
+  } else {
+    cache.set(instanceId, {
+      instanceId,
+      agentId: '',
+      broadcastHealth: 'unknown',
+      runtimeHealth: 'unknown',
+      connectivityHealth: 'offline',
+      lastHeartbeatAt: null,
+      lastObservations: null,
+      thumbnailAt: capturedAt,
+      broadcastStartedAt: capturedAt,
+      runtimeStartedAt: capturedAt,
+      updatedAt: capturedAt,
+    });
   }
 }
 
 export async function setConnectivity(instanceId: string, connectivity: ConnectivityHealth): Promise<void> {
-  const timestamp = now();
-  await db.execute({
-    sql: `UPDATE instance_state SET connectivity_health = ?, updated_at = ? WHERE instance_id = ?`,
-    args: [connectivity, timestamp, instanceId],
-  });
+  const timestamp = nowIso();
+  await exec(`
+    UPDATE instance_state
+    SET connectivity_health = $2, updated_at = $3
+    WHERE instance_id = $1
+  `, [instanceId, connectivity, timestamp]);
+
   const existing = cache.get(instanceId);
   if (existing) {
     existing.connectivityHealth = connectivity;
@@ -144,32 +216,37 @@ export async function setConnectivity(instanceId: string, connectivity: Connecti
 }
 
 export async function markInstanceOffline(instanceId: string): Promise<InstanceState | undefined> {
-  const timestamp = now();
+  const timestamp = nowIso();
   const existing = cache.get(instanceId);
-  const broadcastStartedAt = existing?.broadcastHealth === 'unknown'
+  if (!existing) {
+    return undefined;
+  }
+
+  const broadcastStartedAt = existing.broadcastHealth === 'unknown'
     ? existing.broadcastStartedAt
     : timestamp;
-  const runtimeStartedAt = existing?.runtimeHealth === 'unknown'
+  const runtimeStartedAt = existing.runtimeHealth === 'unknown'
     ? existing.runtimeStartedAt
     : timestamp;
 
-  await db.execute({
-    sql: `UPDATE instance_state
-          SET broadcast_health = 'unknown', runtime_health = 'unknown', connectivity_health = 'offline',
-              broadcast_started_at = ?, runtime_started_at = ?, updated_at = ?
-          WHERE instance_id = ?`,
-    args: [broadcastStartedAt, runtimeStartedAt, timestamp, instanceId],
-  });
+  await exec(`
+    UPDATE instance_state
+    SET
+      broadcast_health = 'unknown',
+      runtime_health = 'unknown',
+      connectivity_health = 'offline',
+      broadcast_started_at = $2,
+      runtime_started_at = $3,
+      updated_at = $4
+    WHERE instance_id = $1
+  `, [instanceId, broadcastStartedAt, runtimeStartedAt, timestamp]);
 
-  if (existing) {
-    existing.broadcastHealth = 'unknown';
-    existing.runtimeHealth = 'unknown';
-    existing.connectivityHealth = 'offline';
-    existing.broadcastStartedAt = broadcastStartedAt;
-    existing.runtimeStartedAt = runtimeStartedAt;
-    existing.updatedAt = timestamp;
-  }
-
+  existing.broadcastHealth = 'unknown';
+  existing.runtimeHealth = 'unknown';
+  existing.connectivityHealth = 'offline';
+  existing.broadcastStartedAt = broadcastStartedAt;
+  existing.runtimeStartedAt = runtimeStartedAt;
+  existing.updatedAt = timestamp;
   return existing;
 }
 
@@ -179,35 +256,56 @@ export async function logEvent(
   fromState: object | null,
   toState: object | null,
   observations: object | null,
-  alertSent: boolean
+  alertSent: boolean,
 ): Promise<void> {
-  await db.execute({
-    sql: `INSERT INTO events (instance_id, event_type, from_state, to_state, observations, alert_sent, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    args: [
-      instanceId, eventType,
-      fromState ? JSON.stringify(fromState) : null,
-      toState ? JSON.stringify(toState) : null,
-      observations ? JSON.stringify(observations) : null,
-      alertSent ? 1 : 0,
-      now(),
-    ],
-  });
+  await exec(`
+    INSERT INTO events (instance_id, event_type, from_state, to_state, observations, alert_sent, created_at)
+    VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6, $7)
+  `, [
+    instanceId,
+    eventType,
+    fromState ? JSON.stringify(fromState) : null,
+    toState ? JSON.stringify(toState) : null,
+    observations ? JSON.stringify(observations) : null,
+    alertSent,
+    nowIso(),
+  ]);
 }
 
 export async function wasAlertSentForCurrentIncident(instanceId: string, broadcastHealth: string): Promise<boolean> {
-  const result = await db.execute({
-    sql: `SELECT alert_sent, to_state FROM events
-          WHERE instance_id = ? AND event_type = 'state_change'
-          ORDER BY created_at DESC LIMIT 1`,
-    args: [instanceId],
-  });
-  if (result.rows.length === 0) return false;
-  const row = result.rows[0];
-  try {
-    const toState = JSON.parse(row.to_state as string);
-    return toState.broadcastHealth === broadcastHealth && row.alert_sent === 1;
-  } catch {
+  const row = await queryOne<Record<string, unknown>>(`
+    SELECT alert_sent, to_state
+    FROM events
+    WHERE instance_id = $1 AND event_type = 'state_change'
+    ORDER BY created_at DESC
+    LIMIT 1
+  `, [instanceId]);
+
+  if (!row) {
     return false;
   }
+
+  const toState = asObservationMap(row.to_state);
+  return Boolean(row.alert_sent) && toState?.broadcastHealth === broadcastHealth;
+}
+
+export async function getPersistedState(instanceId: string): Promise<InstanceState | null> {
+  const row = await queryOne<Record<string, unknown>>(`
+    SELECT
+      instance_id,
+      agent_id,
+      broadcast_health,
+      runtime_health,
+      connectivity_health,
+      last_heartbeat_at,
+      last_observations,
+      thumbnail_at,
+      broadcast_started_at,
+      runtime_started_at,
+      updated_at
+    FROM instance_state
+    WHERE instance_id = $1
+  `, [instanceId]);
+
+  return row ? rowToState(row) : null;
 }

@@ -1,83 +1,87 @@
-# Pulse - Architecture Decision Record Summary
+# Pulse - Decision Record Summary
 
-**Document Date**: 2026-03-27
+**Document Date**: `2026-03-27 20:43:51 -04:00`
 
-This file records current product-level technical decisions and current operational posture.
+## ADR-001 - Node.js / Express / Socket.IO hub remains the core backend
 
-## ADR-001 - Node.js + Express + Socket.IO hub
+**Decision**: keep the hub in Node.js + TypeScript with Express and Socket.IO.  
+**Why**: it still fits heartbeat ingestion, state evaluation, and realtime dashboard fan-out well.  
+**Current note**: unchanged by the `v1.6` refactor.
 
-**Decision**: The hub remains a Node.js / TypeScript service built on Express and Socket.IO.  
-**Why**: It fits heartbeat ingestion, state evaluation, and real-time fan-out well.  
-**Current note**: No change as part of the March 27, 2026 release pass.
+## ADR-002 - Python Windows agent remains the node runtime
 
-## ADR-002 - Python Windows agent packaged as a standalone executable
+**Decision**: keep the Windows agent in Python and package it into `clarix-agent.exe`.  
+**Why**: it still fits Windows process, file, and service behavior very well.  
+**Current note**: unchanged.
 
-**Decision**: The node agent remains Python-based and is packaged into `clarix-agent.exe`.  
-**Why**: It is a strong fit for Windows process inspection, YAML config handling, and packaging into a single operator-friendly artifact.  
-**Current note**: One-click install via `install.bat` remains the supported operator path.
+## ADR-003 - One service per node remains the service model
 
-## ADR-003 - One agent service per node
+**Decision**: one Windows service monitors all configured players on a node.  
+**Why**: simpler operations and upgrade flow.  
+**Current note**: unchanged.
 
-**Decision**: One Windows service monitors all configured players on a node.  
-**Why**: This keeps service management simple while still supporting multi-player nodes.  
-**Current note**: No change.
+## ADR-004 - Health remains hub-computed only
 
-## ADR-004 - Health is computed only in the hub
+**Decision**: agents send observations, not final health state.  
+**Why**: health logic and alert logic stay centralized and consistent.  
+**Current note**: unchanged.
 
-**Decision**: Agents send observations, not final health states.  
-**Why**: A single state engine prevents drift and keeps alert logic centralized.  
-**Current note**: No change.
+## ADR-005 - Local node config remains authoritative for machine-local settings
 
-## ADR-005 - Three separate health domains
+**Decision**: paths, player layout, selectors, and UDP URLs stay owned by the node.  
+**Why**: those settings are environment-specific and safest when edited on the machine that uses them.  
+**Current note**: reinforced in `v1.6`, not relaxed.
 
-**Decision**: Keep `broadcast_health`, `runtime_health`, and `connectivity_health` separate.  
-**Why**: Connectivity loss must not be confused with off-air or runtime failure.  
-**Current note**: No change.
+## ADR-006 - Hub owns central operational state
 
-## ADR-006 - Local node config is the source of truth for machine-local monitoring inputs
+**Decision**: maintenance, monitoring enable / disable, alert routing, tokens, and inventory stay hub-owned.  
+**Why**: they are shared operational concerns, not machine-local runtime details.  
+**Current note**: active in `v1.6`.
 
-**Decision**: Machine-local settings are owned by the node, not the hub.  
-**Why**: Local paths, selectors, player layout, and UDP stream endpoints are environment-specific and belong with the machine that uses them.  
-**Current note**: This is the active production model in the March 27, 2026 release.
+## ADR-007 - Dashboard remains read/write only for hub-owned controls
 
-## ADR-007 - Dashboard mirrors node config but does not own path / UDP editing in the current release
+**Decision**: dashboard edits hub-owned controls and mirrors node-owned config read-only.  
+**Why**: this preserves a clean ownership boundary and avoids unsafe remote edits for machine-local fields.  
+**Current note**: the dashboard now mirrors more node detail, including selector data.
 
-**Decision**: The dashboard is read-only for mirrored node config in the current production release.  
-**Why**: The local node UI is more trustworthy for machine-local config, and the hub-side desired-config flow is not fully active yet.  
-**Current note**: `POST /api/config/player/:playerId` intentionally does not act as a live config editor in production.
+## ADR-008 - Move the hub off SQLite and onto PostgreSQL
 
-## ADR-008 - Operational controls stay hub-owned
+**Decision**: stop using SQLite for the hub runtime and use PostgreSQL instead.  
+**Why**: the product has outgrown a fragile single-file DB model, and the earlier live corruption made SQLite an operational liability.  
+**Current note**: implemented in code in `v1.6`.
 
-**Decision**: Monitoring enabled / disabled, maintenance mode, and alert settings are hub-owned controls.  
-**Why**: These are cross-operator operational decisions rather than machine-local runtime settings.  
-**Current note**: Active in production.
+## ADR-009 - Keep a tiny legacy bootstrap catalog, but remove static runtime registry usage
 
-## ADR-009 - External DB path for production hub persistence
+**Decision**: keep `instances.ts` only as first-run seed data for known legacy nodes.  
+**Why**: this smooths migration while removing hardcoded runtime ownership checks.  
+**Current note**: runtime now validates against DB-backed inventory instead.
 
-**Decision**: Production hub persistence must use `PULSE_DB_PATH` or `PULSE_DATA_DIR`, not the bundled app-tree DB path.  
-**Why**: Deploys must not overwrite or re-import the app-local DB.  
-**Current note**: Adopted on the VPS as of March 27, 2026.
+## ADR-010 - Add generic hub enrollment
 
-## ADR-010 - SQLite remains current-state storage, but it is no longer considered the final long-term control-plane database
+**Decision**: add a hub enrollment endpoint that returns an `agent_token` to a newly configured node.  
+**Why**: generic installer rollout requires self-registration instead of per-node bundle creation as the main onboarding path.  
+**Current note**: implemented at `POST /api/config/enroll`.
 
-**Decision**: Keep SQLite for the current release, but treat PostgreSQL as the recommended next persistence target for the hub control plane.  
-**Why**: The live external SQLite file is still showing corruption in production, and the hub is evolving from a small state cache into a real control plane.  
-**Current note**: March 27, 2026 review recommends PostgreSQL for the next architecture phase.
+## ADR-011 - Keep the alert semantics stable during the platform refactor
 
-## ADR-011 - Shared bundle baseline for release installers
+**Decision**: do not change the current way alerts are generated during the Postgres / installer / registry refactor.  
+**Why**: the user explicitly requested that alert behavior stay untouched unless separately approved.  
+**Current note**: honored in this pass.
 
-**Decision**: All node installers must be rebuilt from the same runtime baseline.  
-**Why**: This avoids drift and gives predictable rollout behavior.  
-**Current note**: The March 27, 2026 release bundle baseline is `v1.5`.
+## ADR-012 - Move hot thumbnails out of the main state store
 
-## ADR-012 - Prepared per-node bundles remain the current production rollout method
+**Decision**: store thumbnail bytes in a file cache instead of inline in the main hub state row.  
+**Why**: it reduces write pressure and avoids carrying large base64 blobs through the primary persistence path.  
+**Current note**: implemented in `v1.6`.
 
-**Decision**: Continue shipping prepared per-node bundles for the current rollout phase.  
-**Why**: The hub registry is still static, so full generic onboarding is not complete yet.  
-**Current note**: Generic installer flow is a target direction, but not yet the only production onboarding path.
+## ADR-013 - Prepared per-node bundles remain optional convenience artifacts
 
-## ADR-013 - Timestamped release / operations knowledge base
+**Decision**: keep prepared bundles for current rollout convenience, but make the generic installer the default direction.  
+**Why**: migration is easier with both paths available during transition.  
+**Current note**: `pulse-generic-v1.6` is now part of the manifest and release tooling.
 
-**Decision**: Close major debug and rollout passes with a timestamped release knowledge-base record.  
-**Why**: The project needs durable operational memory, not just code changes.  
-**Current note**: The March 27, 2026 release record lives in [docs/RELEASE_KB_2026-03-27.md](/D:/monitoring/docs/RELEASE_KB_2026-03-27.md).
+## ADR-014 - End major refactors with timestamped operational memory
+
+**Decision**: keep writing timestamped KB and handover records after major release / refactor passes.  
+**Why**: the project needs durable operational memory, not just code diffs.  
+**Current note**: see [RELEASE_KB_2026-03-27.md](/D:/monitoring/docs/RELEASE_KB_2026-03-27.md).

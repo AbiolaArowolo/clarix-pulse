@@ -1,4 +1,4 @@
-import { db } from './db';
+import { exec, queryOne } from './db';
 
 export interface AlertSettings {
   emailRecipients: string[];
@@ -13,30 +13,27 @@ export interface AlertSettings {
 const MAX_CONTACTS_PER_CHANNEL = 3;
 
 function parseStoredList(value: unknown): string[] {
-  if (typeof value !== 'string' || !value.trim()) {
-    return [];
-  }
-
-  try {
-    const parsed = JSON.parse(value);
-    if (!Array.isArray(parsed)) {
+  if (!Array.isArray(value)) {
+    if (typeof value !== 'string' || !value.trim()) return [];
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parseStoredList(parsed) : [];
+    } catch {
       return [];
     }
-
-    return parsed
-      .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
-      .filter(Boolean)
-      .slice(0, MAX_CONTACTS_PER_CHANNEL);
-  } catch {
-    return [];
   }
+
+  return value
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter(Boolean)
+    .slice(0, MAX_CONTACTS_PER_CHANNEL);
 }
 
 function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function normalizeToken(value: string): string {
+function normalizeTelegramRecipient(value: string): string {
   return value.trim();
 }
 
@@ -53,28 +50,30 @@ function asBool(value: unknown, fallback: boolean): boolean {
   return fallback;
 }
 
-function normalizeList(
-  values: unknown,
-  normalize: (value: string) => string
-): string[] {
+function toIso(value: Date | string | null | undefined): string | null {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toISOString();
+}
+
+function normalizeList(values: unknown, normalize: (value: string) => string): string[] {
   if (!Array.isArray(values)) {
     return [];
   }
 
-  const deduped = new Set<string>();
+  const seen = new Set<string>();
   const normalized: string[] = [];
-
   for (const value of values) {
-    if (typeof value !== 'string') {
-      continue;
-    }
+    if (typeof value !== 'string') continue;
 
     const cleaned = normalize(value);
-    if (!cleaned || deduped.has(cleaned)) {
-      continue;
-    }
+    if (!cleaned) continue;
 
-    deduped.add(cleaned);
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
     normalized.push(cleaned);
 
     if (normalized.length >= MAX_CONTACTS_PER_CHANNEL) {
@@ -85,7 +84,7 @@ function normalizeList(
   return normalized;
 }
 
-function rowToAlertSettings(row: Record<string, unknown>): AlertSettings {
+function rowToSettings(row: Record<string, unknown>): AlertSettings {
   return {
     emailRecipients: parseStoredList(row.email_recipients),
     telegramChatIds: parseStoredList(row.telegram_chat_ids),
@@ -93,33 +92,46 @@ function rowToAlertSettings(row: Record<string, unknown>): AlertSettings {
     emailEnabled: asBool(row.email_enabled, true),
     telegramEnabled: asBool(row.telegram_enabled, true),
     phoneEnabled: asBool(row.phone_enabled, true),
-    updatedAt: typeof row.updated_at === 'string' ? row.updated_at : null,
+    updatedAt: toIso(row.updated_at as Date | string | null | undefined),
   };
 }
 
 export async function getAlertSettings(): Promise<AlertSettings> {
-  const result = await db.execute('SELECT * FROM alert_settings WHERE id = 1');
-  if (result.rows.length === 0) {
-    const timestamp = new Date().toISOString();
-    await db.execute({
-      sql: `INSERT INTO alert_settings
-              (id, email_recipients, telegram_chat_ids, phone_numbers, updated_at)
-            VALUES (1, '[]', '[]', '[]', ?)`,
-      args: [timestamp],
-    });
+  const row = await queryOne<Record<string, unknown>>(`
+    SELECT
+      email_recipients,
+      telegram_chat_ids,
+      phone_numbers,
+      email_enabled,
+      telegram_enabled,
+      phone_enabled,
+      updated_at
+    FROM alert_settings
+    WHERE id = 1
+  `);
 
-    return {
-      emailRecipients: [],
-      telegramChatIds: [],
-      phoneNumbers: [],
-      emailEnabled: true,
-      telegramEnabled: true,
-      phoneEnabled: true,
-      updatedAt: timestamp,
-    };
+  if (row) {
+    return rowToSettings(row);
   }
 
-  return rowToAlertSettings(result.rows[0] as Record<string, unknown>);
+  const timestamp = new Date().toISOString();
+  await exec(`
+    INSERT INTO alert_settings (
+      id, email_recipients, telegram_chat_ids, phone_numbers,
+      email_enabled, telegram_enabled, phone_enabled, updated_at
+    )
+    VALUES (1, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, TRUE, TRUE, TRUE, $1)
+  `, [timestamp]);
+
+  return {
+    emailRecipients: [],
+    telegramChatIds: [],
+    phoneNumbers: [],
+    emailEnabled: true,
+    telegramEnabled: true,
+    phoneEnabled: true,
+    updatedAt: timestamp,
+  };
 }
 
 export async function updateAlertSettings(input: {
@@ -132,7 +144,7 @@ export async function updateAlertSettings(input: {
 }): Promise<AlertSettings> {
   const next: AlertSettings = {
     emailRecipients: normalizeList(input.emailRecipients, normalizeEmail),
-    telegramChatIds: normalizeList(input.telegramChatIds, normalizeToken),
+    telegramChatIds: normalizeList(input.telegramChatIds, normalizeTelegramRecipient),
     phoneNumbers: normalizeList(input.phoneNumbers, normalizePhone),
     emailEnabled: asBool(input.emailEnabled, true),
     telegramEnabled: asBool(input.telegramEnabled, true),
@@ -140,28 +152,36 @@ export async function updateAlertSettings(input: {
     updatedAt: new Date().toISOString(),
   };
 
-  await db.execute({
-    sql: `INSERT INTO alert_settings
-            (id, email_recipients, telegram_chat_ids, phone_numbers, email_enabled, telegram_enabled, phone_enabled, updated_at)
-          VALUES (1, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET
-            email_recipients = excluded.email_recipients,
-            telegram_chat_ids = excluded.telegram_chat_ids,
-            phone_numbers = excluded.phone_numbers,
-            email_enabled = excluded.email_enabled,
-            telegram_enabled = excluded.telegram_enabled,
-            phone_enabled = excluded.phone_enabled,
-            updated_at = excluded.updated_at`,
-    args: [
-      JSON.stringify(next.emailRecipients),
-      JSON.stringify(next.telegramChatIds),
-      JSON.stringify(next.phoneNumbers),
-      next.emailEnabled ? 1 : 0,
-      next.telegramEnabled ? 1 : 0,
-      next.phoneEnabled ? 1 : 0,
-      next.updatedAt,
-    ],
-  });
+  await exec(`
+    INSERT INTO alert_settings (
+      id,
+      email_recipients,
+      telegram_chat_ids,
+      phone_numbers,
+      email_enabled,
+      telegram_enabled,
+      phone_enabled,
+      updated_at
+    )
+    VALUES ($1, $2::jsonb, $3::jsonb, $4::jsonb, $5, $6, $7, $8)
+    ON CONFLICT (id) DO UPDATE SET
+      email_recipients = EXCLUDED.email_recipients,
+      telegram_chat_ids = EXCLUDED.telegram_chat_ids,
+      phone_numbers = EXCLUDED.phone_numbers,
+      email_enabled = EXCLUDED.email_enabled,
+      telegram_enabled = EXCLUDED.telegram_enabled,
+      phone_enabled = EXCLUDED.phone_enabled,
+      updated_at = EXCLUDED.updated_at
+  `, [
+    1,
+    JSON.stringify(next.emailRecipients),
+    JSON.stringify(next.telegramChatIds),
+    JSON.stringify(next.phoneNumbers),
+    next.emailEnabled,
+    next.telegramEnabled,
+    next.phoneEnabled,
+    next.updatedAt,
+  ]);
 
   return next;
 }

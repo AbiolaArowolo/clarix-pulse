@@ -135,17 +135,28 @@ $expectedZips = @()
 $expectedTokenizedConfigs = @()
 
 foreach ($bundle in $manifest.bundles) {
-    $configPath = Resolve-RepoPath -Path ([string]$bundle.configPath)
+    $hasConfigPath = $bundle.PSObject.Properties.Name -contains 'configPath' -and -not [string]::IsNullOrWhiteSpace([string]$bundle.configPath)
+    $configPath = if ($hasConfigPath) {
+        Resolve-RepoPath -Path ([string]$bundle.configPath)
+    } else {
+        $null
+    }
     $version = Get-BundleVersion -Bundle $bundle -DefaultVersion $defaultVersion
     $releaseName = Get-ReleaseName -BundleName ([string]$bundle.bundleName) -Version $version
     $bundlePath = Join-Path $ReleaseRoot $releaseName
     $zipPath = Join-Path $ReleaseRoot ($releaseName + '.zip')
-    $tokenizedConfigPath = Join-Path $TokenizedConfigRoot ([System.IO.Path]::GetFileName($configPath))
+    $tokenizedConfigPath = if ($configPath) {
+        Join-Path $TokenizedConfigRoot ([System.IO.Path]::GetFileName($configPath))
+    } else {
+        $null
+    }
     $releaseConfigPath = Join-Path $bundlePath 'config.yaml'
 
     $expectedDirectories += $releaseName
     $expectedZips += ($releaseName + '.zip')
-    $expectedTokenizedConfigs += ([System.IO.Path]::GetFileName($configPath))
+    if ($configPath) {
+        $expectedTokenizedConfigs += ([System.IO.Path]::GetFileName($configPath))
+    }
 
     if (-not (Test-Path $bundlePath)) {
         $issues.Add([pscustomobject]@{
@@ -173,7 +184,7 @@ foreach ($bundle in $manifest.bundles) {
             File = 'config.yaml'
             Detail = 'Bundled config.yaml is missing.'
         })
-    } else {
+    } elseif ($configPath) {
         $sourceHash = (Get-FileHash -Path $configPath -Algorithm SHA256).Hash
         $releaseHash = (Get-FileHash -Path $releaseConfigPath -Algorithm SHA256).Hash
         if ($sourceHash -ne $releaseHash) {
@@ -186,14 +197,14 @@ foreach ($bundle in $manifest.bundles) {
         }
     }
 
-    if (-not (Test-Path $tokenizedConfigPath)) {
+    if ($configPath -and -not (Test-Path $tokenizedConfigPath)) {
         $issues.Add([pscustomobject]@{
             Type = 'Missing'
             Bundle = $releaseName
             File = 'tokenized-config'
             Detail = "Missing mirrored source config at $tokenizedConfigPath"
         })
-    } else {
+    } elseif ($configPath) {
         $sourceHash = (Get-FileHash -Path $configPath -Algorithm SHA256).Hash
         $tokenizedHash = (Get-FileHash -Path $tokenizedConfigPath -Algorithm SHA256).Hash
         if ($sourceHash -ne $tokenizedHash) {

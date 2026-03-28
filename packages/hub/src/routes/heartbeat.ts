@@ -1,27 +1,16 @@
 import { Router, Request, Response } from 'express';
 import { Server as SocketServer } from 'socket.io';
-import { AGENT_INSTANCE_MAP, INSTANCE_MAP } from '../config/instances';
 import { computeHealth, Observations } from '../services/stateEngine';
 import { evaluateAlert } from '../services/alerting';
 import { getInstanceControls } from '../store/instanceControls';
+import { updateMirroredNodeConfig, MirroredNodeConfig } from '../store/nodeConfigMirror';
+import { getPlayer, markPlayerSeen, resolveNodeIdForToken, syncRegistryFromNodeMirror } from '../store/registry';
 import { getState, updateState } from '../store/state';
-import { updateMirroredNodeConfig } from '../store/nodeConfigMirror';
 
-function parseAgentTokens(): Map<string, string> {
-  const map = new Map<string, string>();
-  const raw = process.env.AGENT_TOKENS ?? '';
-  for (const pair of raw.split(',')) {
-    const [nodeId, token] = pair.trim().split(':');
-    if (nodeId && token) map.set(token, nodeId);
-  }
-  return map;
-}
-
-function validateToken(req: Request, tokenToNode: Map<string, string>): string | null {
+function bearerToken(req: Request): string | null {
   const auth = req.headers.authorization ?? '';
   if (!auth.startsWith('Bearer ')) return null;
-  const token = auth.slice(7).trim();
-  return tokenToNode.get(token) ?? null;
+  return auth.slice(7).trim() || null;
 }
 
 function getUdpMonitoringEnabled(observations: Observations): boolean {
@@ -30,12 +19,17 @@ function getUdpMonitoringEnabled(observations: Observations): boolean {
     || (observations.udp_input_count ?? 0) > 0;
 }
 
+function asMirroredNodeConfig(value: unknown): MirroredNodeConfig | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as MirroredNodeConfig;
+}
+
 export function createHeartbeatRouter(io: SocketServer): Router {
   const router = Router();
-  const tokenToNode = parseAgentTokens();
 
   router.post('/', async (req: Request, res: Response) => {
-    const nodeId = validateToken(req, tokenToNode);
+    const token = bearerToken(req);
+    const nodeId = token ? await resolveNodeIdForToken(token) : null;
     if (!nodeId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
@@ -45,13 +39,12 @@ export function createHeartbeatRouter(io: SocketServer): Router {
       playerId?: string;
       agentId?: string;
       nodeId?: string;
-      observations: Observations;
+      observations?: Observations;
       nodeConfigMirror?: unknown;
     };
 
     const resolvedPlayerId = playerId ?? instanceId;
     const claimedNodeId = reportedNodeId ?? agentId ?? nodeId;
-
     if (!resolvedPlayerId || !observations) {
       return res.status(400).json({ error: 'Missing playerId/instanceId or observations' });
     }
@@ -60,21 +53,37 @@ export function createHeartbeatRouter(io: SocketServer): Router {
       return res.status(403).json({ error: 'Node ID does not match token' });
     }
 
-    const allowedPlayers = AGENT_INSTANCE_MAP.get(nodeId) ?? [];
-    if (!allowedPlayers.includes(resolvedPlayerId)) {
+    let mirroredConfig: MirroredNodeConfig | null = null;
+    if (nodeConfigMirror !== undefined) {
+      mirroredConfig = await updateMirroredNodeConfig(nodeId, nodeConfigMirror);
+    } else {
+      mirroredConfig = asMirroredNodeConfig(nodeConfigMirror);
+    }
+
+    let playerRecord = await getPlayer(resolvedPlayerId);
+    if ((!playerRecord || playerRecord.nodeId !== nodeId) && mirroredConfig) {
+      await syncRegistryFromNodeMirror({
+        nodeId,
+        nodeName: mirroredConfig.nodeName,
+        siteId: mirroredConfig.siteId,
+        players: mirroredConfig.players.map((player) => ({
+          playerId: player.playerId,
+          playoutType: player.playoutType,
+          label: `${mirroredConfig.nodeName} - ${player.playerId}`,
+        })),
+      });
+      playerRecord = await getPlayer(resolvedPlayerId);
+    }
+
+    if (!playerRecord) {
+      return res.status(404).json({ error: 'Unknown player' });
+    }
+
+    if (playerRecord.nodeId !== nodeId) {
       return res.status(403).json({ error: 'Player not allowed for this node' });
     }
 
-    const instanceConfig = INSTANCE_MAP.get(resolvedPlayerId);
-    if (!instanceConfig) {
-      return res.status(404).json({ error: 'Unknown player' });
-    }
     const controls = getInstanceControls(resolvedPlayerId);
-
-    if (nodeConfigMirror !== undefined) {
-      await updateMirroredNodeConfig(nodeId, nodeConfigMirror);
-    }
-
     const previousState = getState(resolvedPlayerId);
     const udpMonitoringEnabled = getUdpMonitoringEnabled(observations);
     const { broadcastHealth, runtimeHealth, connectivityHealth } = computeHealth(
@@ -86,7 +95,7 @@ export function createHeartbeatRouter(io: SocketServer): Router {
         previousBroadcastStartedAt: previousState?.broadcastStartedAt ?? null,
         previousRuntimeHealth: previousState?.runtimeHealth,
         previousRuntimeStartedAt: previousState?.runtimeStartedAt ?? null,
-      }
+      },
     );
 
     const { previous, current } = await updateState(
@@ -95,17 +104,27 @@ export function createHeartbeatRouter(io: SocketServer): Router {
       broadcastHealth,
       runtimeHealth,
       connectivityHealth,
-      observations
+      observations,
     );
+
+    await markPlayerSeen(resolvedPlayerId, current.lastHeartbeatAt ?? new Date().toISOString());
 
     io.emit('state_update', {
       instanceId: resolvedPlayerId,
       playerId: resolvedPlayerId,
       nodeId,
+      commissioned: playerRecord.commissioned,
+      udpMonitoringCapable: playerRecord.udpMonitoringCapable,
       broadcastHealth,
       runtimeHealth,
       connectivityHealth,
-      monitoringMode: !controls.monitoringEnabled ? 'disabled' : controls.maintenanceMode ? 'maintenance' : udpMonitoringEnabled ? 'hybrid' : 'local',
+      monitoringMode: !controls.monitoringEnabled
+        ? 'disabled'
+        : controls.maintenanceMode
+          ? 'maintenance'
+          : udpMonitoringEnabled
+            ? 'hybrid'
+            : 'local',
       monitoringEnabled: controls.monitoringEnabled,
       maintenanceMode: controls.maintenanceMode,
       udpMonitoringEnabled,
@@ -119,7 +138,9 @@ export function createHeartbeatRouter(io: SocketServer): Router {
 
     evaluateAlert({
       instanceId: resolvedPlayerId,
-      instanceLabel: instanceConfig.label,
+      instanceLabel: playerRecord.label,
+      siteName: playerRecord.siteName,
+      nodeId,
       broadcastHealth,
       runtimeHealth,
       previousBroadcast: previous?.broadcastHealth,

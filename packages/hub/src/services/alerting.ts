@@ -1,13 +1,15 @@
 import nodemailer from 'nodemailer';
-import { INSTANCE_MAP } from '../config/instances';
 import { BroadcastHealth, RuntimeHealth } from '../store/db';
-import { isAlertingSuppressed } from '../store/instanceControls';
-import { wasAlertSentForCurrentIncident, logEvent } from '../store/state';
 import { getAlertSettings } from '../store/alertSettings';
+import { isAlertingSuppressed } from '../store/instanceControls';
+import { getPlayer } from '../store/registry';
+import { logEvent, wasAlertSentForCurrentIncident } from '../store/state';
 
 interface AlertContext {
   instanceId: string;
   instanceLabel: string;
+  siteName?: string;
+  nodeId?: string;
   broadcastHealth: BroadcastHealth;
   runtimeHealth: RuntimeHealth;
   previousBroadcast: BroadcastHealth | undefined;
@@ -229,10 +231,9 @@ function buildAlertMessage(
   prefix: 'RECOVERED' | 'NETWORK ISSUE' | 'OFF AIR' | 'OFF AIR LIKELY',
   ctx: AlertContext,
 ): AlertMessage {
-  const instance = INSTANCE_MAP.get(ctx.instanceId);
-  const siteName = instance?.siteName ?? ctx.instanceLabel;
-  const nodeId = instance?.nodeId ?? 'unknown-node';
-  const playerId = instance?.playerId ?? ctx.instanceId;
+  const siteName = ctx.siteName ?? ctx.instanceLabel;
+  const nodeId = ctx.nodeId ?? 'unknown-node';
+  const playerId = ctx.instanceId;
   const causes = deriveLikelyCauses(ctx);
   const bodyLines = [
     `Pulse Alert: ${prefix}`,
@@ -292,7 +293,7 @@ function isRecovery(prev: BroadcastHealth | undefined, current: BroadcastHealth)
 }
 
 export async function evaluateAlert(ctx: AlertContext): Promise<void> {
-  const { instanceId, instanceLabel, broadcastHealth, runtimeHealth, previousBroadcast, observations } = ctx;
+  const { instanceId, broadcastHealth, runtimeHealth, previousBroadcast, observations } = ctx;
 
   if (isAlertingSuppressed(instanceId)) {
     await logEvent(
@@ -357,14 +358,19 @@ export async function evaluateAlert(ctx: AlertContext): Promise<void> {
 
 export async function sendNetworkIssueAlert(instanceId: string, instanceLabel: string): Promise<void> {
   if (isAlertingSuppressed(instanceId)) return;
+
+  const player = await getPlayer(instanceId);
   const alert = buildAlertMessage('NETWORK ISSUE', {
     instanceId,
     instanceLabel,
+    siteName: player?.siteName,
+    nodeId: player?.nodeId,
     broadcastHealth: 'unknown',
     runtimeHealth: 'unknown',
     previousBroadcast: undefined,
     observations: {},
   });
+
   console.log(`[alert] NETWORK ISSUE ${instanceId}`);
   await sendTelegram(alert.body);
   await sendEmail(alert.subject, `${alert.body}\n- Heartbeat missing, so the latest playback state is unknown.`);

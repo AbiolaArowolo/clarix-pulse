@@ -1,59 +1,77 @@
 import { Router, Request, Response } from 'express';
-import { getAllStates } from '../store/state';
-import { SITES } from '../config/instances';
 import { getInstanceControls } from '../store/instanceControls';
+import { listPlayers } from '../store/registry';
+import { getAllStates } from '../store/state';
 
-export function buildStatusPayload() {
+export async function buildStatusPayload() {
   const states = getAllStates();
   const stateMap = new Map(states.map((state) => [state.instanceId, state]));
+  const players = await listPlayers();
 
-  const sites = SITES.map((site) => ({
-    id: site.id,
-    name: site.name,
-    instances: site.instances.map((inst) => {
-      const state = stateMap.get(inst.id);
-      const controls = getInstanceControls(inst.id);
-      const udpInputCount = Number(state?.lastObservations?.udp_input_count ?? 0);
-      const udpHealthyInputCount = Number(state?.lastObservations?.udp_healthy_input_count ?? 0);
-      const udpMonitoringEnabled = (state?.lastObservations?.udp_enabled ?? 0) === 1 || udpInputCount > 0;
+  const siteMap = new Map<string, {
+    id: string;
+    name: string;
+    instances: Array<Record<string, unknown>>;
+  }>();
 
-      return {
-        id: inst.id,
-        nodeId: inst.nodeId,
-        playerId: inst.playerId,
-        label: inst.label,
-        siteId: inst.siteId,
-        playoutType: inst.playoutType,
-        commissioned: inst.commissioned,
-        monitoringMode: !controls.monitoringEnabled ? 'disabled' : controls.maintenanceMode ? 'maintenance' : udpMonitoringEnabled ? 'hybrid' : 'local',
-        monitoringEnabled: controls.monitoringEnabled,
-        maintenanceMode: controls.maintenanceMode,
-        udpMonitoringCapable: inst.udpMonitoringCapable,
-        udpMonitoringEnabled,
-        udpInputCount,
-        udpHealthyInputCount,
-        udpSelectedInputId: (state?.lastObservations?.udp_selected_input_id as string | null | undefined) ?? null,
-        broadcastHealth: state?.broadcastHealth ?? 'unknown',
-        runtimeHealth: state?.runtimeHealth ?? 'unknown',
-        connectivityHealth: state?.connectivityHealth ?? 'offline',
-        lastHeartbeatAt: state?.lastHeartbeatAt ?? null,
-        updatedAt: state?.updatedAt ?? null,
-        hasThumbnail: !!state?.thumbnailData,
-        thumbnailAt: state?.thumbnailAt ?? null,
-        thumbnailDataUrl: state?.thumbnailData ?? undefined,
-        udpProbeEnabled: udpMonitoringEnabled,
-      };
-    }),
-  }));
+  for (const player of players) {
+    const state = stateMap.get(player.playerId);
+    const controls = getInstanceControls(player.playerId);
+    const udpInputCount = Number(state?.lastObservations?.udp_input_count ?? 0);
+    const udpHealthyInputCount = Number(state?.lastObservations?.udp_healthy_input_count ?? 0);
+    const udpMonitoringEnabled = (state?.lastObservations?.udp_enabled ?? 0) === 1 || udpInputCount > 0;
+    const site = siteMap.get(player.siteId) ?? {
+      id: player.siteId,
+      name: player.siteName,
+      instances: [],
+    };
 
-  return { sites, timestamp: new Date().toISOString() };
+    site.instances.push({
+      id: player.playerId,
+      nodeId: player.nodeId,
+      playerId: player.playerId,
+      label: player.label,
+      siteId: player.siteId,
+      playoutType: player.playoutType,
+      commissioned: player.commissioned,
+      monitoringMode: !controls.monitoringEnabled
+        ? 'disabled'
+        : controls.maintenanceMode
+          ? 'maintenance'
+          : udpMonitoringEnabled
+            ? 'hybrid'
+            : 'local',
+      monitoringEnabled: controls.monitoringEnabled,
+      maintenanceMode: controls.maintenanceMode,
+      udpMonitoringCapable: player.udpMonitoringCapable,
+      udpMonitoringEnabled,
+      udpInputCount,
+      udpHealthyInputCount,
+      udpSelectedInputId: (state?.lastObservations?.udp_selected_input_id as string | null | undefined) ?? null,
+      broadcastHealth: state?.broadcastHealth ?? 'unknown',
+      runtimeHealth: state?.runtimeHealth ?? 'unknown',
+      connectivityHealth: state?.connectivityHealth ?? 'offline',
+      lastHeartbeatAt: state?.lastHeartbeatAt ?? null,
+      updatedAt: state?.updatedAt ?? null,
+      hasThumbnail: !!state?.thumbnailAt,
+      thumbnailAt: state?.thumbnailAt ?? null,
+      udpProbeEnabled: udpMonitoringEnabled,
+    });
+
+    siteMap.set(player.siteId, site);
+  }
+
+  return {
+    sites: Array.from(siteMap.values()),
+    timestamp: new Date().toISOString(),
+  };
 }
 
 export function createStatusRouter(): Router {
   const router = Router();
 
-  router.get('/', (_req: Request, res: Response) => {
-    res.json(buildStatusPayload());
+  router.get('/', async (_req: Request, res: Response) => {
+    res.json(await buildStatusPayload());
   });
 
   return router;

@@ -1,115 +1,123 @@
 # Pulse - Product Requirements Summary
 
-**Document Date**: 2026-03-27  
-**Status**: Current release summary with next-phase direction
+**Document Date**: `2026-03-27 20:43:51 -04:00`  
+**Status**: Current product summary after the PostgreSQL and generic-installer refactor
 
 ## Problem
 
-Broadcast operators need a reliable way to monitor playout nodes across multiple sites without confusing runtime faults, connectivity faults, and off-air conditions.
+Operators need to monitor playout nodes across sites without confusing:
 
-Pulse addresses this with:
+- runtime faults
+- network faults
+- stream faults
+- machine-specific config issues
 
-- a Windows node agent
-- a central hub state engine
-- a live dashboard / PWA
-- alerting for critical and recovery events
+Pulse solves this with:
 
----
-
-## Current Release Goals
-
-The current release is optimized for:
-
-- stable monitoring of commissioned nodes
-- correct play / pause / stop runtime behavior
-- one-click Windows installation
-- local node configuration through a persistent local UI
-- remote visibility through a dashboard mirror
-- consistent release bundles across all prepared nodes
+- a Windows agent
+- a central hub
+- a live dashboard
+- alerting through Telegram and email
 
 ---
 
-## Current Product Scope
+## Current Product Goals
 
-### Shipped / Active
+The product now targets:
 
-- real-time dashboard grouped by site and player
-- separate broadcast, runtime, and connectivity health
+- one generic Windows installer by default
+- local node UI as the source of truth for machine-specific config
+- hub-owned operational control plane
+- Postgres-backed central persistence
+- dynamic enrollment for new nodes
+- mirrored read-only node config in the dashboard
+
+---
+
+## Active Scope
+
+### Shipped in code
+
+- Postgres-backed hub persistence
+- DB-backed node / player / token inventory
+- generic node enrollment
 - Windows service agent
-- Insta and Admax monitoring
-- optional UDP monitoring per player
-- thumbnail previews for UDP-enabled monitoring
-- maintenance mode
-- monitoring enable / disable control
-- Telegram and email alerting
-- alert-channel enable / disable toggles
-- local node UI as the source of truth for machine-local config
+- persistent local UI
+- process selectors and log selectors in the local UI
 - mirrored node config in the dashboard
+- maintenance mode
+- monitoring enable / disable
+- Telegram and email alerting
+- file-based thumbnail cache instead of DB-inline blobs
 
-### Current Operational Constraints
+### Intentionally unchanged
 
-- hub onboarding is still static and commissioned in code / env
-- new nodes still need registry and token work on the hub
-- hub persistence is still SQLite
-- dashboard does not currently own machine-local config editing
+- current play / pause / stop monitoring logic
+- current alert timing / trigger behavior
 
----
+### Still operationally dependent on deployment work
 
-## User Roles
-
-| User | Need |
-|---|---|
-| Operator | See off-air risk immediately and react quickly |
-| Engineer | Diagnose runtime vs connectivity vs signal issues |
-| Platform admin | Build and roll out bundles consistently |
-| Support lead | Preserve operational memory and release notes |
+- provisioning a real Postgres server
+- migrating or recreating any state that still matters from the old SQLite era
+- rolling the new hub build to the actual target environment
 
 ---
 
-## Current Release Requirements
+## Ownership Requirements
 
-### Monitoring
+### Node-owned
 
-- Process, window, file, and log monitoring must remain active for supported playout types.
-- Optional UDP monitoring must remain per-player, not global.
-- Pause should show yellow immediately and red after sustained duration.
-- Stop should show yellow immediately and red after sustained duration.
-- Player shutdown should go red immediately.
+- log paths
+- playout type
+- player count
+- process selectors
+- log selectors
+- UDP URLs
 
-### Configuration Ownership
+### Hub-owned
 
-- The node must own machine-local settings such as paths and UDP URLs.
-- The hub must own operational controls such as maintenance and monitoring enabled state.
-- The dashboard must clearly reflect mirrored node settings and current controls.
+- monitoring enabled / disabled
+- maintenance mode
+- alert routing
+- tokens
+- inventory
+- mirrored config storage
 
-### Installer Consistency
+### Dashboard role
 
-- Every release bundle must use the same runtime baseline.
-- Bundle-specific variation should be limited to config and labeling.
-
-### Knowledge Base
-
-- Major release and debug passes must be documented with exact timestamps, outcomes, artifacts, risks, and next actions.
-
----
-
-## Future Requirements
-
-The next major product phase should add:
-
-- dynamic node enrollment / registration
-- DB-backed inventory for nodes and players
-- PostgreSQL hub persistence
-- cleaner desired-vs-current config flow
-- optional remote config editing with version / ack safety
+- edit hub-owned controls
+- display live health and alarms
+- display mirrored node config read-only
 
 ---
 
-## Success Criteria For The March 27, 2026 Release
+## Installation Requirements
 
-- Play / pause / stop behavior accepted in live use
-- All prepared node bundles rebuilt to `v1.5`
-- Documentation aligned with actual product behavior
-- Clear record of current live risks, especially hub DB durability
+- install should be as close to one-click as Windows allows
+- admin should only be needed for the final service installation phase
+- generic setup should be able to enroll itself without a custom node bundle
+- per-node bundles should remain optional convenience artifacts, not the main architecture
 
-The detailed release record is captured in [docs/RELEASE_KB_2026-03-27.md](/D:/monitoring/docs/RELEASE_KB_2026-03-27.md).
+---
+
+## Monitoring Requirements
+
+- process, window, file, and log monitoring stay active for supported playout types
+- optional UDP monitoring stays per-player
+- pause remains yellow immediately and escalates based on the accepted current rules
+- stop remains yellow immediately and escalates based on the accepted current rules
+- player shutdown remains red immediately
+
+---
+
+## Knowledge Base Requirement
+
+Major refactor and release passes must leave behind:
+
+- updated top-level docs
+- updated handover
+- exact release bundle information
+- timestamped challenge notes
+- clear statement of what changed and what intentionally did not change
+
+The current dated record is [RELEASE_KB_2026-03-27.md](/D:/monitoring/docs/RELEASE_KB_2026-03-27.md).

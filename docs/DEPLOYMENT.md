@@ -1,82 +1,108 @@
-# Pulse - Hub And VPS Deployment Guide
+# Pulse - Deployment Guide
 
-**Document Date**: 2026-03-27
+**Document Date**: `2026-03-27 20:43:51 -04:00`
 
 ## Purpose
 
-This guide covers the current production deployment model for the Pulse hub and dashboard.
+This guide covers the deployment model for the new Postgres-based hub and the `v1.6` agent bundle set.
 
-It reflects the release state after the March 27, 2026 hardening pass:
+Important scope note:
 
-- external state DB path adopted through `PULSE_DB_PATH`
-- dashboard deployed behind Caddy
-- PM2-managed hub process
-- node-local configuration as the source of truth
-- static commissioned node/player registry still in place
+- this document describes the required production deployment shape
+- the codebase was rebuilt and verified in this refactor pass
+- a live Postgres server was not provisioned on this workstation during the same turn because neither `docker` nor `psql` was installed locally
 
 ---
 
-## Current Production Facts
+## Production Components
 
-### Hub Runtime
+### Hub
 
 - Node.js + TypeScript
-- PM2 process: `clarix-hub`
-- reverse proxy: Caddy
-- current state store: SQLite via `@libsql/client`
+- PM2 process
+- Express + Socket.IO
+- PostgreSQL required
 
-### Current Constraints
+### Dashboard
 
-- nodes are authenticated with `AGENT_TOKENS`
-- allowed player ownership is still enforced through the static hub registry in [packages/hub/src/config/instances.ts](/D:/monitoring/packages/hub/src/config/instances.ts)
-- dashboard mirrors node config but does not currently own machine-local editing
+- static Vite build
+- served behind Caddy or equivalent reverse proxy
+
+### Agent nodes
+
+- Windows service
+- persistent local UI at `127.0.0.1:3210`
+- self-enrollment supported when `PULSE_ENROLLMENT_KEY` is configured on the hub
 
 ---
 
 ## Required Environment Variables
 
-The current environment template is [/.env.example](/D:/monitoring/.env.example).
+Use [/.env.example](/D:/monitoring/.env.example) as the source template.
 
-Important fields:
+Minimum hub configuration:
 
 ```env
 HUB_PORT=3001
-PULSE_DB_PATH=/var/lib/clarix-pulse/clarix.db
+PULSE_DATABASE_URL=postgres://pulse_user:REPLACE_ME@127.0.0.1:5432/clarix_pulse
+PULSE_ENROLLMENT_KEY=REPLACE_ME
+PULSE_THUMBNAIL_DIR=/var/lib/clarix-pulse/thumbnails
 TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHAT_ID=
 SMTP_HOST=
 SMTP_PORT=587
 SMTP_USER=
 SMTP_PASS=
-SMTP_FROM=alerts@yourdomain.com
-SMTP_TO=ops@yourdomain.com
+SMTP_FROM=alerts@example.com
+SMTP_TO=ops@example.com
 AGENT_TOKENS=node-a:token-a,node-b:token-b
-CONFIG_WRITE_KEY=
 ```
 
-### Database Path
+Notes:
 
-Use an external persistent DB path:
-
-```env
-PULSE_DB_PATH=/var/lib/clarix-pulse/clarix.db
-```
-
-Do not rely on the in-app `packages/hub/data` path for production persistence.
+- `PULSE_DATABASE_URL` is now the main persistence setting
+- `AGENT_TOKENS` remains useful for seeding known nodes during migration
+- `PULSE_ENROLLMENT_KEY` is required for the generic self-registration flow
 
 ---
 
-## Recommended Server Layout
+## Recommended Linux Layout
 
 ```text
-/var/www/clarix-pulse                  # application checkout
-/var/lib/clarix-pulse/clarix.db        # external state database
-/root/.pm2                             # PM2 runtime state
+/var/www/clarix-pulse                  # repo checkout
+/var/lib/clarix-pulse/thumbnails       # thumbnail cache
+/etc/clarix-pulse/.env.local           # env file or symlink target
+/var/lib/postgresql/...                # Postgres data (or managed DB)
 ```
+
+If you use a managed PostgreSQL service, only the thumbnail directory remains local.
 
 ---
 
-## Initial Build
+## PostgreSQL Setup
+
+### Database objects
+
+Create:
+
+- database: `clarix_pulse`
+- application user with normal DDL/DML rights on that database
+
+Example connection string:
+
+```text
+postgres://pulse_user:strong_password@127.0.0.1:5432/clarix_pulse
+```
+
+If you use a managed provider:
+
+- append `?sslmode=require` when required
+- or set `PULSE_DATABASE_SSL=true`
+
+The hub creates its own tables on first boot.
+
+---
+
+## Initial Deployment
 
 ```bash
 cd /var/www
@@ -87,9 +113,30 @@ cp .env.example .env.local
 nano .env.local
 
 npm install
-npm run build --workspace=packages/hub
-npm run build --workspace=packages/dashboard
+npm run build
 ```
+
+Then start the hub:
+
+```bash
+pm2 start packages/hub/dist/index.js --name clarix-hub --update-env
+pm2 save
+```
+
+Checks:
+
+```bash
+pm2 status
+pm2 logs clarix-hub --lines 100
+curl -s http://localhost:3001/api/health
+```
+
+Expected startup shape:
+
+- `[hub] Pulse hub running on port 3001`
+- `[hub] PostgreSQL state initialised for ... tracked instances`
+- `[hub] Database: postgres://...`
+- `[hub] Thumbnail cache: /var/lib/clarix-pulse/thumbnails`
 
 ---
 
@@ -107,29 +154,10 @@ pulse.example.com {
 }
 ```
 
-Then:
+Reload:
 
 ```bash
 systemctl reload caddy
-systemctl enable caddy
-```
-
----
-
-## Starting The Hub
-
-```bash
-cd /var/www/clarix-pulse
-pm2 start packages/hub/dist/index.js --name clarix-hub --update-env
-pm2 save
-```
-
-Checks:
-
-```bash
-pm2 status
-pm2 logs clarix-hub --lines 100
-curl -s http://localhost:3001/api/health
 ```
 
 ---
@@ -140,94 +168,71 @@ curl -s http://localhost:3001/api/health
 cd /var/www/clarix-pulse
 git pull
 npm install
-npm run build --workspace=packages/hub
-npm run build --workspace=packages/dashboard
+npm run build
 pm2 restart clarix-hub --update-env
 systemctl reload caddy
 ```
 
-If using the repo helper:
+If bundle artifacts also need refreshing for operator rollout:
 
-- [scripts/vps_clean_redeploy.py](/D:/monitoring/scripts/vps_clean_redeploy.py)
-
-That script preserves `.env` / `.env.local` and avoids dragging the bundled app-tree DB back into the fresh deploy.
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\rebuild-node-bundles.ps1 -PruneReleaseRoot
+powershell -ExecutionPolicy Bypass -File scripts\verify-bundle-parity.ps1
+```
 
 ---
 
-## Verification Checklist
+## Migration Guidance From SQLite
 
-### Basic Hub Checks
+This codebase no longer uses SQLite for the hub runtime.
+
+Recommended production cutover order:
+
+1. provision PostgreSQL
+2. set `PULSE_DATABASE_URL`
+3. keep `AGENT_TOKENS` populated for existing nodes during first startup
+4. start the new hub so it bootstraps `sites`, `nodes`, `players`, and `agent_tokens`
+5. enroll new generic nodes with `PULSE_ENROLLMENT_KEY`
+6. decommission old SQLite repair scripts after the operational migration is complete
+
+Important caveat:
+
+- there is no in-turn live data migration executed in this refactor pass
+- any existing SQLite state that still matters operationally must be migrated or recreated during deployment planning
+
+---
+
+## Validation Checklist
+
+### Hub
 
 ```bash
 curl -s http://localhost:3001/api/health
 pm2 status --no-color
-```
-
-### Public Checks
-
-```bash
-curl -s https://pulse.clarixtech.com/api/health
-```
-
-### Logs
-
-```bash
 pm2 logs clarix-hub --lines 100 --nostream
 ```
 
-Look for:
-
-- `[hub] Pulse hub running on port 3001`
-- `[hub] State DB path: /var/lib/clarix-pulse/clarix.db`
-
----
-
-## Backups And Repair
-
-### Backup
-
-Back up the external DB file, not the old app-tree path:
+### Dashboard
 
 ```bash
-cp /var/lib/clarix-pulse/clarix.db /var/lib/clarix-pulse/clarix.db.bak
+curl -s https://pulse.example.com/api/health
 ```
 
-### Repair / Reset Helper
+### Agent enrollment
 
-Current helper:
+Confirm a generic node can:
 
-- [scripts/vps_repair_state_db.py](/D:/monitoring/scripts/vps_repair_state_db.py)
-
-Important behavior:
-
-- it stops the hub
-- moves the current DB aside with a timestamped suffix
-- starts the hub against a fresh DB
-
-This is a recovery / reset action, not a full logical repair. Persisted hub state such as alert settings, maintenance flags, mirrored config, and thumbnails will need to repopulate.
+1. save local config with an enrollment key
+2. receive a fresh agent token
+3. heartbeat successfully
+4. appear in the dashboard grouped under its site
 
 ---
 
-## Known Production Risks
+## Known Current Gaps
 
-As of March 27, 2026:
+- no live Postgres server was provisioned on this workstation during the refactor pass
+- no VPS cutover was executed in this turn
+- prepared per-node bundles still ship for convenience, even though the generic installer is now the intended main path
 
-- the VPS still shows `SQLITE_CORRUPT` in live hub logs
-- Telegram alert delivery has at least one invalid configured target
-- thumbnail blobs are still stored inline in the hub DB
-- onboarding new nodes still requires static registry and token updates on the hub
-
-These are operationally important and should be tracked in the next engineering phase.
-
----
-
-## Recommended Next Architecture Step
-
-For the next major phase:
-
-1. move hub persistence to PostgreSQL
-2. replace static registry with DB-backed nodes / players / tokens
-3. add dynamic enrollment for new nodes
-4. keep local node config authoritative for machine-local paths and UDP inputs
-
-For the full timestamped release record, see [docs/RELEASE_KB_2026-03-27.md](/D:/monitoring/docs/RELEASE_KB_2026-03-27.md).
+For the timestamped release and challenge log, see [RELEASE_KB_2026-03-27.md](/D:/monitoring/docs/RELEASE_KB_2026-03-27.md).

@@ -154,7 +154,7 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
       text-transform: uppercase;
       color: var(--muted);
     }
-    input, select {
+    input, select, textarea {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 12px;
@@ -162,6 +162,11 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
       background: #08111d;
       color: var(--text);
       font-size: 14px;
+    }
+    textarea {
+      min-height: 92px;
+      resize: vertical;
+      font-family: inherit;
     }
     input[type="checkbox"] {
       width: auto;
@@ -263,6 +268,9 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
         This node is configured here first. The web app mirrors these settings for remote visibility,
         but the live configuration stays on the node.
       </p>
+      <p>
+        Fixed local access stays at http://127.0.0.1:3210/ after install, so operators can always reach setup on the node itself.
+      </p>
     </section>
 
     <section class="panel">
@@ -273,6 +281,7 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
         <label>Site ID<input id="site_id"></label>
         <label>Hub URL<input id="hub_url"></label>
         <label>Agent Token<input id="agent_token"></label>
+        <label>Enrollment Key<input id="enrollment_key" placeholder="Optional when Agent Token is blank"></label>
         <label>Poll Interval (Seconds)<input id="poll_interval_seconds" type="number" min="1" max="120"></label>
       </div>
     </section>
@@ -334,6 +343,8 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
           shared_log_dir: DEFAULTS.instaLogDir,
           instance_root: DEFAULTS.instaRoot
         },
+        process_selectors: {},
+        log_selectors: {},
         udp_inputs: []
       };
     }
@@ -353,7 +364,30 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
       document.getElementById("site_id").value = state.site_id || "";
       document.getElementById("hub_url").value = state.hub_url || DEFAULTS.hubUrl;
       document.getElementById("agent_token").value = state.agent_token || "";
+      document.getElementById("enrollment_key").value = state.enrollment_key || "";
       document.getElementById("poll_interval_seconds").value = state.poll_interval_seconds || 5;
+    }
+
+    function listText(value) {
+      if (Array.isArray(value)) {
+        return value.join("\n");
+      }
+      if (typeof value === "string") {
+        return value;
+      }
+      return "";
+    }
+
+    function parseLines(value) {
+      return String(value || "")
+        .split(/\r?\n|,/)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+    }
+
+    function ensureAdvanced(player) {
+      player.process_selectors = player.process_selectors || {};
+      player.log_selectors = player.log_selectors || {};
     }
 
     function renderPlayers() {
@@ -385,6 +419,52 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
               </label>
             </div>
           `;
+
+        const processSelectors = player.process_selectors || {};
+        const logSelectors = player.log_selectors || {};
+        const advancedHtml = `
+          <div class="stack" style="margin-top:16px;">
+            <h3 class="section-title">Advanced Selectors</h3>
+            <div class="grid">
+              <label>Process Names
+                <textarea oninput="PulseUi.updateSelectorList(${playerIndex}, 'process_selectors', 'process_names', this.value)">${escapeHtml(listText(processSelectors.process_names))}</textarea>
+              </label>
+              <label>Window Title Contains
+                <textarea oninput="PulseUi.updateSelectorList(${playerIndex}, 'process_selectors', 'window_title_contains', this.value)">${escapeHtml(listText(processSelectors.window_title_contains))}</textarea>
+              </label>
+              <label>Process Regex
+                <input value="${escapeHtml(processSelectors.process_name_regex || '')}" oninput="PulseUi.updateSelectorValue(${playerIndex}, 'process_selectors', 'process_name_regex', this.value)">
+              </label>
+              <label>Window Title Regex
+                <input value="${escapeHtml(processSelectors.window_title_regex || '')}" oninput="PulseUi.updateSelectorValue(${playerIndex}, 'process_selectors', 'window_title_regex', this.value)">
+              </label>
+              <label>Log Include Contains
+                <textarea oninput="PulseUi.updateSelectorList(${playerIndex}, 'log_selectors', 'include_contains', this.value)">${escapeHtml(listText(logSelectors.include_contains))}</textarea>
+              </label>
+              <label>Log Exclude Contains
+                <textarea oninput="PulseUi.updateSelectorList(${playerIndex}, 'log_selectors', 'exclude_contains', this.value)">${escapeHtml(listText(logSelectors.exclude_contains))}</textarea>
+              </label>
+              <label>Paused Regex
+                <input value="${escapeHtml(logSelectors.paused_regex || '')}" oninput="PulseUi.updateSelectorValue(${playerIndex}, 'log_selectors', 'paused_regex', this.value)">
+              </label>
+              <label>Played Regex
+                <input value="${escapeHtml(logSelectors.played_regex || '')}" oninput="PulseUi.updateSelectorValue(${playerIndex}, 'log_selectors', 'played_regex', this.value)">
+              </label>
+              <label>Skipped Regex
+                <input value="${escapeHtml(logSelectors.skipped_regex || '')}" oninput="PulseUi.updateSelectorValue(${playerIndex}, 'log_selectors', 'skipped_regex', this.value)">
+              </label>
+              <label>Exited Regex
+                <input value="${escapeHtml(logSelectors.exited_regex || '')}" oninput="PulseUi.updateSelectorValue(${playerIndex}, 'log_selectors', 'exited_regex', this.value)">
+              </label>
+              <label>Reinit Regex
+                <input value="${escapeHtml(logSelectors.reinit_regex || '')}" oninput="PulseUi.updateSelectorValue(${playerIndex}, 'log_selectors', 'reinit_regex', this.value)">
+              </label>
+              <label>Token Patterns
+                <textarea oninput="PulseUi.updateSelectorList(${playerIndex}, 'log_selectors', 'token_patterns', this.value)">${escapeHtml(listText(logSelectors.token_patterns))}</textarea>
+              </label>
+            </div>
+          </div>
+        `;
 
         const udpHtml = udpInputs.length === 0
           ? '<div class="muted-card">No streams added for this player.</div>'
@@ -439,6 +519,7 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
               </label>
             </div>
             <div style="margin-top:14px;">${pathHtml}</div>
+            ${advancedHtml}
             <div class="row" style="margin-top:16px;">
               <h3 class="section-title">Streams</h3>
               <button type="button" class="primary" onclick="PulseUi.addUdp(${playerIndex})">+ Add stream</button>
@@ -455,7 +536,7 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
     }
 
     function wireTopInputs() {
-      ["node_id", "node_name", "site_id", "hub_url", "agent_token", "poll_interval_seconds"].forEach((field) => {
+      ["node_id", "node_name", "site_id", "hub_url", "agent_token", "enrollment_key", "poll_interval_seconds"].forEach((field) => {
         document.getElementById(field).addEventListener("input", (event) => {
           state[field] = event.target.value;
         });
@@ -480,6 +561,26 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
           delete player.paths.admax_root;
         } else {
           player.paths[key] = value;
+        }
+      },
+      updateSelectorValue(playerIndex, group, key, value) {
+        const player = state.players[playerIndex];
+        ensureAdvanced(player);
+        const cleaned = String(value || "").trim();
+        if (cleaned) {
+          player[group][key] = cleaned;
+        } else {
+          delete player[group][key];
+        }
+      },
+      updateSelectorList(playerIndex, group, key, value) {
+        const player = state.players[playerIndex];
+        ensureAdvanced(player);
+        const values = parseLines(value);
+        if (values.length > 0) {
+          player[group][key] = values;
+        } else {
+          delete player[group][key];
         }
       },
       addPlayer() {
@@ -848,6 +949,79 @@ def _normalize_log_selectors(player: dict[str, Any]) -> dict[str, Any]:
     _merge_mapping(selectors, player.get("logs"))
     _merge_mapping(selectors, player.get("log_selectors"))
     return selectors
+
+
+PROCESS_SELECTOR_LIST_UI_KEYS = {
+    "process_names",
+    "process_name_regexes",
+    "window_title_contains",
+    "window_title_regexes",
+}
+
+PROCESS_SELECTOR_STRING_UI_KEYS = {
+    "process_name",
+    "process_name_regex",
+    "window_title",
+    "window_title_regex",
+}
+
+LOG_SELECTOR_LIST_UI_KEYS = {
+    "include_contains",
+    "exclude_contains",
+    "include_regexes",
+    "exclude_regexes",
+    "token_patterns",
+}
+
+LOG_SELECTOR_STRING_UI_KEYS = {
+    "paused_regex",
+    "played_regex",
+    "skipped_regex",
+    "exited_regex",
+    "reinit_regex",
+}
+
+
+def _normalize_ui_selector_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        parts = []
+        for chunk in value.replace("\r", "\n").split("\n"):
+            parts.extend(chunk.split(","))
+        return _dedupe_strings(parts)
+    if isinstance(value, (list, tuple, set)):
+        return _dedupe_strings([_as_str(item) for item in value])
+    return []
+
+
+def _merge_local_ui_selectors(
+    existing_selectors: dict[str, Any],
+    raw_selectors: Any,
+    list_keys: set[str],
+    string_keys: set[str],
+) -> dict[str, Any]:
+    merged = dict(existing_selectors)
+    if not isinstance(raw_selectors, dict):
+        return merged
+
+    for key in list_keys:
+        if key not in raw_selectors:
+            continue
+        values = _normalize_ui_selector_list(raw_selectors.get(key))
+        if values:
+            merged[key] = values
+        else:
+            merged.pop(key, None)
+
+    for key in string_keys:
+        if key not in raw_selectors:
+            continue
+        text = _as_str(raw_selectors.get(key))
+        if text:
+            merged[key] = text
+        else:
+            merged.pop(key, None)
+
+    return merged
 
 
 def _normalize_player(player: Any, index: int) -> dict[str, Any] | None:
@@ -1294,6 +1468,8 @@ def _build_default_player_for_ui(index: int, node_id: str, existing_player: dict
         "player_id": player_id,
         "playout_type": playout_type,
         "paths": _default_player_paths(playout_type, existing_paths),
+        "process_selectors": _normalize_process_selectors(existing_player),
+        "log_selectors": _normalize_log_selectors(existing_player),
         "udp_inputs": udp_inputs,
     }
 
@@ -1318,6 +1494,7 @@ def _config_for_local_ui(existing: dict[str, Any] | None = None) -> dict[str, An
         "site_id": _as_str(existing.get("site_id"), _default_site_id(node_id)),
         "hub_url": _as_str(existing.get("hub_url"), DEFAULT_HUB_URL),
         "agent_token": _as_str(existing.get("agent_token")),
+        "enrollment_key": "",
         "poll_interval_seconds": max(1, _as_int(existing.get("poll_interval_seconds"), 5)),
         "players": players,
     }
@@ -1333,6 +1510,7 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
     site_id = _as_str(payload.get("site_id"), _default_site_id(node_id))
     hub_url = _as_str(payload.get("hub_url"), DEFAULT_HUB_URL)
     agent_token = _as_str(payload.get("agent_token"))
+    enrollment_key = _as_str(payload.get("enrollment_key"))
     poll_interval_seconds = max(1, min(120, _as_int(payload.get("poll_interval_seconds"), 5)))
 
     if not node_id:
@@ -1343,8 +1521,8 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
         raise ValueError("Site ID is required.")
     if not hub_url:
         raise ValueError("Hub URL is required.")
-    if not agent_token:
-        raise ValueError("Agent token is required.")
+    if not agent_token and not enrollment_key:
+        raise ValueError("Agent token or enrollment key is required.")
 
     players_raw = payload.get("players")
     if not isinstance(players_raw, list) or not players_raw:
@@ -1421,6 +1599,18 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
                 udp_inputs.append(normalized_input)
 
         merged_player["udp_inputs"] = udp_inputs
+        merged_player["process_selectors"] = _merge_local_ui_selectors(
+            _normalize_process_selectors(merged_player),
+            raw_player.get("process_selectors", {}),
+            PROCESS_SELECTOR_LIST_UI_KEYS,
+            PROCESS_SELECTOR_STRING_UI_KEYS,
+        )
+        merged_player["log_selectors"] = _merge_local_ui_selectors(
+            _normalize_log_selectors(merged_player),
+            raw_player.get("log_selectors", {}),
+            LOG_SELECTOR_LIST_UI_KEYS,
+            LOG_SELECTOR_STRING_UI_KEYS,
+        )
         merged_player.pop("udp_probe", None)
         merged_players.append(merged_player)
 
@@ -1456,20 +1646,80 @@ def _current_local_ui_config() -> dict[str, Any]:
     return _config_for_local_ui(existing)
 
 
-def _save_local_ui_config(payload: dict[str, Any]) -> dict[str, Any]:
-    config_path = _runtime_config_path()
-    existing = _load_yaml_if_exists(config_path)
-    config = _normalize_local_ui_submission(payload, existing)
-    _write_yaml(config_path, config)
-
-    udp_enabled = any(
+def _config_has_enabled_udp(config: dict[str, Any]) -> bool:
+    return any(
         _as_bool(udp_input.get("enabled"), False)
         for player in config.get("players", [])
         if isinstance(player, dict)
         for udp_input in player.get("udp_inputs", [])
         if isinstance(udp_input, dict)
     )
-    _ensure_ff_tools(required=udp_enabled)
+
+
+def _build_enrollment_request(config: dict[str, Any], enrollment_key: str) -> dict[str, Any]:
+    return {
+        "enrollmentKey": enrollment_key,
+        "nodeId": _as_str(config.get("node_id")),
+        "nodeName": _as_str(config.get("node_name")),
+        "siteId": _as_str(config.get("site_id")),
+        "players": [
+            {
+                "playerId": _as_str(player.get("player_id")),
+                "playoutType": _as_str(player.get("playout_type"), "insta"),
+            }
+            for player in config.get("players", [])
+            if isinstance(player, dict) and _as_str(player.get("player_id"))
+        ],
+    }
+
+
+def _enroll_node_with_hub(config: dict[str, Any], enrollment_key: str) -> str:
+    hub_url = _as_str(config.get("hub_url")).rstrip("/")
+    if not hub_url:
+        raise ValueError("Hub URL is required for enrollment.")
+
+    payload = _build_enrollment_request(config, enrollment_key)
+    response = requests.post(f"{hub_url}/api/config/enroll", json=payload, timeout=20)
+
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+
+    if response.status_code >= 400:
+        message = _as_str(body.get("error")) if isinstance(body, dict) else ""
+        raise RuntimeError(message or f"Hub enrollment failed with HTTP {response.status_code}.")
+
+    if not isinstance(body, dict):
+        raise RuntimeError("Hub enrollment returned an invalid response.")
+
+    agent_token = _as_str(body.get("agentToken"))
+    if not agent_token:
+        raise RuntimeError("Hub enrollment did not return an agent token.")
+
+    return agent_token
+
+
+def _materialize_local_ui_config(payload: dict[str, Any], existing: dict[str, Any] | None = None) -> dict[str, Any]:
+    config = _normalize_local_ui_submission(payload, existing)
+    if _as_str(config.get("agent_token")):
+        return config
+
+    enrollment_key = _as_str(payload.get("enrollment_key"))
+    if not enrollment_key:
+        raise ValueError("Agent token or enrollment key is required.")
+
+    config["agent_token"] = _enroll_node_with_hub(config, enrollment_key)
+    return config
+
+
+def _save_local_ui_config(payload: dict[str, Any]) -> dict[str, Any]:
+    config_path = _runtime_config_path()
+    existing = _load_yaml_if_exists(config_path)
+    config = _materialize_local_ui_config(payload, existing)
+    _write_yaml(config_path, config)
+
+    _ensure_ff_tools(required=_config_has_enabled_udp(config))
 
     return _config_for_local_ui(config)
 
@@ -1590,7 +1840,7 @@ def _run_local_config_ui(existing: dict[str, Any] | None = None) -> dict[str, An
 
             try:
                 payload = json.loads(raw_body.decode("utf-8"))
-                config = _normalize_local_ui_submission(payload, existing)
+                config = _materialize_local_ui_config(payload, existing)
             except Exception as exc:
                 self._send_json(400, {"error": str(exc)})
                 return
@@ -1902,18 +2152,37 @@ def _load_or_prepare_config(config_path: str) -> dict[str, Any]:
 
 
 def install_service_command() -> int:
-    if not _is_admin():
-        print("Administrator approval is required for the Pulse installation.")
-        return _relaunch_as_admin(["--install-service"])
+    try:
+        config_path = _bundle_path("config.yaml")
+        bundle_config = _load_yaml_if_exists(config_path)
+        if os.path.exists(_installed_path("config.yaml")) and (not bundle_config or _contains_placeholder(bundle_config)):
+            _copy_if_exists(_installed_path("config.yaml"), config_path)
+        _load_or_prepare_config(config_path)
+        load_config(config_path)
+    except Exception as exc:
+        print(f"ERROR: {exc}")
+        return 1
 
+    if not _is_admin():
+        print()
+        print("Pulse configuration is ready.")
+        print("Windows will ask for one Administrator approval to finish installing the service.")
+        return _relaunch_as_admin(["--install-service-admin"])
+
+    return install_service_admin_command()
+
+
+def install_service_admin_command() -> int:
     try:
         nssm_path = _ensure_nssm()
         _stop_existing_service(nssm_path)
         staged_exe = _stage_runtime_files()
         config_path = _installed_path("config.yaml")
-        raw_config = _load_or_prepare_config(config_path)
+        if os.path.exists(_bundle_path("config.yaml")):
+            _copy_if_exists(_bundle_path("config.yaml"), config_path)
+        _load_or_prepare_config(config_path)
         validated_config = load_config(config_path)
-        _ensure_ff_tools(required=True)
+        _ensure_ff_tools(required=_config_has_enabled_udp(validated_config))
 
         _run_command([nssm_path, "install", SERVICE_NAME, staged_exe, "--service-loop"])
         _run_command([nssm_path, "set", SERVICE_NAME, "DisplayName", SERVICE_DISPLAY_NAME])
@@ -1953,14 +2222,7 @@ def configure_command() -> int:
         _write_yaml(config_path, configured)
         load_config(config_path)
 
-        udp_enabled = any(
-            _as_bool(udp_input.get("enabled"), False)
-            for player in configured.get("players", [])
-            if isinstance(player, dict)
-            for udp_input in player.get("udp_inputs", [])
-            if isinstance(udp_input, dict)
-        )
-        _ensure_ff_tools(required=udp_enabled)
+        _ensure_ff_tools(required=_config_has_enabled_udp(configured))
 
         if _service_exists():
             nssm_path = _ensure_nssm()
@@ -2358,6 +2620,8 @@ def main() -> int:
             return validate_config_command(config_path)
         if command == "--install-service":
             return install_service_command()
+        if command == "--install-service-admin":
+            return install_service_admin_command()
         if command == "--configure":
             return configure_command()
         if command == "--open-local-ui":

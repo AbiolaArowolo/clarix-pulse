@@ -1,6 +1,6 @@
 # Pulse - Tech Stack
 
-**Document Date**: 2026-03-27
+**Document Date**: `2026-03-27 20:43:51 -04:00`
 
 ## Hub
 
@@ -10,25 +10,21 @@
 | Language | TypeScript |
 | HTTP framework | Express |
 | Realtime transport | Socket.IO |
-| Current DB client | `@libsql/client` |
-| Current DB engine | SQLite |
-| Email | Nodemailer |
+| DB client | `pg` |
+| DB engine | PostgreSQL |
+| Alerts | Nodemailer + Telegram Bot API |
 | Process manager | PM2 |
-
-Current note:
-
-- SQLite is still the active hub store
-- PostgreSQL is the recommended next-step store for the hub control plane
+| Thumbnail cache | local filesystem path via `PULSE_THUMBNAIL_DIR` |
 
 ## Dashboard
 
 | Layer | Current Choice |
 |---|---|
-| Build tool | Vite |
 | Framework | React |
 | Language | TypeScript |
+| Build tool | Vite |
 | Realtime client | `socket.io-client` |
-| Install model | PWA / browser-native install |
+| Delivery model | browser app / PWA |
 
 ## Windows Agent
 
@@ -43,20 +39,20 @@ Current note:
 | Image handling | Pillow |
 | Service wrapper | NSSM |
 | Media probing | ffmpeg / ffprobe bundled in installer |
+| Local UI | built into the agent at `127.0.0.1:3210` |
 
-## Operational Infrastructure
+## Release Tooling
 
 | Layer | Current Choice |
 |---|---|
-| Hub host | Linux VPS / VM / on-prem server |
-| Reverse proxy | Caddy |
-| TLS / public edge | operator choice |
-| Persistent hub DB path | `PULSE_DB_PATH` |
-| Node-local config UI | built into the agent at `127.0.0.1:3210` |
+| Bundle builder | PowerShell |
+| Bundle parity verification | PowerShell |
+| Prepared bundles | optional convenience path |
+| Generic bundle | primary onboarding path |
 
-## Current Architecture Direction
+## Current Runtime Direction
 
-- local YAML on the node remains the source of truth for machine-local config
-- hub persistence is currently SQLite but under review for PostgreSQL migration
-- prepared per-node bundles are the current rollout format
-- generic installer plus dynamic enrollment is the next major onboarding target
+- PostgreSQL is now the only hub database target in code
+- node-local YAML remains the machine-local source of truth
+- hub DB owns inventory, tokens, mirrored config, state, and controls
+- alert behavior was intentionally left unchanged during this stack transition

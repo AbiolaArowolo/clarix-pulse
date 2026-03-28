@@ -253,18 +253,18 @@ export function AlertContactsEditor() {
     }
   };
 
-  const addTelegramTarget = (recipient: string) => {
+  const addTelegramTarget = (chatId: string) => {
     setDraft((current) => {
-      if (current.telegramChatIds.includes(recipient)) {
+      if (current.telegramChatIds.includes(chatId)) {
         return current;
       }
 
       const next = [...current.telegramChatIds];
       const firstEmptyIndex = next.findIndex((entry) => !entry.trim());
       if (firstEmptyIndex >= 0) {
-        next[firstEmptyIndex] = recipient;
+        next[firstEmptyIndex] = chatId;
       } else {
-        next[0] = recipient;
+        next[0] = chatId;
       }
 
       return {
@@ -394,7 +394,7 @@ export function AlertContactsEditor() {
                           <button
                             key={target.chatId}
                             type="button"
-                            onClick={() => addTelegramTarget(target.recipient)}
+                            onClick={() => addTelegramTarget(target.chatId)}
                             className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-left transition-colors hover:border-teal-500"
                           >
                             <div className="min-w-0">

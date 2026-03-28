@@ -260,6 +260,8 @@ export function InstanceCard({ instance }: Props) {
 
       {!monitoringSuppressed && showUdpMonitoring && instance.hasThumbnail && (
         <StreamThumbnail
+          playerId={instance.playerId}
+          available={instance.hasThumbnail}
           dataUrl={instance.thumbnailDataUrl}
           capturedAt={instance.thumbnailAt}
           instanceLabel={instance.label}

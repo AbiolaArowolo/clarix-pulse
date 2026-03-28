@@ -1,166 +1,229 @@
-# Pulse - Architecture Document
+# Pulse - Architecture
 
-**Document Date**: 2026-03-27  
-**Status**: Current release architecture
+**Document Date**: `2026-03-27 20:43:51 -04:00`  
+**Status**: Codebase architecture after the PostgreSQL and generic-installer refactor
 
 ## System Model
 
-Pulse is a three-part monitoring system:
+Pulse is now organized around two control planes:
+
+1. local node control plane
+2. central hub control plane
 
 ```text
 Windows playout node
+  -> Pulse local UI + config.yaml
   -> Pulse agent service
-  -> Hub API + state engine
+  -> Hub API
+  -> PostgreSQL
   -> Dashboard / PWA
 ```
 
-### Identity Model
-
-- `node_id` identifies the physical host
-- `player_id` identifies the monitored playout source on that host
-- one node can host multiple players
-- one player can define zero to five UDP inputs
-
 ---
 
-## Components
+## Ownership Model
 
-### Local Agent
+### Local node is authoritative for machine-specific settings
 
-Responsibilities:
+The node owns:
 
-- run as a Windows service
-- inspect local process, window, log, file, connectivity, and optional UDP signals
-- host the persistent local configuration UI
-- post raw observations to the hub
-- mirror current node config upward to the hub
-
-Important current rule:
-
-- the node is the source of truth for machine-local config
-
-That includes:
-
-- local paths
+- `node_id`
+- `node_name`
+- `site_id`
+- `hub_url`
+- local player list
 - playout type
-- player count
-- per-player UDP inputs
-- selectors and runtime-specific overrides
+- local paths
+- process selectors
+- log selectors
+- UDP inputs
 
-### Hub
+The authoritative local interface is:
 
-Responsibilities:
+- `http://127.0.0.1:3210/`
 
-- validate agent bearer tokens
-- validate node / player ownership against the commissioned registry
-- compute health state
-- persist current state and event history
-- persist alert settings and instance controls
-- persist mirrored node config
-- emit live dashboard updates
+The node persists that configuration in:
 
-Current implementation note:
+- `%ProgramData%\ClarixPulse\Agent\config.yaml`
 
-- the commissioned registry is still static and lives in [packages/hub/src/config/instances.ts](/D:/monitoring/packages/hub/src/config/instances.ts)
+### Hub is authoritative for central operational state
 
-### Dashboard
+The hub owns:
 
-Responsibilities:
-
-- render the live operational view
-- display alarms, health, thumbnails, and monitoring controls
-- display mirrored node-side stream settings
-- edit hub-owned operational controls such as maintenance mode and alert settings
-
-Current implementation note:
-
-- the dashboard is not the primary editor for machine-local paths or UDP inputs in the current release
-
----
-
-## Persistence Model
-
-Current hub persistence is SQLite through [packages/hub/src/store/db.ts](/D:/monitoring/packages/hub/src/store/db.ts).
-
-Persisted data includes:
-
-- instance state
-- incident / event history
-- alert settings
-- instance controls
+- `sites`
+- `nodes`
+- `players`
+- `agent_tokens`
+- `instance_controls`
+- `alert_settings`
+- `events`
 - mirrored node config
-- thumbnails
 
-Current production note:
+The hub is also still the only place that computes:
 
-- the live DB path is externalized through `PULSE_DB_PATH`
-- the live VPS still shows SQLite corruption in logs as of March 27, 2026
-
----
-
-## Current Data Flows
-
-### Heartbeat Flow
-
-```text
-Agent polls one player
-  -> POST /api/heartbeat
-  -> Hub validates token and player ownership
-  -> Hub computes health
-  -> Hub updates persisted state
-  -> Hub emits Socket.IO state update
-  -> Dashboard updates the card
-```
-
-### Thumbnail Flow
-
-```text
-Agent captures thumbnail from selected UDP input
-  -> POST /api/thumbnail
-  -> Hub stores thumbnail
-  -> Hub emits thumbnail update
-  -> Dashboard refreshes preview
-```
-
-### Config Mirror Flow
-
-```text
-Local node config changes
-  -> Agent includes nodeConfigMirror in heartbeat payload
-  -> Hub stores mirrored config
-  -> Dashboard reads mirrored stream settings
-```
-
-### Operational Control Flow
-
-```text
-Operator changes monitoringEnabled / maintenanceMode / alert settings
-  -> Dashboard calls hub API
-  -> Hub persists operational control
-  -> Dashboard and alert engine use the updated control state
-```
+- `broadcast_health`
+- `runtime_health`
+- `connectivity_health`
 
 ---
 
-## Current Non-Goals In Production
+## Hub Persistence Model
 
-The current release does not yet provide:
+Hub persistence is now PostgreSQL in [db.ts](/D:/monitoring/packages/hub/src/store/db.ts).
 
-- dynamic self-registration for brand-new nodes
-- DB-backed dynamic node/player inventory
-- dashboard-owned editing of machine-local path or UDP config
-- fully active desired-config pushdown from the hub back to nodes
+### Main tables
 
-The codebase contains some preparatory pieces for future desired-config flows, but they are not the active production control plane today.
+- `sites`
+- `nodes`
+- `players`
+- `agent_tokens`
+- `instance_state`
+- `events`
+- `alert_settings`
+- `instance_controls`
+- `node_config_mirror`
+
+### Non-DB thumbnail storage
+
+Hot thumbnail blobs were removed from the main state row and moved to a file cache in [thumbnails.ts](/D:/monitoring/packages/hub/src/store/thumbnails.ts).
+
+Current behavior:
+
+- DB stores `thumbnail_at`
+- file cache stores the JPEG bytes
+- initial dashboard load fetches thumbnails on demand
+- live thumbnail socket updates still carry the fresh `dataUrl`
 
 ---
 
-## Current Architecture Truths
+## Registration Model
 
-1. The agent owns machine-local monitoring config.
-2. The hub owns health computation and operational controls.
-3. The dashboard mirrors node config and edits hub-owned controls.
-4. The commissioned registry is still static.
-5. SQLite is the current store, but it is now an operational risk rather than a finished long-term answer.
+### Legacy bootstrap
 
-For the dated release and incident record, see [docs/RELEASE_KB_2026-03-27.md](/D:/monitoring/docs/RELEASE_KB_2026-03-27.md).
+[instances.ts](/D:/monitoring/packages/hub/src/config/instances.ts) is no longer the runtime source of truth. It is now only a bootstrap catalog used to seed known sites / nodes / players into Postgres on first start.
+
+### Dynamic enrollment
+
+New nodes can register through:
+
+- `POST /api/config/enroll`
+
+That endpoint:
+
+- validates `PULSE_ENROLLMENT_KEY`
+- creates or updates the node
+- rotates the active `agent_token`
+- creates or updates player rows
+- returns the node’s new agent token
+
+### Heartbeat ownership enforcement
+
+`POST /api/heartbeat` now:
+
+- authenticates against DB-backed `agent_tokens`
+- checks player ownership from DB-backed `players`
+- can sync new player identities from the mirrored local config for that node
+
+---
+
+## Config Mirror Model
+
+The agent still includes `nodeConfigMirror` with heartbeats.
+
+The hub stores that mirror in:
+
+- [nodeConfigMirror.ts](/D:/monitoring/packages/hub/src/store/nodeConfigMirror.ts)
+
+The mirror is intentionally read-only in the dashboard. It exists for visibility and audit, not remote machine editing.
+
+Mirrored data now includes:
+
+- paths
+- process selectors
+- log selectors
+- UDP inputs
+
+---
+
+## Agent Installation Model
+
+The installer now splits setup into two phases:
+
+1. non-admin config preparation
+2. admin-only service installation
+
+Flow:
+
+```text
+install.bat
+  -> local UI / config validation
+  -> optional enrollment with hub
+  -> single Windows UAC prompt
+  -> NSSM service install
+  -> service start
+```
+
+This keeps the one-click operator path while reducing time spent inside an elevated session.
+
+---
+
+## Dashboard Model
+
+The dashboard now acts as:
+
+- live operations board
+- editor for hub-owned controls
+- read-only mirror for node-owned config
+
+What it edits:
+
+- monitoring enabled / disabled
+- maintenance mode
+- alert contacts and channel toggles
+
+What it displays from the node mirror:
+
+- stream inputs
+- resolved paths
+- process selectors
+- log selectors
+
+---
+
+## Alerting Model
+
+This refactor intentionally did **not** change the current alert semantics.
+
+Unchanged by design:
+
+- pause / stop / shutdown escalation rules
+- recovery handling
+- email / Telegram alert channel behavior
+
+Changed safely:
+
+- Telegram target picker now saves discovered `chatId` values by default, which reduces the old username-resolution failure path without changing alert timing or trigger rules
+
+---
+
+## Current Constraints
+
+As of this refactor:
+
+- the codebase is Postgres-first, but this workstation did not have `docker` or `psql`, so a local live DB was not provisioned here
+- the VPS was not cut over in this turn
+- no SQLite runtime fallback remains in the hub codepath
+- prepared node bundles still exist as convenience bundles, but the generic installer is now the default architecture path
+
+---
+
+## Key Files
+
+- Hub DB bootstrapping: [db.ts](/D:/monitoring/packages/hub/src/store/db.ts)
+- Registry model: [registry.ts](/D:/monitoring/packages/hub/src/store/registry.ts)
+- Heartbeat route: [heartbeat.ts](/D:/monitoring/packages/hub/src/routes/heartbeat.ts)
+- Config / enrollment route: [config.ts](/D:/monitoring/packages/hub/src/routes/config.ts)
+- Thumbnail file cache: [thumbnails.ts](/D:/monitoring/packages/hub/src/store/thumbnails.ts)
+- Agent runtime + installer: [agent.py](/D:/monitoring/packages/agent/agent.py)
+
+For the timestamped release record and challenges encountered during this pass, see [RELEASE_KB_2026-03-27.md](/D:/monitoring/docs/RELEASE_KB_2026-03-27.md).

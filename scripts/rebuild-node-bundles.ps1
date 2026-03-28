@@ -218,13 +218,13 @@ try {
         if ([string]::IsNullOrWhiteSpace([string]$bundle.bundleName)) {
             throw 'Each manifest entry must define bundleName.'
         }
-        if ([string]::IsNullOrWhiteSpace([string]$bundle.configPath)) {
-            throw "Manifest entry for $($bundle.bundleName) is missing configPath."
-        }
-
-        $configPath = Resolve-RepoPath -Path ([string]$bundle.configPath)
-        if (-not (Test-Path $configPath)) {
-            throw "Config not found for $($bundle.bundleName): $configPath"
+        $hasConfigPath = $bundle.PSObject.Properties.Name -contains 'configPath' -and -not [string]::IsNullOrWhiteSpace([string]$bundle.configPath)
+        $configPath = $null
+        if ($hasConfigPath) {
+            $configPath = Resolve-RepoPath -Path ([string]$bundle.configPath)
+            if (-not (Test-Path $configPath)) {
+                throw "Config not found for $($bundle.bundleName): $configPath"
+            }
         }
 
         $version = Get-BundleVersion -Bundle $bundle -DefaultVersion $defaultVersion
@@ -233,20 +233,33 @@ try {
         $stageZipPath = Join-Path $StagingRoot ($releaseName + '.zip')
         $targetBundleDir = Join-Path $ReleaseRoot $releaseName
         $targetZipPath = Join-Path $ReleaseRoot ($releaseName + '.zip')
-        $tokenizedConfigPath = Join-Path $TokenizedConfigRoot ([System.IO.Path]::GetFileName($configPath))
+        $tokenizedConfigPath = if ($configPath) {
+            Join-Path $TokenizedConfigRoot ([System.IO.Path]::GetFileName($configPath))
+        } else {
+            $null
+        }
         $displayName = if ($bundle.PSObject.Properties.Name -contains 'displayName' -and -not [string]::IsNullOrWhiteSpace([string]$bundle.displayName)) {
             [string]$bundle.displayName
         } else {
             [string]$bundle.bundleName
         }
 
-        Write-Host "Building $releaseName from $configPath"
-        & $BundleBuilderPath `
-            -OutputRoot $StagingRoot `
-            -BundleName ([string]$bundle.bundleName) `
-            -VersionLabel $version `
-            -ConfigPath $configPath `
-            -Zip
+        if ($configPath) {
+            Write-Host "Building $releaseName from $configPath"
+            & $BundleBuilderPath `
+                -OutputRoot $StagingRoot `
+                -BundleName ([string]$bundle.bundleName) `
+                -VersionLabel $version `
+                -ConfigPath $configPath `
+                -Zip
+        } else {
+            Write-Host "Building $releaseName from generic config.example.yaml"
+            & $BundleBuilderPath `
+                -OutputRoot $StagingRoot `
+                -BundleName ([string]$bundle.bundleName) `
+                -VersionLabel $version `
+                -Zip
+        }
 
         if (-not (Test-Path $stageBundleDir)) {
             throw "Expected bundle folder was not created: $stageBundleDir"
@@ -261,20 +274,24 @@ try {
             -TargetBundleDir $targetBundleDir `
             -TargetZipPath $targetZipPath
 
-        Copy-Item -Path $configPath -Destination $tokenizedConfigPath -Force
+        if ($configPath) {
+            Copy-Item -Path $configPath -Destination $tokenizedConfigPath -Force
+        }
 
         $expectedBundleNames.Add($releaseName)
         $expectedZipNames.Add($releaseName + '.zip')
-        $expectedTokenizedNames.Add([System.IO.Path]::GetFileName($configPath))
+        if ($configPath) {
+            $expectedTokenizedNames.Add([System.IO.Path]::GetFileName($configPath))
+        }
 
         $summaryRows.Add([pscustomobject]@{
             DisplayName = $displayName
             ReleaseName = $releaseName
-            ConfigFile = [System.IO.Path]::GetFileName($configPath)
+            ConfigFile = if ($configPath) { [System.IO.Path]::GetFileName($configPath) } else { 'config.example.yaml' }
         })
         $results.Add([pscustomobject]@{
             Bundle = $releaseName
-            Config = [System.IO.Path]::GetFileName($configPath)
+            Config = if ($configPath) { [System.IO.Path]::GetFileName($configPath) } else { 'config.example.yaml' }
             Status = 'Built'
         })
     }

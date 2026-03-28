@@ -1,5 +1,4 @@
-import { INSTANCES } from '../config/instances';
-import { db } from './db';
+import { exec, query } from './db';
 
 export interface InstanceControls {
   instanceId: string;
@@ -10,33 +9,36 @@ export interface InstanceControls {
 
 const cache = new Map<string, InstanceControls>();
 
-const now = () => new Date().toISOString();
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function toIso(value: Date | string | null | undefined): string {
+  if (!value) return nowIso();
+  if (value instanceof Date) return value.toISOString();
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toISOString();
+}
 
 function rowToControls(row: Record<string, unknown>): InstanceControls {
   return {
-    instanceId: row.instance_id as string,
-    monitoringEnabled: Number(row.monitoring_enabled ?? 1) !== 0,
-    maintenanceMode: Number(row.maintenance_mode ?? 0) !== 0,
-    updatedAt: row.updated_at as string,
+    instanceId: String(row.instance_id),
+    monitoringEnabled: Boolean(row.monitoring_enabled),
+    maintenanceMode: Boolean(row.maintenance_mode),
+    updatedAt: toIso(row.updated_at as Date | string | null | undefined),
   };
 }
 
 export async function initInstanceControls(): Promise<void> {
-  const timestamp = now();
+  const rows = await query<Record<string, unknown>>(`
+    SELECT instance_id, monitoring_enabled, maintenance_mode, updated_at
+    FROM instance_controls
+  `);
 
-  for (const instance of INSTANCES) {
-    await db.execute({
-      sql: `INSERT OR IGNORE INTO instance_controls
-              (instance_id, monitoring_enabled, maintenance_mode, updated_at)
-            VALUES (?, 1, 0, ?)`,
-      args: [instance.id, timestamp],
-    });
-  }
-
-  const result = await db.execute('SELECT * FROM instance_controls');
   cache.clear();
-  for (const row of result.rows) {
-    const controls = rowToControls(row as Record<string, unknown>);
+  for (const row of rows) {
+    const controls = rowToControls(row);
     cache.set(controls.instanceId, controls);
   }
 }
@@ -46,7 +48,7 @@ export function getInstanceControls(instanceId: string): InstanceControls {
     instanceId,
     monitoringEnabled: true,
     maintenanceMode: false,
-    updatedAt: now(),
+    updatedAt: nowIso(),
   };
 }
 
@@ -62,24 +64,17 @@ export async function updateInstanceControls(
     instanceId,
     monitoringEnabled: patch.monitoringEnabled ?? current.monitoringEnabled,
     maintenanceMode: patch.maintenanceMode ?? current.maintenanceMode,
-    updatedAt: now(),
+    updatedAt: nowIso(),
   };
 
-  await db.execute({
-    sql: `INSERT INTO instance_controls
-            (instance_id, monitoring_enabled, maintenance_mode, updated_at)
-          VALUES (?, ?, ?, ?)
-          ON CONFLICT(instance_id) DO UPDATE SET
-            monitoring_enabled = excluded.monitoring_enabled,
-            maintenance_mode = excluded.maintenance_mode,
-            updated_at = excluded.updated_at`,
-    args: [
-      instanceId,
-      next.monitoringEnabled ? 1 : 0,
-      next.maintenanceMode ? 1 : 0,
-      next.updatedAt,
-    ],
-  });
+  await exec(`
+    INSERT INTO instance_controls (instance_id, monitoring_enabled, maintenance_mode, updated_at)
+    VALUES ($1, $2, $3, $4)
+    ON CONFLICT (instance_id) DO UPDATE SET
+      monitoring_enabled = EXCLUDED.monitoring_enabled,
+      maintenance_mode = EXCLUDED.maintenance_mode,
+      updated_at = EXCLUDED.updated_at
+  `, [instanceId, next.monitoringEnabled, next.maintenanceMode, next.updatedAt]);
 
   cache.set(instanceId, next);
   return next;

@@ -18,7 +18,10 @@ node_name: Primary Control Room
 site_id: primary-control-room
 # hub_url may point to a local LAN hub or a remote internet-facing hub
 hub_url: https://monitor.example.com
+# Use either agent_token or enrollment_key during setup.
+# If enrollment_key is provided and agent_token is blank, the local UI enrolls this node and saves the returned agent token.
 agent_token: REPLACE_ME
+# enrollment_key: REPLACE_WITH_HUB_ENROLLMENT_KEY
 poll_interval_seconds: 10
 
 players:
@@ -36,6 +39,8 @@ players:
     # log_selectors:
     #   include_contains:
     #     - Insta 1
+    #   paused_regex: '(?i)paused'
+    #   played_regex: '(?i)fully played'
     # Add UDP, RTSP, RTMP, or direct .ts stream URLs later from the Pulse dashboard when needed.
     udp_inputs: []
 

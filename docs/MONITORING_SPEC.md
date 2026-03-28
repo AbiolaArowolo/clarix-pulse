@@ -2,6 +2,10 @@
 
 **Document Date**: 2026-03-27
 
+Current release note:
+
+- the monitoring rules in this document were intentionally left unchanged during the PostgreSQL / installer / enrollment refactor
+
 ## Scope
 
 This document describes the current monitoring behavior of the shipped release.

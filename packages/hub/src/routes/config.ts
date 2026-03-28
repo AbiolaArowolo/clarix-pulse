@@ -1,25 +1,13 @@
 import { Request, Response, Router } from 'express';
-import { INSTANCE_MAP } from '../config/instances';
-import { getNodeDesiredConfig, getPlayerNodeConfig } from '../config/nodeConfigs';
 import { getAlertSettings, updateAlertSettings } from '../store/alertSettings';
 import { getInstanceControls, updateInstanceControls } from '../store/instanceControls';
-import { getMirroredPlayerConfig } from '../store/nodeConfigMirror';
+import { getMirroredNodeConfig, getMirroredPlayerConfig } from '../store/nodeConfigMirror';
+import { enrollNode, getNode, getPlayer, resolveNodeIdForToken } from '../store/registry';
 
-function parseAgentTokens(): Map<string, string> {
-  const map = new Map<string, string>();
-  const raw = process.env.AGENT_TOKENS ?? '';
-  for (const pair of raw.split(',')) {
-    const [nodeId, token] = pair.trim().split(':');
-    if (nodeId && token) map.set(token, nodeId);
-  }
-  return map;
-}
-
-function validateAgentToken(req: Request, tokenToNode: Map<string, string>): string | null {
+function bearerToken(req: Request): string | null {
   const auth = req.headers.authorization ?? '';
   if (!auth.startsWith('Bearer ')) return null;
-  const token = auth.slice(7).trim();
-  return tokenToNode.get(token) ?? null;
+  return auth.slice(7).trim() || null;
 }
 
 function asString(value: unknown, fallback = ''): string {
@@ -35,12 +23,6 @@ function asBool(value: unknown, fallback = false): boolean {
     return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
   }
   return fallback;
-}
-
-function clampInt(value: unknown, fallback: number, minimum: number, maximum: number): number {
-  const parsed = Number.parseInt(asString(value), 10);
-  const normalized = Number.isFinite(parsed) ? parsed : fallback;
-  return Math.min(maximum, Math.max(minimum, normalized));
 }
 
 function normalizeOptionalStringList(values: unknown): string[] | null {
@@ -75,7 +57,7 @@ function formatTelegramTarget(chat: Record<string, unknown>): TelegramTarget | n
 
   return {
     chatId,
-    recipient: username ? `@${username}` : chatId,
+    recipient: chatId,
     title: displayTitle,
     subtitle: subtitleParts.join(' | '),
   };
@@ -120,40 +102,64 @@ async function listTelegramTargets(): Promise<TelegramTarget[]> {
   }
 }
 
+function validateEnrollmentKey(value: unknown): boolean {
+  const expected = process.env.PULSE_ENROLLMENT_KEY?.trim();
+  if (!expected) {
+    return false;
+  }
+
+  return asString(value) === expected;
+}
+
 export function createConfigRouter(): Router {
   const router = Router();
-  const tokenToNode = parseAgentTokens();
 
   router.get('/player/:playerId', async (req: Request, res: Response) => {
-    const player = await getMirroredPlayerConfig(req.params.playerId) ?? getPlayerNodeConfig(req.params.playerId);
+    const mirrored = await getMirroredPlayerConfig(req.params.playerId);
+    if (mirrored) {
+      return res.json(mirrored);
+    }
+
+    const player = await getPlayer(req.params.playerId);
     if (!player) {
       return res.status(404).json({ error: 'Unknown player config.' });
     }
 
-    return res.json(player);
+    return res.json({
+      nodeId: player.nodeId,
+      playerId: player.playerId,
+      playoutType: player.playoutType,
+      paths: {},
+      processSelectors: {},
+      logSelectors: {},
+      udpInputs: [],
+      updatedAt: player.updatedAt,
+      sourcePath: 'hub://registry',
+      source: 'hub',
+    });
   });
 
-  router.post('/player/:playerId', (req: Request, res: Response) => {
+  router.post('/player/:playerId', (_req: Request, res: Response) => {
     return res.status(409).json({
       error: 'This player is configured locally on the node. Open Pulse on the node to edit settings there.',
     });
   });
 
-  router.get('/instance/:playerId/controls', (req: Request, res: Response) => {
-    const instance = INSTANCE_MAP.get(req.params.playerId);
-    if (!instance) {
+  router.get('/instance/:playerId/controls', async (req: Request, res: Response) => {
+    const player = await getPlayer(req.params.playerId);
+    if (!player) {
       return res.status(404).json({ error: 'Unknown player.' });
     }
 
     return res.json({
-      instanceId: instance.id,
-      controls: getInstanceControls(instance.id),
+      instanceId: player.playerId,
+      controls: getInstanceControls(player.playerId),
     });
   });
 
   router.post('/instance/:playerId/controls', async (req: Request, res: Response) => {
-    const instance = INSTANCE_MAP.get(req.params.playerId);
-    if (!instance) {
+    const player = await getPlayer(req.params.playerId);
+    if (!player) {
       return res.status(404).json({ error: 'Unknown player.' });
     }
 
@@ -164,19 +170,19 @@ export function createConfigRouter(): Router {
       ? asBool(req.body.maintenanceMode, false)
       : undefined;
 
-    const controls = await updateInstanceControls(instance.id, {
+    const controls = await updateInstanceControls(player.playerId, {
       monitoringEnabled,
       maintenanceMode,
     });
 
     return res.json({
       ok: true,
-      instanceId: instance.id,
+      instanceId: player.playerId,
       controls,
     });
   });
 
-  router.get('/alerts', async (req: Request, res: Response) => {
+  router.get('/alerts', async (_req: Request, res: Response) => {
     return res.json({
       settings: await getAlertSettings(),
       capabilities: {
@@ -187,7 +193,7 @@ export function createConfigRouter(): Router {
     });
   });
 
-  router.get('/alerts/telegram-targets', async (req: Request, res: Response) => {
+  router.get('/alerts/telegram-targets', async (_req: Request, res: Response) => {
     return res.json({
       targets: await listTelegramTargets(),
       configured: Boolean(process.env.TELEGRAM_BOT_TOKEN),
@@ -228,13 +234,87 @@ export function createConfigRouter(): Router {
     });
   });
 
-  router.get('/node', (req: Request, res: Response) => {
-    const nodeId = validateAgentToken(req, tokenToNode);
+  router.post('/enroll', async (req: Request, res: Response) => {
+    if (!process.env.PULSE_ENROLLMENT_KEY?.trim()) {
+      return res.status(503).json({ error: 'Enrollment is not configured on this hub.' });
+    }
+
+    if (!validateEnrollmentKey(req.body?.enrollmentKey)) {
+      return res.status(403).json({ error: 'Invalid enrollment key.' });
+    }
+
+    const nodeId = asString(req.body?.nodeId);
+    const nodeName = asString(req.body?.nodeName, nodeId);
+    const siteId = asString(req.body?.siteId, nodeId);
+    const playersRaw: unknown[] = Array.isArray(req.body?.players) ? req.body.players : [];
+
+    if (!nodeId) {
+      return res.status(400).json({ error: 'nodeId is required.' });
+    }
+    if (playersRaw.length === 0) {
+      return res.status(400).json({ error: 'At least one player is required for enrollment.' });
+    }
+
+    const players = playersRaw
+      .map((entry: unknown) => {
+        const record = entry && typeof entry === 'object' && !Array.isArray(entry)
+          ? entry as Record<string, unknown>
+          : {};
+        const playoutType: 'insta' | 'admax' = asString(record.playoutType ?? record.playout_type, 'insta') === 'admax'
+          ? 'admax'
+          : 'insta';
+        return {
+          playerId: asString(record.playerId ?? record.player_id),
+          playoutType,
+          label: asString(record.label),
+        };
+      })
+      .filter((entry: { playerId: string }) => entry.playerId);
+
+    if (players.length === 0) {
+      return res.status(400).json({ error: 'Enrollment did not include any valid player IDs.' });
+    }
+
+    const enrollment = await enrollNode({
+      nodeId,
+      nodeName,
+      siteId,
+      players,
+    });
+
+    return res.json({
+      ok: true,
+      nodeId: enrollment.nodeId,
+      siteId: enrollment.siteId,
+      agentToken: enrollment.agentToken,
+      localUiUrl: 'http://127.0.0.1:3210/',
+      players: enrollment.players,
+      updatedAt: enrollment.updatedAt,
+    });
+  });
+
+  router.get('/node', async (req: Request, res: Response) => {
+    const token = bearerToken(req);
+    const nodeId = token ? await resolveNodeIdForToken(token) : null;
     if (!nodeId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    return res.json(getNodeDesiredConfig(nodeId) ?? { nodeId, players: [], updatedAt: null });
+    const node = await getNode(nodeId);
+    const mirror = await getMirroredNodeConfig(nodeId);
+    if (!node) {
+      return res.status(404).json({ error: 'Unknown node.' });
+    }
+
+    return res.json({
+      nodeId: node.nodeId,
+      siteId: node.siteId,
+      nodeName: node.nodeName,
+      commissioned: node.commissioned,
+      localUiUrl: node.localUiUrl,
+      updatedAt: node.updatedAt,
+      mirror,
+    });
   });
 
   return router;

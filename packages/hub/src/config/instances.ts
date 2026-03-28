@@ -1,5 +1,5 @@
-// Player registry - source of truth for all monitored playout players.
-// Nodes map to players via nodeId -> allowedPlayerIds.
+// Legacy bootstrap catalog for first-run Postgres seeding.
+// Runtime reads nodes and players from the database after bootstrap.
 
 export interface InstanceConfig {
   id: string;
@@ -17,11 +17,6 @@ export interface SiteConfig {
   id: string;
   name: string;
   instances: InstanceConfig[];
-}
-
-export interface AgentConfig {
-  nodeId: string;
-  allowedPlayerIds: string[];
 }
 
 function player(config: Omit<InstanceConfig, 'id' | 'commissioned'> & { id?: string; commissioned?: boolean }): InstanceConfig {
@@ -127,25 +122,3 @@ export const SITES: SiteConfig[] = [
     instances: INSTANCES.filter((instance) => instance.siteId === 'digicel'),
   },
 ];
-
-export const AGENT_MAP: AgentConfig[] = [
-  {
-    nodeId: 'ny-main-pc',
-    allowedPlayerIds: ['ny-main-insta-1', 'ny-main-insta-2', 'ny-main-admax-1'],
-  },
-  {
-    nodeId: 'ny-backup-pc',
-    allowedPlayerIds: ['ny-backup-admax-1', 'ny-backup-admax-2'],
-  },
-  {
-    nodeId: 'nj-optimum-pc',
-    allowedPlayerIds: ['nj-optimum-insta-1'],
-  },
-  {
-    nodeId: 'digicel-pc',
-    allowedPlayerIds: ['digicel-admax-1'],
-  },
-];
-
-export const INSTANCE_MAP = new Map(INSTANCES.map((instance) => [instance.id, instance]));
-export const AGENT_INSTANCE_MAP = new Map(AGENT_MAP.map((agent) => [agent.nodeId, agent.allowedPlayerIds]));

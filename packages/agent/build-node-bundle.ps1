@@ -206,11 +206,12 @@ Contents:
 
 Usage:
 1. Copy this folder to the target node.
-2. Right-click install.bat and run it as Administrator.
-3. Accept the Administrator prompt when Windows asks.
-4. install.bat uses clarix-agent.exe automatically. No separate EXE launch is required.
-5. If config.yaml is already valid for this node, Pulse installs without extra editing.
-6. If config.yaml is incomplete, Pulse asks for the missing node/player/UDP details itself.
+2. Double-click install.bat.
+3. Pulse opens local setup first and saves node-specific settings locally.
+4. Windows asks for one Administrator approval only when the service install is ready to finish.
+5. install.bat uses clarix-agent.exe automatically. No separate EXE launch is required.
+6. If config.yaml is already valid for this node, Pulse installs without extra editing.
+7. If config.yaml is incomplete, Pulse asks for the missing node/player/selector/stream details itself.
 "@ | Set-Content -Path $manifestPath -Encoding ASCII
 
     if ($Zip) {

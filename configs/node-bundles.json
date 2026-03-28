@@ -1,6 +1,10 @@
 {
-  "defaultVersion": "v1.5",
+  "defaultVersion": "v1.6",
   "bundles": [
+    {
+      "displayName": "Generic Installer",
+      "bundleName": "pulse-generic"
+    },
     {
       "displayName": "NJ Optimum",
       "bundleName": "nj-optimum",

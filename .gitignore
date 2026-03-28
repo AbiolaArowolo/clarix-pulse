@@ -24,7 +24,7 @@ packages/agent/release-test/
 **/.env.local
 .env.production
 
-# SQLite database (contains live state — back up separately)
+# Hub runtime data / thumbnail cache
 packages/hub/data/
 
 # Python virtual environments

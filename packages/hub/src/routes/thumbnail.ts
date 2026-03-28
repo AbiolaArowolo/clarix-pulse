@@ -1,51 +1,61 @@
 import { Router, Request, Response } from 'express';
 import { Server as SocketServer } from 'socket.io';
-import { AGENT_INSTANCE_MAP } from '../config/instances';
-import { updateThumbnail } from '../store/state';
+import { getPlayer, resolveNodeIdForToken } from '../store/registry';
+import { updateThumbnailMeta } from '../store/state';
+import { readThumbnailDataUrl, saveThumbnail } from '../store/thumbnails';
 
-function parseAgentTokens(): Map<string, string> {
-  const tokenToNode = new Map<string, string>();
-  const raw = process.env.AGENT_TOKENS ?? '';
-  for (const pair of raw.split(',')) {
-    const [nodeId, token] = pair.trim().split(':');
-    if (nodeId && token) tokenToNode.set(token, nodeId);
-  }
-  return tokenToNode;
-}
-
-function validateToken(req: Request, tokenToNode: Map<string, string>): string | null {
+function bearerToken(req: Request): string | null {
   const auth = req.headers.authorization ?? '';
   if (!auth.startsWith('Bearer ')) return null;
-  return tokenToNode.get(auth.slice(7).trim()) ?? null;
+  return auth.slice(7).trim() || null;
 }
 
 const lastThumbnailAt = new Map<string, number>();
 
 export function createThumbnailRouter(io: SocketServer): Router {
   const router = Router();
-  const tokenToNode = parseAgentTokens();
+
+  router.get('/:playerId', async (req: Request, res: Response) => {
+    const playerId = req.params.playerId;
+    const dataUrl = await readThumbnailDataUrl(playerId);
+    if (!dataUrl) {
+      return res.status(404).json({ error: 'Thumbnail not found.' });
+    }
+
+    return res.json({
+      playerId,
+      dataUrl,
+    });
+  });
 
   router.post('/', async (req: Request, res: Response) => {
-    const nodeId = validateToken(req, tokenToNode);
-    if (!nodeId) return res.status(401).json({ error: 'Unauthorized' });
+    const token = bearerToken(req);
+    const nodeId = token ? await resolveNodeIdForToken(token) : null;
+    if (!nodeId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
     const { instanceId, playerId, agentId, nodeId: reportedNodeId, dataUrl, capturedAt } = req.body as {
       instanceId?: string;
       playerId?: string;
       agentId?: string;
       nodeId?: string;
-      dataUrl: string;
+      dataUrl?: string;
       capturedAt?: string;
     };
 
     const resolvedPlayerId = playerId ?? instanceId;
     const claimedNodeId = reportedNodeId ?? agentId ?? nodeId;
+    if (!resolvedPlayerId || !dataUrl) {
+      return res.status(400).json({ error: 'Missing fields' });
+    }
 
-    if (!resolvedPlayerId || !dataUrl) return res.status(400).json({ error: 'Missing fields' });
-    if (claimedNodeId !== nodeId) return res.status(403).json({ error: 'Node ID does not match token' });
+    if (claimedNodeId !== nodeId) {
+      return res.status(403).json({ error: 'Node ID does not match token' });
+    }
 
-    const allowedPlayers = AGENT_INSTANCE_MAP.get(nodeId) ?? [];
-    if (!allowedPlayers.includes(resolvedPlayerId)) {
+    const player = await getPlayer(resolvedPlayerId);
+    if (!player || player.nodeId !== nodeId) {
       return res.status(403).json({ error: 'Player not allowed' });
     }
 
@@ -55,11 +65,12 @@ export function createThumbnailRouter(io: SocketServer): Router {
     }
     lastThumbnailAt.set(resolvedPlayerId, Date.now());
 
-    if (dataUrl.length > 75000) {
+    if (dataUrl.length > 75_000) {
       return res.status(413).json({ error: 'Thumbnail too large (max 50KB JPEG)' });
     }
 
-    await updateThumbnail(resolvedPlayerId, dataUrl);
+    await saveThumbnail(resolvedPlayerId, dataUrl);
+    await updateThumbnailMeta(resolvedPlayerId, capturedAt ?? new Date().toISOString());
 
     io.emit('thumbnail_update', {
       instanceId: resolvedPlayerId,
