@@ -55,11 +55,11 @@ The product now targets:
 - current play / pause / stop monitoring logic
 - current alert timing / trigger behavior
 
-### Still operationally dependent on deployment work
+### Current operational follow-ups
 
-- provisioning a real Postgres server
-- migrating or recreating any state that still matters from the old SQLite era
-- rolling the new hub build to the actual target environment
+- rolling the generic installer to more PCs
+- validating self-enrollment from the local UI on new nodes
+- replacing any legacy Telegram username recipient with a numeric chat ID
 
 ---
 

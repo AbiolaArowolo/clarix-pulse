@@ -14,6 +14,7 @@ As of `2026-03-27 20:43:51 -04:00`:
 - the local node UI at `http://127.0.0.1:3210/` now exposes process selectors and log selectors
 - thumbnails are no longer stored inline in the main hub state database; they are written to a thumbnail file cache
 - release bundles have been rebuilt to `v1.6`, including a new generic installer bundle
+- the production VPS hub was cut over to PostgreSQL on `2026-03-27` and is now running commit `298f858`
 
 Important operational note:
 
@@ -137,4 +138,4 @@ See the full template in [/.env.example](/D:/monitoring/.env.example).
 
 ## Current Next Step
 
-The next operational step is not more code in this repo. It is provisioning a real Postgres server for the hub environment, pointing `PULSE_DATABASE_URL` at it, and then doing the hub cutover / data migration on the target server.
+The next operational step is rolling the generic installer to additional PCs, validating enrollment from the local UI, and replacing the legacy Telegram username recipient with a discovered numeric chat ID.

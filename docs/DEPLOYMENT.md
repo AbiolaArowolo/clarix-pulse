@@ -229,10 +229,10 @@ Confirm a generic node can:
 
 ---
 
-## Known Current Gaps
+## Current Notes
 
 - no live Postgres server was provisioned on this workstation during the refactor pass
-- no VPS cutover was executed in this turn
+- the production VPS was later cut over to PostgreSQL on `2026-03-27` and is running hub commit `298f858`
 - prepared per-node bundles still ship for convenience, even though the generic installer is now the intended main path
 
 For the timestamped release and challenge log, see [RELEASE_KB_2026-03-27.md](/D:/monitoring/docs/RELEASE_KB_2026-03-27.md).

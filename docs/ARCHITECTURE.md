@@ -211,7 +211,7 @@ Changed safely:
 As of this refactor:
 
 - the codebase is Postgres-first, but this workstation did not have `docker` or `psql`, so a local live DB was not provisioned here
-- the VPS was not cut over in this turn
+- the production VPS has since been cut over to PostgreSQL and is running commit `298f858`
 - no SQLite runtime fallback remains in the hub codepath
 - prepared node bundles still exist as convenience bundles, but the generic installer is now the default architecture path
 
