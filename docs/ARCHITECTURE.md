@@ -1,6 +1,6 @@
 # Pulse - Architecture
 
-**Document Date**: `2026-03-28 06:25:19 -04:00`  
+**Document Date**: `2026-03-28 07:22:24 -04:00`  
 **Status**: Codebase architecture after the PostgreSQL refactor, generic-installer rollout, and playout-profile expansion
 
 ## System Model
@@ -51,6 +51,7 @@ Identity note:
 
 - `node_name` is a display label and is safe to rename
 - `node_id` and `player_id` are durable identities and should stay stable unless you intentionally want Pulse to treat them as new objects
+- the local UI now locks `node_id`, `player_id`, `hub_url`, `agent_token`, and `enrollment_key` by default after registration
 
 ### Playout profile model
 
@@ -205,7 +206,7 @@ This keeps the one-click operator path while reducing time spent inside an eleva
 
 Current generic release baseline:
 
-- `pulse-generic-v1.8`
+- `pulse-generic-v1.9`
 
 ---
 

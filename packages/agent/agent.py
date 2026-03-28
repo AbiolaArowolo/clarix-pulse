@@ -292,12 +292,21 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
         <label>Enrollment Key<input id="enrollment_key" placeholder="Optional when Agent Token is blank"></label>
         <label>Poll Interval (Seconds)<input id="poll_interval_seconds" type="number" min="1" max="120"></label>
       </div>
+      <div class="row" style="margin-top:14px;">
+        <div class="status-note" style="flex:1;">
+          Sensitive identity and registration settings lock automatically after enrollment. Unlock them only when you intentionally want to move, rename, or re-register this node.
+        </div>
+        <label class="checkbox">
+          <input id="unlock_sensitive_fields" type="checkbox">
+          Unlock sensitive settings
+        </label>
+      </div>
     </section>
 
     <section class="panel">
       <div class="row">
         <h2 class="section-title">Players</h2>
-        <button type="button" class="primary" onclick="PulseUi.addPlayer()">+ Add player</button>
+        <button type="button" class="primary" id="add_player_button" onclick="PulseUi.addPlayer()">+ Add player</button>
       </div>
       <div id="players" class="stack"></div>
     </section>
@@ -396,7 +405,21 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
       };
     }
 
+    function identityLocked() {
+      return !!state.identity_locked && !state.unlock_sensitive_fields;
+    }
+
+    function lockedPlayerIds() {
+      return new Set(Array.isArray(state.locked_player_ids) ? state.locked_player_ids : []);
+    }
+
+    function playerIdentityLocked(player) {
+      if (!identityLocked()) return false;
+      return lockedPlayerIds().has(player.player_id || "");
+    }
+
     function renderTop() {
+      const lock = identityLocked();
       document.getElementById("node_id").value = state.node_id || "";
       document.getElementById("node_name").value = state.node_name || "";
       document.getElementById("site_id").value = state.site_id || "";
@@ -404,6 +427,12 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
       document.getElementById("agent_token").value = state.agent_token || "";
       document.getElementById("enrollment_key").value = state.enrollment_key || "";
       document.getElementById("poll_interval_seconds").value = state.poll_interval_seconds || 5;
+      document.getElementById("unlock_sensitive_fields").checked = !!state.unlock_sensitive_fields;
+      document.getElementById("node_id").readOnly = lock;
+      document.getElementById("hub_url").readOnly = lock;
+      document.getElementById("agent_token").readOnly = lock;
+      document.getElementById("enrollment_key").readOnly = lock;
+      document.getElementById("add_player_button").disabled = lock;
     }
 
     function listText(value) {
@@ -498,6 +527,7 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
         const selectedType = player.playout_type || "insta";
         const profile = profileFor(selectedType);
         const pathHtml = renderPathFields(player, playerIndex, profile);
+        const playerLocked = playerIdentityLocked(player);
 
         const processSelectors = player.process_selectors || {};
         const logSelectors = player.log_selectors || {};
@@ -584,11 +614,11 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
                 <strong>Player ${playerIndex + 1}</strong>
                 <div class="meta">${escapeHtml(player.player_id || '')}</div>
               </div>
-              <button type="button" class="danger" onclick="PulseUi.removePlayer(${playerIndex})">Remove player</button>
+              <button type="button" class="danger" ${playerLocked ? 'disabled' : ''} onclick="PulseUi.removePlayer(${playerIndex})">Remove player</button>
             </div>
             <div class="grid" style="margin-top:12px;">
               <label>Player ID
-                <input value="${escapeHtml(player.player_id || '')}" oninput="PulseUi.updatePlayer(${playerIndex}, 'player_id', this.value)">
+                <input value="${escapeHtml(player.player_id || '')}" ${playerLocked ? 'readonly' : ''} oninput="PulseUi.updatePlayer(${playerIndex}, 'player_id', this.value)">
               </label>
               <label>Playout Type
                 <select onchange="PulseUi.updatePlayer(${playerIndex}, 'playout_type', this.value)">
@@ -620,10 +650,17 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
           state[field] = event.target.value;
         });
       });
+      document.getElementById("unlock_sensitive_fields").addEventListener("change", (event) => {
+        state.unlock_sensitive_fields = !!event.target.checked;
+        render();
+      });
     }
 
     window.PulseUi = {
       updatePlayer(index, key, value) {
+        if (key === "player_id" && playerIdentityLocked(state.players[index])) {
+          return;
+        }
         state.players[index][key] = value;
         if (key === "playout_type") {
           state.players[index].paths = defaultPaths(value, state.players[index].paths || {});
@@ -661,12 +698,20 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
         }
       },
       addPlayer() {
+        if (identityLocked()) {
+          showMessage("error", "Unlock sensitive settings to add another player.");
+          return;
+        }
         if ((state.players || []).length >= MAX_PLAYERS) return;
         state.players = Array.isArray(state.players) ? state.players : [];
         state.players.push(defaultPlayer(state.players.length));
         renderPlayers();
       },
       removePlayer(index) {
+        if (playerIdentityLocked(state.players[index])) {
+          showMessage("error", "Unlock sensitive settings to remove an existing player.");
+          return;
+        }
         state.players.splice(index, 1);
         renderPlayers();
       },
@@ -1601,6 +1646,13 @@ def _config_for_local_ui(existing: dict[str, Any] | None = None) -> dict[str, An
         "hub_url": _as_str(existing.get("hub_url"), DEFAULT_HUB_URL),
         "agent_token": _as_str(existing.get("agent_token")),
         "enrollment_key": "",
+        "identity_locked": bool(_as_str(existing.get("agent_token"))),
+        "unlock_sensitive_fields": False,
+        "locked_player_ids": [
+            _as_str(player.get("player_id"))
+            for player in existing_players
+            if isinstance(player, dict) and _as_str(player.get("player_id"))
+        ],
         "poll_interval_seconds": max(1, _as_int(existing.get("poll_interval_seconds"), 5)),
         "players": players,
     }
@@ -1611,12 +1663,20 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
         raise ValueError("Invalid local configuration payload.")
 
     existing = copy.deepcopy(existing or {})
-    node_id = _as_str(payload.get("node_id"), socket.gethostname().lower().replace(" ", "-"))
+    existing_agent_token = _as_str(existing.get("agent_token"))
+    existing_registered = bool(existing_agent_token)
+    allow_sensitive_edits = (not existing_registered) or _as_bool(payload.get("unlock_sensitive_fields"), False)
+
+    submitted_node_id = _as_str(payload.get("node_id"), socket.gethostname().lower().replace(" ", "-"))
+    existing_node_id = _as_str(existing.get("node_id"))
+    node_id = submitted_node_id if allow_sensitive_edits or not existing_node_id else existing_node_id
     node_name = _as_str(payload.get("node_name"), socket.gethostname())
     site_id = _as_str(payload.get("site_id"), _default_site_id(node_id))
-    hub_url = _as_str(payload.get("hub_url"), DEFAULT_HUB_URL)
-    agent_token = _as_str(payload.get("agent_token"))
-    enrollment_key = _as_str(payload.get("enrollment_key"))
+    submitted_hub_url = _as_str(payload.get("hub_url"), DEFAULT_HUB_URL)
+    hub_url = submitted_hub_url if allow_sensitive_edits or not _as_str(existing.get("hub_url")) else _as_str(existing.get("hub_url"))
+    submitted_agent_token = _as_str(payload.get("agent_token"))
+    agent_token = submitted_agent_token if allow_sensitive_edits or not existing_agent_token else existing_agent_token
+    enrollment_key = _as_str(payload.get("enrollment_key")) if allow_sensitive_edits else ""
     poll_interval_seconds = max(1, min(120, _as_int(payload.get("poll_interval_seconds"), 5)))
 
     if not node_id:
@@ -1637,6 +1697,9 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
         raise ValueError("Pulse supports up to 10 players per node.")
 
     existing_players = existing.get("players") if isinstance(existing.get("players"), list) else []
+    if existing_registered and not allow_sensitive_edits and len(players_raw) != len(existing_players):
+        raise ValueError("Unlock sensitive settings to add or remove players.")
+
     merged_players: list[dict[str, Any]] = []
 
     for index, raw_player in enumerate(players_raw):
@@ -1647,17 +1710,26 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
         profile = get_playout_profile(playout_type)
         ui_mode = str(profile.get("ui_mode") or "generic")
 
-        player_id = _as_str(raw_player.get("player_id"), _default_player_id(node_id, playout_type, index))
+        indexed_existing_player = (
+            existing_players[index]
+            if index < len(existing_players) and isinstance(existing_players[index], dict)
+            else {}
+        )
+        locked_existing_player_id = _as_str(indexed_existing_player.get("player_id"))
+        submitted_player_id = _as_str(raw_player.get("player_id"), _default_player_id(node_id, playout_type, index))
+        player_id = locked_existing_player_id if (existing_registered and not allow_sensitive_edits and locked_existing_player_id) else submitted_player_id
         if not player_id:
             raise ValueError(f"Player {index + 1} needs an ID.")
 
-        existing_player = next(
-            (
-                player for player in existing_players
-                if isinstance(player, dict) and _as_str(player.get("player_id")) == player_id
-            ),
-            existing_players[index] if index < len(existing_players) and isinstance(existing_players[index], dict) else {},
-        )
+        existing_player = indexed_existing_player
+        if allow_sensitive_edits or not locked_existing_player_id:
+            existing_player = next(
+                (
+                    player for player in existing_players
+                    if isinstance(player, dict) and _as_str(player.get("player_id")) == player_id
+                ),
+                indexed_existing_player,
+            )
         merged_player = copy.deepcopy(existing_player) if isinstance(existing_player, dict) else {}
         merged_player["player_id"] = player_id
         merged_player["playout_type"] = playout_type
@@ -1745,6 +1817,9 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
     existing["poll_interval_seconds"] = poll_interval_seconds
     existing["players"] = merged_players
     existing.pop("instances", None)
+    existing.pop("identity_locked", None)
+    existing.pop("unlock_sensitive_fields", None)
+    existing.pop("locked_player_ids", None)
     return existing
 
 

@@ -1,7 +1,7 @@
 # Pulse - Agent Installation Guide
 
-**Document Date**: `2026-03-28 06:25:19 -04:00`  
-**Current Bundle Baseline**: `v1.8`
+**Document Date**: `2026-03-28 07:22:24 -04:00`  
+**Current Bundle Baseline**: `v1.9`
 
 ## Purpose
 
@@ -36,15 +36,15 @@ Release folder:
 
 Current bundles:
 
-- `pulse-generic-v1.8`
-- `nj-optimum-v1.8`
-- `ny-main-v1.8`
-- `ny-backup-v1.8`
-- `digicel-v1.8`
+- `pulse-generic-v1.9`
+- `nj-optimum-v1.9`
+- `ny-main-v1.9`
+- `ny-backup-v1.9`
+- `digicel-v1.9`
 
 ---
 
-## What Changed In `v1.8`
+## What Changed In `v1.9`
 
 - install now gathers or validates config before the final admin prompt
 - local UI still stays fixed at `http://127.0.0.1:3210/`
@@ -54,6 +54,8 @@ Current bundles:
 - playout type is now profile-driven instead of being limited to just `Insta` and `Admax`
 - new profile choices now include `Cinegy Air`, `PlayBox Neo`, `Grass Valley iTX`, `Imagine Versio`, `BroadStream OASYS`, `Pebble Marina`, `Evertz StreamPro / Overture`, and `Generic Windows Playout`
 - non-native vendor profiles now save generic log/process settings safely instead of falling back to `Insta` assumptions
+- sensitive identity fields are now locked by default after registration in the local UI
+- the local save path now preserves those locked IDs and registration fields unless the operator explicitly unlocks them
 
 Unchanged by design:
 
@@ -139,6 +141,12 @@ The hub mirrors this config for visibility, but it is not the primary live edito
 ## What You Can Rename
 
 If you only want the label in the UI to look different, change `node_name`.
+
+Pulse now helps protect operators here:
+
+- registered nodes open with sensitive identity fields locked by default
+- operators must explicitly unlock them before changing node identity or registration fields
+- the save handler still preserves those values even if someone tries to bypass the browser field lock
 
 Safe to change:
 
@@ -260,4 +268,4 @@ Monitoring N player(s): [...]
 
 ## Operational Note
 
-Prepared per-node bundles still exist in `v1.8`, but they are now optional convenience artifacts. The architecture target is that any machine can take the generic bundle, be configured locally, enroll itself, and start reporting without a special installer build for that one node.
+Prepared per-node bundles still exist in `v1.9`, but they are now optional convenience artifacts. The architecture target is that any machine can take the generic bundle, be configured locally, enroll itself, and start reporting without a special installer build for that one node.

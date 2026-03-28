@@ -1,7 +1,7 @@
 # Pulse Release Knowledge Base - 2026-03-27
 
-**Prepared**: `2026-03-28 06:25:19 -04:00`  
-**Scope**: PostgreSQL refactor, dynamic enrollment, generic installer, playout-profile expansion, release bundle refresh, and documentation closure
+**Prepared**: `2026-03-28 07:22:24 -04:00`  
+**Scope**: PostgreSQL refactor, dynamic enrollment, generic installer, playout-profile expansion, sensitive-setting safety lock, local `v1.9` reinstall, release bundle refresh, and documentation closure
 
 ## Executive Summary
 
@@ -19,14 +19,16 @@ Key outcomes:
 - generic vendor profiles now exist for Cinegy Air, PlayBox Neo, Grass Valley iTX, Imagine Versio, BroadStream OASYS, Pebble Marina, Evertz StreamPro / Overture, and Generic Windows Playout
 - installer now defers admin until the final service install phase
 - thumbnail blobs moved out of the main state DB path
-- bundles rebuilt to `v1.8`
+- bundles rebuilt to `v1.9`
 - generic bundle added to the release manifest
-- Optimum PC was later cleanly reinstalled onto the `v1.8` generic bundle with node identity preserved
+- registered local UI now locks sensitive identity and registration fields by default
+- Optimum PC was later cleanly reinstalled onto the `v1.9` generic bundle with node identity preserved
 
-Important execution note:
+Important execution notes:
 
 - the codebase, bundles, and docs were fully rebuilt and verified
-- this workstation did not have `docker` or `psql`, so a live local Postgres instance was not provisioned during the same turn
+- the production VPS has already been cut over to PostgreSQL for the hub
+- this workstation still does not have `docker` or `psql`, so a live local Postgres instance was not provisioned here
 
 ---
 
@@ -38,22 +40,22 @@ Release folder:
 
 ### Common Agent Runtime Hash
 
-All `v1.8` bundles contain the same agent executable:
+All `v1.9` bundles contain the same agent executable:
 
 ```text
 clarix-agent.exe SHA256
-D44984D6E7786F5CA071A5D8D6BBF21CDBE378DD70767BAE52A01AAE122B1BD9
+BE5AD1622D4A6B4F0F60634B1D09F3B44ADD7EE10948B44B81DF26CD5CA66E0F
 ```
 
 ### Bundle Zip Hashes
 
 | Bundle | Zip Path | SHA256 |
 |---|---|---|
-| `pulse-generic-v1.8` | [pulse-generic-v1.8.zip](/D:/monitoring/packages/agent/release/pulse-generic-v1.8.zip) | `D70C0BF4ADE54939410C052570DCAFD11EB26E92EC6BD76C0627C1118694FEFD` |
-| `nj-optimum-v1.8` | [nj-optimum-v1.8.zip](/D:/monitoring/packages/agent/release/nj-optimum-v1.8.zip) | `FB37B72E8382FC4DB3560509A376026B381A16E96A4A0A766E148B41A48079E1` |
-| `ny-main-v1.8` | [ny-main-v1.8.zip](/D:/monitoring/packages/agent/release/ny-main-v1.8.zip) | `A39195DB51C5CC6BC9B9EA836C81CEC1EFFF880B68685D8BE0D069BA7F712363` |
-| `ny-backup-v1.8` | [ny-backup-v1.8.zip](/D:/monitoring/packages/agent/release/ny-backup-v1.8.zip) | `ED5E03013970885D8AC9934EC176220ECDB897762ABDB0B82189A7F81F6A10A8` |
-| `digicel-v1.8` | [digicel-v1.8.zip](/D:/monitoring/packages/agent/release/digicel-v1.8.zip) | `2F032219F860F9D86C6508316DC3E336B8C1A5ECF9AA5A160110CB19C277828C` |
+| `pulse-generic-v1.9` | [pulse-generic-v1.9.zip](/D:/monitoring/packages/agent/release/pulse-generic-v1.9.zip) | `5E38F939CD281261993A6548BD961559F65D9EE6C9E329A38409562C12435340` |
+| `nj-optimum-v1.9` | [nj-optimum-v1.9.zip](/D:/monitoring/packages/agent/release/nj-optimum-v1.9.zip) | `8EB0EEEF9B6129B2699B5C3049EE98FDD15524DE3BACCA98E6376CD7BA520A94` |
+| `ny-main-v1.9` | [ny-main-v1.9.zip](/D:/monitoring/packages/agent/release/ny-main-v1.9.zip) | `7A711A3D2C5D7645DA60B2270E7817529E4DA1097991891F24F29C0283161462` |
+| `ny-backup-v1.9` | [ny-backup-v1.9.zip](/D:/monitoring/packages/agent/release/ny-backup-v1.9.zip) | `C5085468870F99DBB4B6AB6132CF1151721BFB47FB1B6D3A2A729F49A120612F` |
+| `digicel-v1.9` | [digicel-v1.9.zip](/D:/monitoring/packages/agent/release/digicel-v1.9.zip) | `6DCF160F8FC664ABFEB855D5E9A99F296F0A16A3B37B8F082E261E39BC4F5378` |
 
 ### Release Manifest
 
@@ -63,7 +65,7 @@ Manifest:
 
 Current default version:
 
-- `v1.8`
+- `v1.9`
 
 ---
 
@@ -88,7 +90,7 @@ Verified in this pass:
 
 Result:
 
-- parity passed for the `v1.8` bundle set, including the generic installer bundle
+- parity passed for the `v1.9` bundle set, including the generic installer bundle
 
 ---
 
@@ -109,6 +111,12 @@ Machine-specific settings remain node-owned:
 Current editing surface:
 
 - local UI at `http://127.0.0.1:3210/`
+
+Sensitive identity protection now exists on top of that local ownership model:
+
+- `node_name` remains safe to rename as a display label
+- `node_id`, `player_id`, `hub_url`, `agent_token`, and `enrollment_key` are locked by default after registration
+- the backend save path also preserves those values unless the operator explicitly unlocks sensitive settings
 
 ### 2. Hub owns central operational state
 
@@ -151,9 +159,10 @@ The refactor did not alter:
 | Timestamp | Challenge | Outcome |
 |---|---|---|
 | `2026-03-27 20:41:59 -04:00` | The new generic bundle needed release-tool support because it does not have a node-specific `configPath` like the old prepared bundles | bundle rebuild tooling was updated to support generic bundles |
-| `2026-03-27 20:43:51 -04:00` | The parity checker still assumed every bundle mapped to a mirrored tokenized config file | parity tooling was updated and then passed against the final `v1.6` set |
-| `2026-03-27 20:43:51 -04:00` | Postgres code was ready, but this workstation had neither `docker` nor `psql` installed | builds and packaging were completed, but live DB provisioning remains a deployment task |
-| `2026-03-27 20:43:51 -04:00` | Earlier docs still described SQLite, static registry ownership, and `v1.5` bundles as current state | top-level docs, KB, and handover were rewritten to match the refactored codebase |
+| `2026-03-27 20:43:51 -04:00` | The parity checker still assumed every bundle mapped to a mirrored tokenized config file | parity tooling was updated and then passed against the final generic-capable bundle set |
+| `2026-03-28 06:23:27 -04:00` | The generic installer needed a broader playout model because real broadcaster estates span many vendors beyond the two native profiles | playout profile registry and safe generic vendor mode were added, then bundled into `v1.8` and carried forward into `v1.9` |
+| `2026-03-28 07:19:26 -04:00` | Registered operators could still accidentally alter identity fields in the local UI | a sensitive-setting lock was added to the UI and enforced again in the config save path, then shipped in `v1.9` |
+| `2026-03-28 07:19:26 -04:00` | This PC needed a clean reinstall to the new agent baseline without losing its registered identity | the service was removed and reinstalled from the `v1.9` generic bundle with the saved config restored |
 
 ---
 
@@ -161,10 +170,11 @@ The refactor did not alter:
 
 | Timestamp | Event |
 |---|---|
-| `2026-03-27 20:41:59 -04:00` | `LATEST-BUNDLES.txt` regenerated for the `v1.6` release set |
-| `2026-03-27 20:41:59 -04:00` | `pulse-generic-v1.6`, `nj-optimum-v1.6`, `ny-main-v1.6`, `ny-backup-v1.6`, and `digicel-v1.6` rebuilt |
-| `2026-03-27 20:43:51 -04:00` | verified release facts, hashes, and current workstation capability snapshot captured |
-| `2026-03-27 20:43:51 -04:00` | documentation refresh and handover rewrite completed around the verified `v1.6` baseline |
+| `2026-03-27 20:41:59 -04:00` | `LATEST-BUNDLES.txt` regenerated for the first generic-installer release set |
+| `2026-03-28 05:55:24 -04:00` | `pulse-generic-v1.8`, `nj-optimum-v1.8`, `ny-main-v1.8`, `ny-backup-v1.8`, and `digicel-v1.8` rebuilt with the broader playout profile model |
+| `2026-03-28 07:18:19 -04:00` | `pulse-generic-v1.9`, `nj-optimum-v1.9`, `ny-main-v1.9`, `ny-backup-v1.9`, and `digicel-v1.9` rebuilt after the sensitive-setting safety lock was added |
+| `2026-03-28 07:19:26 -04:00` | Optimum PC clean reinstall completed from the `v1.9` generic bundle |
+| `2026-03-28 07:22:24 -04:00` | release KB, install guide, architecture notes, and handover were synchronized around the verified `v1.9` baseline |
 
 ---
 
@@ -197,36 +207,38 @@ The refactor did not alter:
 
 ## Outstanding Work After This Pass
 
-### 1. Provision a live PostgreSQL server
+### 1. Add deeper native parsers for the next playout vendors
 
 Status:
 
-- not completed in this workstation session
+- not yet implemented
 
 Why it still matters:
 
-- the hub code now expects Postgres
-- deployment still needs the real runtime service and connection string
+- `Insta` and `Admax` remain the only deep native profiles
+- the newer vendor choices currently rely on generic process, log, and UDP selectors
 
-### 2. Plan SQLite-era state migration or recreation
+### 2. Roll the generic installer onto more production Windows nodes
 
 Status:
 
-- not executed in this pass
+- partially completed
 
 Why it still matters:
 
-- anything still valuable in old SQLite state must be migrated or rebuilt during environment cutover
+- this PC is already on `v1.9`
+- other nodes still need the same generic-baseline rollout when scheduled
 
-### 3. Roll the new hub build to the real target environment
+### 3. Keep alert contact data current in the hub
 
 Status:
 
-- not executed in this turn
+- ongoing operations task
 
 Why it still matters:
 
-- the repo now reflects the new architecture, but production still requires the deployment step
+- alert timing and semantics were intentionally left alone
+- recipient correctness still determines whether Telegram and other channels reach the right operators
 
 ---
 
@@ -237,8 +249,3 @@ Why it still matters:
 - Deployment: [DEPLOYMENT.md](/D:/monitoring/docs/DEPLOYMENT.md)
 - Agent install: [AGENT_INSTALL.md](/D:/monitoring/docs/AGENT_INSTALL.md)
 - Handover: [HANDOVER.txt](/C:/Users/owner/Desktop/HANDOVER.txt)
-| `2026-03-28 06:23:27 -04:00` | The generic installer needed a broader playout model because real broadcaster estates span many vendors beyond the two native profiles | playout profile registry and safe generic vendor mode were added, then bundled into `v1.8` |
-| `2026-03-28 06:23:27 -04:00` | The Optimum PC needed a clean local reinstall onto the new generic runtime without losing its existing node token and live config | service was removed and reinstalled from the `v1.8` generic bundle with the saved config restored |
-| `2026-03-28 05:55:24 -04:00` | `pulse-generic-v1.8`, `nj-optimum-v1.8`, `ny-main-v1.8`, `ny-backup-v1.8`, and `digicel-v1.8` rebuilt |
-| `2026-03-28 06:23:27 -04:00` | Optimum PC clean reinstall completed from the `v1.8` generic bundle |
-| `2026-03-28 06:23:44 -04:00` | live API confirmed Optimum back online with `udpMonitoringEnabled=true` and `udpInputCount=1` |

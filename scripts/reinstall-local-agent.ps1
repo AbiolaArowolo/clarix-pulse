@@ -1,8 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$RepoRoot = 'D:\monitoring',
-    [string]$BundleRoot = 'D:\monitoring\packages\agent\release\pulse-generic-v1.8',
-    [string]$ConfigBackupPath = 'D:\monitoring\temp\optimum-config-before-v1.8.yaml'
+    [string]$BundleRoot = 'D:\monitoring\packages\agent\release\pulse-generic-v1.9',
+    [string]$ConfigBackupPath = 'D:\monitoring\temp\optimum-config-before-current.yaml'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,8 +10,9 @@ $ProgressPreference = 'SilentlyContinue'
 
 $serviceName = 'ClarixPulseAgent'
 $installDir = Join-Path $env:ProgramData 'ClarixPulse\Agent'
-$stagingRoot = Join-Path $RepoRoot 'temp\local-reinstall-v1.8'
-$stagingBundle = Join-Path $stagingRoot 'pulse-generic-v1.8-install'
+$bundleName = Split-Path -Path $BundleRoot -Leaf
+$stagingRoot = Join-Path $RepoRoot 'temp\local-reinstall-current'
+$stagingBundle = Join-Path $stagingRoot ($bundleName + '-install')
 $bundleExe = Join-Path $stagingBundle 'clarix-agent.exe'
 $stagingConfig = Join-Path $stagingBundle 'config.yaml'
 
