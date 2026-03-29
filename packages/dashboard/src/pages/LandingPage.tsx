@@ -21,7 +21,7 @@ const PREVIEW_ITEMS = [
 const OUTCOMES = [
   'Detect silent failures earlier',
   'Verify incidents with evidence',
-  'Support many industries, not only broadcast',
+  'Keep teams aligned during live operations',
 ];
 
 export function LandingPage({
