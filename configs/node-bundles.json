@@ -2,28 +2,8 @@
   "defaultVersion": "v1.9",
   "bundles": [
     {
-      "displayName": "Generic Installer",
-      "bundleName": "pulse-generic"
-    },
-    {
-      "displayName": "NJ Optimum",
-      "bundleName": "nj-optimum",
-      "configPath": "configs/nj-optimum-pc.yaml"
-    },
-    {
-      "displayName": "NY Main",
-      "bundleName": "ny-main",
-      "configPath": "configs/ny-main-pc.yaml"
-    },
-    {
-      "displayName": "NY Backup",
-      "bundleName": "ny-backup",
-      "configPath": "configs/ny-backup-pc.yaml"
-    },
-    {
-      "displayName": "FL Digicel",
-      "bundleName": "digicel",
-      "configPath": "configs/digicel-pc.yaml"
+      "displayName": "Clarix Pulse",
+      "bundleName": "clarix-pulse"
     }
   ]
 }

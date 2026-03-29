@@ -1,4 +1,4 @@
-import { exec, query, queryOne } from './db';
+import { exec, queryOne } from './db';
 import { syncRegistryFromNodeMirror } from './registry';
 
 export interface MirroredUdpInputConfig {
@@ -10,7 +10,7 @@ export interface MirroredUdpInputConfig {
 
 export interface MirroredPlayerConfig {
   playerId: string;
-  playoutType: 'insta' | 'admax';
+  playoutType: string;
   paths: Record<string, unknown>;
   processSelectors: Record<string, unknown>;
   logSelectors: Record<string, unknown>;
@@ -123,7 +123,7 @@ function normalizePlayer(raw: unknown): MirroredPlayerConfig | null {
 
   return {
     playerId,
-    playoutType: asString(player.playoutType ?? player.playout_type, 'insta') === 'admax' ? 'admax' : 'insta',
+    playoutType: asString(player.playoutType ?? player.playout_type, 'insta') || 'insta',
     paths: asMapping(player.paths),
     processSelectors: normalizeSelectorMap(player.processSelectors ?? player.process_selectors),
     logSelectors: normalizeSelectorMap(player.logSelectors ?? player.log_selectors),
@@ -164,7 +164,11 @@ function serializePayload(payload: MirroredNodeConfig): string {
   return JSON.stringify(payload);
 }
 
-export async function updateMirroredNodeConfig(nodeId: string, payload: unknown): Promise<MirroredNodeConfig | null> {
+export async function updateMirroredNodeConfig(
+  tenantId: string,
+  nodeId: string,
+  payload: unknown,
+): Promise<MirroredNodeConfig | null> {
   const normalized = normalizeNodeConfig(payload, nodeId);
   if (!normalized) return null;
 
@@ -176,6 +180,7 @@ export async function updateMirroredNodeConfig(nodeId: string, payload: unknown)
   };
 
   await syncRegistryFromNodeMirror({
+    tenantId,
     nodeId,
     nodeName: stored.nodeName,
     siteId: stored.siteId,
@@ -197,12 +202,14 @@ export async function updateMirroredNodeConfig(nodeId: string, payload: unknown)
   return stored;
 }
 
-export async function getMirroredNodeConfig(nodeId: string): Promise<MirroredNodeConfig | null> {
+export async function getMirroredNodeConfig(nodeId: string, tenantId: string): Promise<MirroredNodeConfig | null> {
   const row = await queryOne<Record<string, unknown>>(`
-    SELECT payload, updated_at
-    FROM node_config_mirror
-    WHERE node_id = $1
-  `, [nodeId]);
+    SELECT m.payload, m.updated_at
+    FROM node_config_mirror m
+    JOIN nodes n ON n.node_id = m.node_id
+    JOIN sites s ON s.site_id = n.site_id
+    WHERE m.node_id = $1 AND s.tenant_id = $2
+  `, [nodeId, tenantId]);
 
   if (!row) {
     return null;
@@ -219,10 +226,10 @@ export async function getMirroredNodeConfig(nodeId: string): Promise<MirroredNod
   };
 }
 
-export async function getMirroredPlayerConfig(playerId: string): Promise<{
+export async function getMirroredPlayerConfig(playerId: string, tenantId: string): Promise<{
   nodeId: string;
   playerId: string;
-  playoutType: 'insta' | 'admax';
+  playoutType: string;
   paths: Record<string, unknown>;
   processSelectors: Record<string, unknown>;
   logSelectors: Record<string, unknown>;
@@ -231,29 +238,38 @@ export async function getMirroredPlayerConfig(playerId: string): Promise<{
   sourcePath: string;
   source: 'node';
 } | null> {
-  const rows = await query<Record<string, unknown>>(`
-    SELECT payload, updated_at
-    FROM node_config_mirror
-  `);
+  const row = await queryOne<Record<string, unknown>>(
+    `
+      SELECT m.payload, m.updated_at
+      FROM node_config_mirror m
+      JOIN nodes n ON n.node_id = m.node_id
+      JOIN players p ON p.node_id = n.node_id
+      JOIN sites s ON s.site_id = n.site_id
+      WHERE p.player_id = $1 AND s.tenant_id = $2
+    `,
+    [playerId, tenantId],
+  );
 
-  for (const row of rows) {
-    const config = normalizeNodeConfig(row.payload);
-    const player = config?.players.find((entry) => entry.playerId === playerId);
-    if (!config || !player) continue;
-
-    return {
-      nodeId: config.nodeId,
-      playerId,
-      playoutType: player.playoutType,
-      paths: player.paths,
-      processSelectors: player.processSelectors,
-      logSelectors: player.logSelectors,
-      udpInputs: player.udpInputs,
-      updatedAt: toIso(row.updated_at as Date | string | null | undefined) ?? config.updatedAt,
-      sourcePath: 'node://local-config',
-      source: 'node',
-    };
+  if (!row) {
+    return null;
   }
 
-  return null;
+  const config = normalizeNodeConfig(row.payload);
+  const player = config?.players.find((entry) => entry.playerId === playerId);
+  if (!config || !player) {
+    return null;
+  }
+
+  return {
+    nodeId: config.nodeId,
+    playerId,
+    playoutType: player.playoutType,
+    paths: player.paths,
+    processSelectors: player.processSelectors,
+    logSelectors: player.logSelectors,
+    udpInputs: player.udpInputs,
+    updatedAt: toIso(row.updated_at as Date | string | null | undefined) ?? config.updatedAt,
+    sourcePath: 'node://local-config',
+    source: 'node',
+  };
 }

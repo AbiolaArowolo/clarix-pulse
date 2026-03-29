@@ -12,7 +12,7 @@
     "build": "npm run build --workspace=packages/hub && npm run build --workspace=packages/dashboard",
     "hub": "npm run dev --workspace=packages/hub",
     "dashboard": "npm run dev --workspace=packages/dashboard",
-    "agent:rebuild-bundles": "powershell -ExecutionPolicy Bypass -File scripts/rebuild-node-bundles.ps1 -PruneReleaseRoot -Verify",
+    "agent:rebuild-bundles": "powershell -ExecutionPolicy Bypass -File scripts/rebuild-node-bundles.ps1 -PruneReleaseRoot",
     "agent:verify-bundles": "powershell -ExecutionPolicy Bypass -File scripts/verify-bundle-parity.ps1",
     "agent:refresh-bundles": "npm run agent:rebuild-bundles && npm run agent:verify-bundles"
   },

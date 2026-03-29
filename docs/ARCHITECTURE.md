@@ -1,29 +1,29 @@
-# Pulse - Architecture
+# Clarix Pulse - Architecture
 
-**Document Date**: `2026-03-28 07:22:24 -04:00`  
-**Status**: Codebase architecture after the PostgreSQL refactor, generic-installer rollout, and playout-profile expansion
+**Document Date**: `2026-03-29 -04:00`
 
 ## System Model
 
-Pulse is now organized around two control planes:
+Clarix Pulse now has three major layers:
 
-1. local node control plane
-2. central hub control plane
+1. Windows node runtime
+2. tenant-aware hub API
+3. public/authenticated web app
 
 ```text
-Windows playout node
-  -> Pulse local UI + config.yaml
-  -> Pulse agent service
-  -> Hub API
+Windows node
+  -> local UI + config.yaml
+  -> ClarixPulseAgent service
+  -> hub API
   -> PostgreSQL
-  -> Dashboard / PWA
+  -> tenant-scoped dashboard
 ```
 
 ---
 
 ## Ownership Model
 
-### Local node is authoritative for machine-specific settings
+### Local node remains authoritative for machine-specific settings
 
 The node owns:
 
@@ -32,241 +32,142 @@ The node owns:
 - `site_id`
 - `hub_url`
 - local player list
-- playout type
-- playout vendor profile
-- local paths
+- playout profile
+- paths
 - process selectors
 - log selectors
 - UDP inputs
 
-The authoritative local interface is:
+Primary local editing surface:
 
 - `http://127.0.0.1:3210/`
 
-The node persists that configuration in:
+Current node-side import helpers:
 
-- `%ProgramData%\ClarixPulse\Agent\config.yaml`
+- discovery report upload
+- provisioned `config.yaml` upload
+- direct `config.yaml` pull from a direct HTTPS URL
 
-Identity note:
-
-- `node_name` is a display label and is safe to rename
-- `node_id` and `player_id` are durable identities and should stay stable unless you intentionally want Pulse to treat them as new objects
-- the local UI now locks `node_id`, `player_id`, `hub_url`, `agent_token`, and `enrollment_key` by default after registration
-
-### Playout profile model
-
-Pulse now separates playout support into:
-
-- native profiles
-- generic vendor profiles
-
-Native profiles currently include:
-
-- `insta`
-- `admax`
-
-Generic vendor-ready profiles currently include:
-
-- `cinegy_air`
-- `playbox_neo`
-- `grass_valley_itx`
-- `imagine_versio`
-- `broadstream_oasys`
-- `pebble_marina`
-- `evertz_streampro`
-- `generic_windows`
-
-The local UI now stores the selected profile explicitly. Native profiles keep their deep path/state parsing. Non-native profiles use:
-
-- process selectors
-- log selectors
-- optional `paths.log_path`
-- UDP/output monitoring
-
-That means the installer is now ready for broader playout estates without falsely treating every unsupported vendor as `Insta`.
-
-### Hub is authoritative for central operational state
+### Hub remains authoritative for central operational state
 
 The hub owns:
 
-- `sites`
-- `nodes`
-- `players`
-- `agent_tokens`
-- `instance_controls`
-- `alert_settings`
-- `events`
+- tenant, user, and session records
+- nodes, players, and agent tokens
+- monitoring enabled / disabled
+- maintenance mode
+- tenant alert settings
+- instance state and events
 - mirrored node config
 
-The hub is also still the only place that computes:
+### Dashboard role
 
-- `broadcast_health`
-- `runtime_health`
-- `connectivity_health`
+The dashboard now does three things:
+
+- public landing and account access
+- authenticated tenant operations
+- remote provisioning and read-only node-config visibility
 
 ---
 
-## Hub Persistence Model
+## Authentication And Tenancy
 
-Hub persistence is now PostgreSQL in [db.ts](/D:/monitoring/packages/hub/src/store/db.ts).
+The browser side is no longer global:
 
-### Main tables
+- `/` is the landing page
+- `/login` is the login page
+- `/register` is the registration page
+- `/app` and its subpages require a valid session
 
+The hub now stores:
+
+- `tenants`
+- `users`
+- `sessions`
+- tenant-scoped alert settings
+
+Realtime state is tenant-scoped:
+
+- `/api/status` requires a valid session
+- config routes for dashboard use require a valid session
+- Socket.IO authenticates with the browser session cookie
+- each socket joins a tenant room
+- status and thumbnail updates emit only to that tenant room
+
+Important product rule:
+
+- the registration email seeds the default off-air alert email for that tenant
+- that alert email can later be changed from the dashboard
+
+---
+
+## Node Registration Model
+
+Clarix Pulse supports two node bootstrap patterns:
+
+### Preferred path
+
+1. run discovery on the Windows node
+2. upload the discovery report in the signed-in dashboard
+3. provision the node from that tenant dashboard
+4. import the downloaded `config.yaml` into the local UI
+
+### Fallback path
+
+- local self-enrollment with the tenant's enrollment key
+
+`POST /api/config/enroll` is still supported, but it now resolves the tenant by the submitted enrollment key instead of using one shared global key.
+
+---
+
+## Persistence Model
+
+Hub persistence is PostgreSQL in [db.ts](/D:/monitoring/packages/hub/src/store/db.ts).
+
+Main tables:
+
+- `tenants`
+- `users`
+- `sessions`
 - `sites`
 - `nodes`
 - `players`
 - `agent_tokens`
 - `instance_state`
 - `events`
-- `alert_settings`
+- `tenant_alert_settings`
 - `instance_controls`
 - `node_config_mirror`
 
-### Non-DB thumbnail storage
-
-Hot thumbnail blobs were removed from the main state row and moved to a file cache in [thumbnails.ts](/D:/monitoring/packages/hub/src/store/thumbnails.ts).
-
-Current behavior:
-
-- DB stores `thumbnail_at`
-- file cache stores the JPEG bytes
-- initial dashboard load fetches thumbnails on demand
-- live thumbnail socket updates still carry the fresh `dataUrl`
+Thumbnail bytes remain file-cached outside the main state table in [thumbnails.ts](/D:/monitoring/packages/hub/src/store/thumbnails.ts).
 
 ---
 
-## Registration Model
+## Bundle Model
 
-### Legacy bootstrap
+The product-facing installer baseline is now:
 
-[instances.ts](/D:/monitoring/packages/hub/src/config/instances.ts) is no longer the runtime source of truth. It is now only a bootstrap catalog used to seed known sites / nodes / players into Postgres on first start.
+- `clarix-pulse-v1.9`
 
-### Dynamic enrollment
+Prepared site-specific release bundles were removed from the supported path.
 
-New nodes can register through:
+That means rollout now assumes:
 
-- `POST /api/config/enroll`
-
-That endpoint:
-
-- validates `PULSE_ENROLLMENT_KEY`
-- creates or updates the node
-- rotates the active `agent_token`
-- creates or updates player rows
-- returns the node’s new agent token
-
-### Heartbeat ownership enforcement
-
-`POST /api/heartbeat` now:
-
-- authenticates against DB-backed `agent_tokens`
-- checks player ownership from DB-backed `players`
-- can sync new player identities from the mirrored local config for that node
-
----
-
-## Config Mirror Model
-
-The agent still includes `nodeConfigMirror` with heartbeats.
-
-The hub stores that mirror in:
-
-- [nodeConfigMirror.ts](/D:/monitoring/packages/hub/src/store/nodeConfigMirror.ts)
-
-The mirror is intentionally read-only in the dashboard. It exists for visibility and audit, not remote machine editing.
-
-Mirrored data now includes:
-
-- paths
-- process selectors
-- log selectors
-- UDP inputs
-
----
-
-## Agent Installation Model
-
-The installer now splits setup into two phases:
-
-1. non-admin config preparation
-2. admin-only service installation
-
-Flow:
-
-```text
-install.bat
-  -> local UI / config validation
-  -> optional enrollment with hub
-  -> single Windows UAC prompt
-  -> NSSM service install
-  -> service start
-```
-
-This keeps the one-click operator path while reducing time spent inside an elevated session.
-
-Current generic release baseline:
-
-- `pulse-generic-v1.9`
-
----
-
-## Dashboard Model
-
-The dashboard now acts as:
-
-- live operations board
-- editor for hub-owned controls
-- read-only mirror for node-owned config
-
-What it edits:
-
-- monitoring enabled / disabled
-- maintenance mode
-- alert contacts and channel toggles
-
-What it displays from the node mirror:
-
-- stream inputs
-- resolved paths
-- process selectors
-- log selectors
-
----
-
-## Alerting Model
-
-This refactor intentionally did **not** change the current alert semantics.
-
-Unchanged by design:
-
-- pause / stop / shutdown escalation rules
-- recovery handling
-- email / Telegram alert channel behavior
-
-Changed safely:
-
-- Telegram target picker now saves discovered `chatId` values by default, which reduces the old username-resolution failure path without changing alert timing or trigger rules
-
----
-
-## Current Constraints
-
-As of this refactor:
-
-- the codebase is Postgres-first, but this workstation did not have `docker` or `psql`, so a local live DB was not provisioned here
-- the production VPS has since been cut over to PostgreSQL and is running commit `298f858`
-- no SQLite runtime fallback remains in the hub codepath
-- prepared node bundles still exist as convenience bundles, but the generic installer is now the default architecture path
+- one default software bundle
+- tenant-specific config generated at provisioning time
 
 ---
 
 ## Key Files
 
-- Hub DB bootstrapping: [db.ts](/D:/monitoring/packages/hub/src/store/db.ts)
-- Registry model: [registry.ts](/D:/monitoring/packages/hub/src/store/registry.ts)
-- Heartbeat route: [heartbeat.ts](/D:/monitoring/packages/hub/src/routes/heartbeat.ts)
-- Config / enrollment route: [config.ts](/D:/monitoring/packages/hub/src/routes/config.ts)
-- Thumbnail file cache: [thumbnails.ts](/D:/monitoring/packages/hub/src/store/thumbnails.ts)
-- Agent runtime + installer: [agent.py](/D:/monitoring/packages/agent/agent.py)
-
-For the timestamped release record and challenges encountered during this pass, see [RELEASE_KB_2026-03-27.md](/D:/monitoring/docs/RELEASE_KB_2026-03-27.md).
+- hub auth/session state: [auth.ts](/D:/monitoring/packages/hub/src/store/auth.ts)
+- hub request/session helpers: [serverAuth.ts](/D:/monitoring/packages/hub/src/serverAuth.ts)
+- hub DB bootstrapping: [db.ts](/D:/monitoring/packages/hub/src/store/db.ts)
+- tenant-aware registry: [registry.ts](/D:/monitoring/packages/hub/src/store/registry.ts)
+- config routes: [config.ts](/D:/monitoring/packages/hub/src/routes/config.ts)
+- status route: [status.ts](/D:/monitoring/packages/hub/src/routes/status.ts)
+- heartbeat route: [heartbeat.ts](/D:/monitoring/packages/hub/src/routes/heartbeat.ts)
+- auth route: [auth.ts](/D:/monitoring/packages/hub/src/routes/auth.ts)
+- dashboard shell: [App.tsx](/D:/monitoring/packages/dashboard/src/App.tsx)
+- dashboard auth provider: [AuthProvider.tsx](/D:/monitoring/packages/dashboard/src/features/auth/AuthProvider.tsx)
+- agent runtime and local UI: [agent.py](/D:/monitoring/packages/agent/agent.py)

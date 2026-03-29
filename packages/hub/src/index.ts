@@ -4,11 +4,14 @@ import express from 'express';
 import { createServer } from 'http';
 import path from 'path';
 import { Server as SocketServer } from 'socket.io';
+import { createAuthRouter } from './routes/auth';
 import { createConfigRouter } from './routes/config';
 import { createHeartbeatRouter } from './routes/heartbeat';
 import { buildStatusPayload, createStatusRouter } from './routes/status';
 import { createThumbnailRouter } from './routes/thumbnail';
+import { SESSION_COOKIE_NAME, readCookie, requireSession } from './serverAuth';
 import { sendNetworkIssueAlert } from './services/alerting';
+import { getSessionFromToken } from './store/auth';
 import { DATABASE_URL_DISPLAY, initDb } from './store/db';
 import { getInstanceControls, initInstanceControls, isAlertingSuppressed } from './store/instanceControls';
 import { getPlayer, initRegistry } from './store/registry';
@@ -22,24 +25,58 @@ dotenv.config({ path: path.join(repoRoot, '.env.local'), override: true });
 const PORT = Number(process.env.HUB_PORT ?? 3001);
 
 const app = express();
-app.use(cors());
+app.set('trust proxy', 1);
+app.use(cors({
+  origin: true,
+  credentials: true,
+}));
 app.use(express.json({ limit: '256kb' }));
 
 const httpServer = createServer(app);
 const io = new SocketServer(httpServer, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
+  cors: {
+    origin: true,
+    credentials: true,
+    methods: ['GET', 'POST'],
+  },
 });
 
+app.use('/api/auth', createAuthRouter());
 app.use('/api/heartbeat', createHeartbeatRouter(io));
 app.use('/api/config', createConfigRouter());
 app.use('/api/thumbnail', createThumbnailRouter(io));
-app.use('/api/status', createStatusRouter());
+app.use('/api/status', requireSession, createStatusRouter());
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 
+io.use(async (socket, next) => {
+  const sessionToken = readCookie(socket.handshake.headers.cookie, SESSION_COOKIE_NAME);
+  if (!sessionToken) {
+    next(new Error('Unauthorized'));
+    return;
+  }
+
+  const session = await getSessionFromToken(sessionToken);
+  if (!session) {
+    next(new Error('Unauthorized'));
+    return;
+  }
+
+  socket.data.session = session;
+  next();
+});
+
 io.on('connection', async (socket) => {
-  console.log(`[ws] client connected: ${socket.id}`);
-  socket.emit('full_state', await buildStatusPayload());
+  const session = socket.data.session as Awaited<ReturnType<typeof getSessionFromToken>>;
+  if (!session) {
+    socket.disconnect(true);
+    return;
+  }
+
+  const room = `tenant:${session.tenantId}`;
+  socket.join(room);
+  console.log(`[ws] client connected: ${socket.id} tenant=${session.tenantSlug}`);
+  socket.emit('full_state', await buildStatusPayload(session.tenantId));
   socket.on('disconnect', () => console.log(`[ws] client disconnected: ${socket.id}`));
 });
 
@@ -62,21 +99,23 @@ setInterval(async () => {
         return undefined;
       });
       const controls = getInstanceControls(state.instanceId);
-      io.emit('state_update', {
-        instanceId: state.instanceId,
-        broadcastHealth: 'unknown',
-        runtimeHealth: updated?.runtimeHealth ?? 'unknown',
-        connectivityHealth: 'offline',
-        monitoringEnabled: controls.monitoringEnabled,
-        maintenanceMode: controls.maintenanceMode,
-        lastHeartbeatAt: state.lastHeartbeatAt,
-        updatedAt: updated?.updatedAt ?? new Date().toISOString(),
-      });
+      const player = await getPlayer(state.instanceId);
+      if (player) {
+        io.to(`tenant:${player.tenantId}`).emit('state_update', {
+          instanceId: state.instanceId,
+          broadcastHealth: 'unknown',
+          runtimeHealth: updated?.runtimeHealth ?? 'unknown',
+          connectivityHealth: 'offline',
+          monitoringEnabled: controls.monitoringEnabled,
+          maintenanceMode: controls.maintenanceMode,
+          lastHeartbeatAt: state.lastHeartbeatAt,
+          updatedAt: updated?.updatedAt ?? new Date().toISOString(),
+        });
+      }
 
       const lastSent = networkIssueSentAt.get(state.instanceId) ?? 0;
       if (now - lastSent > 300_000 && !isAlertingSuppressed(state.instanceId)) {
         networkIssueSentAt.set(state.instanceId, now);
-        const player = await getPlayer(state.instanceId);
         if (player) {
           sendNetworkIssueAlert(state.instanceId, player.label).catch(console.error);
         }
@@ -84,16 +123,19 @@ setInterval(async () => {
     } else if (ageMs >= STALE_THRESHOLD_MS && state.connectivityHealth === 'online') {
       setConnectivity(state.instanceId, 'stale').catch(console.error);
       const controls = getInstanceControls(state.instanceId);
-      io.emit('state_update', {
-        instanceId: state.instanceId,
-        broadcastHealth: state.broadcastHealth,
-        runtimeHealth: state.runtimeHealth,
-        connectivityHealth: 'stale',
-        monitoringEnabled: controls.monitoringEnabled,
-        maintenanceMode: controls.maintenanceMode,
-        lastHeartbeatAt: state.lastHeartbeatAt,
-        updatedAt: new Date().toISOString(),
-      });
+      const player = await getPlayer(state.instanceId);
+      if (player) {
+        io.to(`tenant:${player.tenantId}`).emit('state_update', {
+          instanceId: state.instanceId,
+          broadcastHealth: state.broadcastHealth,
+          runtimeHealth: state.runtimeHealth,
+          connectivityHealth: 'stale',
+          monitoringEnabled: controls.monitoringEnabled,
+          maintenanceMode: controls.maintenanceMode,
+          lastHeartbeatAt: state.lastHeartbeatAt,
+          updatedAt: new Date().toISOString(),
+        });
+      }
     }
   }
 }, 5_000);

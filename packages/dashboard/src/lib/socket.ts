@@ -2,10 +2,29 @@ import { io, Socket } from 'socket.io-client';
 
 const HUB_URL = import.meta.env.VITE_HUB_URL ?? '';
 
-// Connect to hub — empty string uses the Vite proxy in dev, or same origin in prod
-export const socket: Socket = io(HUB_URL, {
-  transports: ['polling', 'websocket'],
-  reconnectionAttempts: Infinity,
-  reconnectionDelay: 1000,
-  timeout: 5000,
-});
+let socket: Socket | null = null;
+
+export function getHubSocket(): Socket {
+  if (!socket) {
+    socket = io(HUB_URL, {
+      autoConnect: false,
+      withCredentials: true,
+      transports: ['polling', 'websocket'],
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      timeout: 5000,
+    });
+  }
+
+  return socket;
+}
+
+export function disconnectHubSocket() {
+  if (!socket) {
+    return;
+  }
+
+  socket.removeAllListeners();
+  socket.disconnect();
+  socket = null;
+}

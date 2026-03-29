@@ -1,12 +1,24 @@
+import { LEGACY_BOOTSTRAP_ENABLED, isLegacyBootstrapPlayerId } from '../config/instances';
 import { Router, Request, Response } from 'express';
 import { getInstanceControls } from '../store/instanceControls';
 import { listPlayers } from '../store/registry';
 import { getAllStates } from '../store/state';
 
-export async function buildStatusPayload() {
+export async function buildStatusPayload(tenantId: string) {
   const states = getAllStates();
   const stateMap = new Map(states.map((state) => [state.instanceId, state]));
-  const players = await listPlayers();
+  const allPlayers = await listPlayers(tenantId);
+  const players = allPlayers.filter((player) => {
+    if (LEGACY_BOOTSTRAP_ENABLED) {
+      return true;
+    }
+
+    if (!isLegacyBootstrapPlayerId(player.playerId)) {
+      return true;
+    }
+
+    return Boolean(player.lastSeenAt || player.lastEnrolledAt);
+  });
 
   const siteMap = new Map<string, {
     id: string;
@@ -70,8 +82,12 @@ export async function buildStatusPayload() {
 export function createStatusRouter(): Router {
   const router = Router();
 
-  router.get('/', async (_req: Request, res: Response) => {
-    res.json(await buildStatusPayload());
+  router.get('/', async (req: Request, res: Response) => {
+    if (!req.auth) {
+      return res.status(401).json({ error: 'Sign in required.' });
+    }
+
+    res.json(await buildStatusPayload(req.auth.tenantId));
   });
 
   return router;

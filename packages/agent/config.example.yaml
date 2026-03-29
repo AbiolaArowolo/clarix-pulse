@@ -13,58 +13,18 @@
 # - id still works as a legacy alias for player_id
 # - udp_probe still works as a legacy alias for a single udp_inputs entry
 
-node_id: sample-node-1
-node_name: Primary Control Room
-site_id: primary-control-room
+node_id:
+node_name:
+site_id:
 # hub_url may point to a local LAN hub or a remote internet-facing hub
 hub_url: https://monitor.example.com
 # Use either agent_token or enrollment_key during setup.
 # If enrollment_key is provided and agent_token is blank, the local UI enrolls this node and saves the returned agent token.
-agent_token: REPLACE_ME
+agent_token:
 # enrollment_key: REPLACE_WITH_HUB_ENROLLMENT_KEY
 poll_interval_seconds: 10
 
-players:
-  - player_id: primary-insta-1
-    # playout_type may be one of:
-    # insta, admax, cinegy_air, playbox_neo, grass_valley_itx,
-    # imagine_versio, broadstream_oasys, pebble_marina,
-    # evertz_streampro, generic_windows
-    playout_type: insta
-    paths:
-      shared_log_dir: C:\Program Files\Indytek\Insta log
-      instance_root: C:\Program Files\Indytek\Insta Playout\Settings
-      fnf_log: C:\Program Files\Indytek\Insta Playout\logs\FNF
-      playlistscan_log: C:\Program Files\Indytek\Insta Playout\logs\playlistscan
-    # Optional selectors for same-type players on one PC:
-    # process_selectors:
-    #   window_title_contains:
-    #     - Insta 1
-    # log_selectors:
-    #   include_contains:
-    #     - Insta 1
-    #   paused_regex: '(?i)paused'
-    #   played_regex: '(?i)fully played'
-    # Add UDP, RTSP, RTMP, or direct .ts stream URLs later from the Pulse dashboard when needed.
-    udp_inputs: []
-
-  - player_id: primary-insta-2
-    playout_type: insta
-    paths:
-      shared_log_dir: C:\Program Files\Indytek\Insta log
-      instance_root: C:\Program Files\Indytek\Insta Playout 2\Settings
-      fnf_log: C:\Program Files\Indytek\Insta Playout 2\logs\FNF
-      playlistscan_log: C:\Program Files\Indytek\Insta Playout 2\logs\playlistscan
-    udp_inputs: []
-
-  - player_id: primary-admax-1
-    playout_type: admax
-    paths:
-      # Version-agnostic candidates. The agent resolves the first real Admax layout it finds.
-      admax_root_candidates:
-        - C:\Program Files (x86)\Unimedia\Admax One*\admax
-        - C:\Program Files\Unimedia\Admax One*\admax
-    udp_inputs: []
+players: []
 
 # Example: vendor profile using generic log/process selectors
 # players:

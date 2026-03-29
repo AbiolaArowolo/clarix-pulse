@@ -1,36 +1,33 @@
-# Pulse - Product Requirements Summary
+# Clarix Pulse - Product Requirements Summary
 
-**Document Date**: `2026-03-27 20:43:51 -04:00`  
-**Status**: Current product summary after the PostgreSQL and generic-installer refactor
+**Document Date**: `2026-03-29 -04:00`
 
 ## Problem
 
-Operators need to monitor playout nodes across sites without confusing:
+Broadcast operators need to monitor multiple playout nodes without mixing:
 
-- runtime faults
-- network faults
-- stream faults
-- machine-specific config issues
+- one customer's nodes with another customer's nodes
+- local machine setup problems with actual off-air problems
+- enrollment/setup friction with normal operations
 
-Pulse solves this with:
+Clarix Pulse solves this with:
 
-- a Windows agent
-- a central hub
-- a live dashboard
-- alerting through Telegram and email
+- a Windows monitoring agent
+- a tenant-aware hub
+- a login-gated dashboard
+- tenant-scoped alerting
 
 ---
 
 ## Current Product Goals
 
-The product now targets:
-
-- one generic Windows installer by default
-- local node UI as the source of truth for machine-specific config
-- hub-owned operational control plane
-- Postgres-backed central persistence
-- dynamic enrollment for new nodes
-- mirrored read-only node config in the dashboard
+- public landing page instead of exposing the monitoring board to everyone
+- registration and login with email and password
+- one private hub per customer account
+- empty-by-default dashboard for new accounts
+- registration email becomes the default off-air alert email
+- local node discovery and remote provisioning as the main onboarding path
+- one default Clarix Pulse installer bundle for all nodes
 
 ---
 
@@ -38,28 +35,21 @@ The product now targets:
 
 ### Shipped in code
 
-- Postgres-backed hub persistence
-- DB-backed node / player / token inventory
-- generic node enrollment
-- Windows service agent
-- persistent local UI
-- process selectors and log selectors in the local UI
-- mirrored node config in the dashboard
-- maintenance mode
-- monitoring enable / disable
-- Telegram and email alerting
-- file-based thumbnail cache instead of DB-inline blobs
+- tenant-aware users, sessions, and alert settings
+- landing page, registration page, login page
+- authenticated monitoring dashboard under `/app`
+- tenant-scoped `/api/status`
+- tenant-scoped Socket.IO updates
+- tenant-scoped remote provisioning
+- tenant-scoped alert contacts
+- local discovery report import
+- provisioned `config.yaml` import/pull in the local UI
+- one default `clarix-pulse` bundle path
 
 ### Intentionally unchanged
 
-- current play / pause / stop monitoring logic
-- current alert timing / trigger behavior
-
-### Current operational follow-ups
-
-- rolling the generic installer to more PCs
-- validating self-enrollment from the local UI on new nodes
-- replacing any legacy Telegram username recipient with a numeric chat ID
+- existing off-air health logic
+- current pause / stop / shutdown alert semantics
 
 ---
 
@@ -67,57 +57,51 @@ The product now targets:
 
 ### Node-owned
 
-- log paths
-- playout type
+- player paths
 - player count
+- playout profile
 - process selectors
 - log selectors
-- UDP URLs
+- UDP inputs
 
 ### Hub-owned
 
+- tenant identity
+- sessions
+- inventory
+- agent tokens
 - monitoring enabled / disabled
 - maintenance mode
 - alert routing
-- tokens
-- inventory
 - mirrored config storage
-
-### Dashboard role
-
-- edit hub-owned controls
-- display live health and alarms
-- display mirrored node config read-only
 
 ---
 
 ## Installation Requirements
 
-- install should be as close to one-click as Windows allows
-- admin should only be needed for the final service installation phase
-- generic setup should be able to enroll itself without a custom node bundle
-- per-node bundles should remain optional convenience artifacts, not the main architecture
+- install should stay close to one-click on Windows
+- elevation should only be required for the final service-install phase
+- setup should work from the same generic bundle everywhere
+- the dashboard should provision tenant-specific config instead of relying on prepared site bundles
 
 ---
 
-## Monitoring Requirements
+## Key Product Rules
 
-- process, window, file, and log monitoring stay active for supported playout types
-- optional UDP monitoring stays per-player
-- pause remains yellow immediately and escalates based on the accepted current rules
-- stop remains yellow immediately and escalates based on the accepted current rules
-- player shutdown remains red immediately
+- users should not land directly on the old shared monitoring interface
+- a new account should not see any nodes until their own node is onboarded
+- the registration email must be the default off-air alert email until changed
+- local discovery should work best while the player is running
+- tenant isolation must apply to both API responses and realtime updates
 
 ---
 
-## Knowledge Base Requirement
+## Documentation Requirement
 
-Major refactor and release passes must leave behind:
+Major product changes must leave behind:
 
-- updated top-level docs
-- updated handover
-- exact release bundle information
-- timestamped challenge notes
-- clear statement of what changed and what intentionally did not change
-
-The current dated record is [RELEASE_KB_2026-03-27.md](/D:/monitoring/docs/RELEASE_KB_2026-03-27.md).
+- updated install guide
+- updated deployment guide
+- updated architecture summary
+- updated onboarding guide
+- updated release notes

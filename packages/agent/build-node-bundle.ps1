@@ -137,6 +137,8 @@ $requiredRepoFiles = @(
     @{ Source = (Join-Path $PSScriptRoot 'install.bat'); Target = 'install.bat' }
     @{ Source = (Join-Path $PSScriptRoot 'uninstall.bat'); Target = 'uninstall.bat' }
     @{ Source = (Join-Path $PSScriptRoot 'configure.bat'); Target = 'configure.bat' }
+    @{ Source = (Join-Path $PSScriptRoot 'install-from-url.ps1'); Target = 'install-from-url.ps1' }
+    @{ Source = (Join-Path $PSScriptRoot 'discover-node.ps1'); Target = 'discover-node.ps1' }
     @{ Source = (Join-Path $PSScriptRoot 'config.example.yaml'); Target = 'config.example.yaml' }
 )
 
@@ -199,6 +201,8 @@ Contents:
 - install.bat
 - uninstall.bat
 - configure.bat
+- install-from-url.ps1
+- discover-node.ps1
 - config.example.yaml
 - config.yaml
 - nssm.exe (required for installation)
@@ -212,6 +216,8 @@ Usage:
 5. install.bat uses clarix-agent.exe automatically. No separate EXE launch is required.
 6. If config.yaml is already valid for this node, Pulse installs without extra editing.
 7. If config.yaml is incomplete, Pulse asks for the missing node/player/selector/stream details itself.
+8. discover-node.ps1 can generate a JSON report that the local UI or remote dashboard can import before saving config.yaml.
+9. install-from-url.ps1 can pull this bundle from a VPS/cloud URL and optionally launch install.bat.
 "@ | Set-Content -Path $manifestPath -Encoding ASCII
 
     if ($Zip) {

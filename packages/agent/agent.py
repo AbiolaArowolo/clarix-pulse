@@ -206,6 +206,29 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
       background: rgba(245,158,11,0.16);
       border-color: rgba(245,158,11,0.5);
     }
+    .button-like {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 10px 16px;
+      background: #10243c;
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 14px;
+      text-transform: none;
+      letter-spacing: normal;
+    }
+    .button-like.primary {
+      background: rgba(20,184,166,0.16);
+      border-color: rgba(20,184,166,0.5);
+    }
+    .button-like input {
+      display: none;
+    }
     button.danger {
       background: rgba(239,68,68,0.16);
       border-color: rgba(239,68,68,0.5);
@@ -305,6 +328,30 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
 
     <section class="panel">
       <div class="row">
+        <div>
+          <h2 class="section-title">Import Setup</h2>
+          <p class="meta">Upload a discovery report, import a provisioned <code>config.yaml</code>, or pull one directly from a VPS/cloud link.</p>
+        </div>
+        <label class="button-like primary">
+          <input id="import_setup_file" type="file" accept=".json,.yaml,.yml,.txt,.conf">
+          Upload report or config
+        </label>
+      </div>
+      <div class="grid">
+        <label>Pull Setup From URL
+          <input id="import_setup_url" placeholder="https://your-vps.example.com/nodes/example/config.yaml">
+        </label>
+      </div>
+      <div class="row" style="margin-top:14px;">
+        <button type="button" class="primary" onclick="PulseUi.importUrl()">Pull from link</button>
+      </div>
+      <div class="status-note">
+        Pulse can fill node ID, site ID, hub URL, player paths, selectors, streams, and any existing token or enrollment key it finds in a scanned Pulse config. The discovery report can also suggest generic non-native players from running playout processes and log folders. If the enrollment key does not work, pull or upload the tokenized <code>config.yaml</code> and then save local settings.
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="row">
         <h2 class="section-title">Players</h2>
         <button type="button" class="primary" id="add_player_button" onclick="PulseUi.addPlayer()">+ Add player</button>
       </div>
@@ -384,7 +431,7 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
     }
 
     function defaultPlayer(index) {
-      const playoutType = "insta";
+      const playoutType = "generic_windows";
       const playerId = `${state.node_id || "node"}-${playoutType}-${index + 1}`;
       return {
         player_id: playerId,
@@ -392,7 +439,8 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
         paths: defaultPaths(playoutType),
         process_selectors: {},
         log_selectors: {},
-        udp_inputs: []
+        udp_inputs: [],
+        advanced_open: false
       };
     }
 
@@ -427,6 +475,7 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
       document.getElementById("agent_token").value = state.agent_token || "";
       document.getElementById("enrollment_key").value = state.enrollment_key || "";
       document.getElementById("poll_interval_seconds").value = state.poll_interval_seconds || 5;
+      document.getElementById("import_setup_url").value = state.import_setup_url || "";
       document.getElementById("unlock_sensitive_fields").checked = !!state.unlock_sensitive_fields;
       document.getElementById("node_id").readOnly = lock;
       document.getElementById("hub_url").readOnly = lock;
@@ -518,7 +567,7 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
       const container = document.getElementById("players");
       const players = Array.isArray(state.players) ? state.players : [];
       if (players.length === 0) {
-        container.innerHTML = '<div class="muted-card">No players added yet.</div>';
+        container.innerHTML = '<div class="muted-card">No players added yet. Upload a discovery report or use Add player to start this node.</div>';
         return;
       }
 
@@ -614,7 +663,12 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
                 <strong>Player ${playerIndex + 1}</strong>
                 <div class="meta">${escapeHtml(player.player_id || '')}</div>
               </div>
-              <button type="button" class="danger" ${playerLocked ? 'disabled' : ''} onclick="PulseUi.removePlayer(${playerIndex})">Remove player</button>
+              <div class="row">
+                <button type="button" class="${player.advanced_open ? 'primary' : 'toggle-off'}" onclick="PulseUi.toggleAdvanced(${playerIndex})">
+                  ${player.advanced_open ? 'Hide advanced' : 'Advanced'}
+                </button>
+                <button type="button" class="danger" ${playerLocked ? 'disabled' : ''} onclick="PulseUi.removePlayer(${playerIndex})">Remove player</button>
+              </div>
             </div>
             <div class="grid" style="margin-top:12px;">
               <label>Player ID
@@ -628,7 +682,7 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
             </div>
             <div class="status-note">${escapeHtml(profile.description || "")}</div>
             <div style="margin-top:14px;">${pathHtml}</div>
-            ${advancedHtml}
+            ${player.advanced_open ? advancedHtml : ''}
             <div class="row" style="margin-top:16px;">
               <h3 class="section-title">Streams</h3>
               <button type="button" class="primary" onclick="PulseUi.addUdp(${playerIndex})">+ Add stream</button>
@@ -649,6 +703,12 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
         document.getElementById(field).addEventListener("input", (event) => {
           state[field] = event.target.value;
         });
+      });
+      document.getElementById("import_setup_url").addEventListener("input", (event) => {
+        state.import_setup_url = event.target.value;
+      });
+      document.getElementById("import_setup_file").addEventListener("change", (event) => {
+        void window.PulseUi.importFile(event);
       });
       document.getElementById("unlock_sensitive_fields").addEventListener("change", (event) => {
         state.unlock_sensitive_fields = !!event.target.checked;
@@ -697,6 +757,11 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
           delete player[group][key];
         }
       },
+      toggleAdvanced(playerIndex) {
+        const player = state.players[playerIndex];
+        player.advanced_open = !player.advanced_open;
+        renderPlayers();
+      },
       addPlayer() {
         if (identityLocked()) {
           showMessage("error", "Unlock sensitive settings to add another player.");
@@ -734,6 +799,65 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
       updateUdp(playerIndex, udpIndex, key, value) {
         const udp = state.players[playerIndex].udp_inputs[udpIndex];
         udp[key] = key === "thumbnail_interval_s" ? Number(value) : value;
+      },
+      async importFile(event) {
+        showMessage("", "");
+        const file = event.target.files && event.target.files[0];
+        if (!file) return;
+
+        try {
+          const documentText = await file.text();
+          const response = await fetch("/api/import", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              documentText,
+              currentState: state
+            })
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            showMessage("error", payload.error || "Unable to import this file.");
+            return;
+          }
+          state = payload.config;
+          render();
+          showMessage("notice", payload.message || `Imported ${file.name}. Save Local Settings to write it to config.yaml.`);
+        } catch (error) {
+          showMessage("error", error && error.message ? error.message : "Unable to import this file.");
+        } finally {
+          event.target.value = "";
+        }
+      },
+      async importUrl() {
+        showMessage("", "");
+        const setupUrl = String(state.import_setup_url || "").trim();
+        if (!setupUrl) {
+          showMessage("error", "Paste a setup URL first.");
+          return;
+        }
+
+        try {
+          const response = await fetch("/api/import-url", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              setupUrl,
+              currentState: state
+            })
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            showMessage("error", payload.error || "Unable to pull setup from that URL.");
+            return;
+          }
+          state = payload.config;
+          state.import_setup_url = setupUrl;
+          render();
+          showMessage("notice", payload.message || "Setup pulled from link. Save Local Settings to write it to config.yaml.");
+        } catch (error) {
+          showMessage("error", error && error.message ? error.message : "Unable to pull setup from that URL.");
+        }
       },
       async save() {
         showMessage("", "");
@@ -775,6 +899,11 @@ def _as_str(value: Any, default: str = "") -> str:
         return default
     text = str(value).strip()
     return text if text else default
+
+
+def _as_non_placeholder_str(value: Any, default: str = "") -> str:
+    text = _as_str(value, default)
+    return "" if "REPLACE_ME" in text else text
 
 
 def _as_bool(value: Any, default: bool = False) -> bool:
@@ -1001,6 +1130,187 @@ def _load_raw_config(config_path: str | None = None) -> dict[str, Any]:
     return data
 
 
+def _coerce_uploaded_player(player: Any) -> dict[str, Any] | None:
+    if not isinstance(player, dict):
+        return None
+
+    normalized = dict(player)
+    normalized.setdefault("player_id", player.get("playerId"))
+    normalized.setdefault("playout_type", player.get("playoutType"))
+    normalized.setdefault("process_selectors", player.get("processSelectors"))
+    normalized.setdefault("log_selectors", player.get("logSelectors"))
+    normalized.setdefault("udp_inputs", player.get("udpInputs"))
+
+    if not isinstance(normalized.get("paths"), dict):
+        lifted_paths = {
+            key: player[key]
+            for key in (
+                "shared_log_dir",
+                "instance_root",
+                "fnf_log",
+                "playlistscan_log",
+                "log_path",
+                "activity_log",
+                "log_file",
+                "admax_root",
+                "admax_root_candidates",
+                "playout_log_dir",
+                "admax_state_path",
+                "settings_ini",
+            )
+            if key in player
+        }
+        if lifted_paths:
+            normalized["paths"] = lifted_paths
+
+    return normalized
+
+
+def _import_local_ui_state(document_text: str, current_state: Any = None) -> tuple[dict[str, Any], str]:
+    raw_text = _as_str(document_text)
+    if not raw_text:
+        raise ValueError("Upload a JSON or YAML discovery report or config file first.")
+
+    try:
+        document = yaml.safe_load(raw_text) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Unable to parse uploaded file: {exc}") from exc
+
+    if not isinstance(document, dict):
+        raise ValueError("Uploaded file must contain a top-level mapping.")
+
+    current = current_state if isinstance(current_state, dict) else {}
+    discovery = _as_mapping(document.get("discovery"))
+    existing_pulse_config = _as_mapping(discovery.get("existing_pulse_config"))
+    current_agent_token = _as_non_placeholder_str(current.get("agent_token"))
+    uploaded_agent_token = _as_non_placeholder_str(
+        document.get("agent_token")
+        or document.get("agentToken")
+        or existing_pulse_config.get("agent_token")
+    )
+    agent_token = uploaded_agent_token or current_agent_token
+
+    node_id = _as_str(
+        document.get("node_id")
+        or document.get("nodeId")
+        or document.get("agent_id")
+        or existing_pulse_config.get("node_id"),
+        _as_str(current.get("node_id"), socket.gethostname().lower().replace(" ", "-")),
+    )
+    node_name = _as_str(
+        document.get("node_name")
+        or document.get("nodeName")
+        or document.get("pc_name")
+        or existing_pulse_config.get("node_name"),
+        _as_str(current.get("node_name"), socket.gethostname()),
+    )
+    site_id = _as_str(
+        document.get("site_id") or document.get("siteId") or existing_pulse_config.get("site_id"),
+        _as_str(current.get("site_id"), _default_site_id(node_id)),
+    )
+    hub_url = _as_str(
+        document.get("hub_url") or document.get("hubUrl") or existing_pulse_config.get("hub_url"),
+        _as_str(current.get("hub_url"), DEFAULT_HUB_URL),
+    )
+    poll_interval_seconds = max(
+        1,
+        min(
+            120,
+            _as_int(
+                document.get("poll_interval_seconds", document.get("pollIntervalSeconds")),
+                _as_int(current.get("poll_interval_seconds"), 5),
+            ),
+        ),
+    )
+    enrollment_key = ""
+    if not agent_token:
+        enrollment_key = _as_non_placeholder_str(
+            document.get("enrollment_key")
+            or document.get("enrollmentKey")
+            or existing_pulse_config.get("enrollment_key"),
+            _as_non_placeholder_str(current.get("enrollment_key")),
+        )
+
+    players_key_present = "players" in document or "instances" in document
+    players_raw = document.get("players")
+    if not isinstance(players_raw, list):
+        players_raw = document.get("instances")
+    if not isinstance(players_raw, list):
+        players_raw = []
+
+    if not players_key_present and isinstance(current.get("players"), list):
+        players_raw = current.get("players", [])
+
+    if len(players_raw) > 10:
+        raise ValueError("Uploaded file defines more than 10 players. Split it into smaller nodes before importing.")
+
+    players = [
+        _build_default_player_for_ui(index, node_id, normalized_player)
+        for index, raw_player in enumerate(players_raw)
+        for normalized_player in [_coerce_uploaded_player(raw_player)]
+        if normalized_player is not None
+    ]
+
+    locked_player_ids = [
+        _as_str(player.get("player_id"))
+        for player in players
+        if _as_str(player.get("player_id"))
+    ] if agent_token else []
+
+    if current_agent_token and not uploaded_agent_token and isinstance(current.get("locked_player_ids"), list):
+        current_locked_ids = [_as_str(value) for value in current.get("locked_player_ids", []) if _as_str(value)]
+        if current_locked_ids:
+            locked_player_ids = current_locked_ids
+
+    imported_state = {
+        "node_id": node_id,
+        "node_name": node_name,
+        "site_id": site_id,
+        "hub_url": hub_url,
+        "agent_token": agent_token,
+        "enrollment_key": enrollment_key,
+        "identity_locked": bool(agent_token),
+        "unlock_sensitive_fields": False,
+        "imported_sensitive_override": bool(uploaded_agent_token),
+        "locked_player_ids": locked_player_ids,
+        "poll_interval_seconds": poll_interval_seconds,
+        "players": players,
+    }
+
+    if uploaded_agent_token:
+        if current_agent_token and current_agent_token != uploaded_agent_token:
+            return (
+                imported_state,
+                "Provisioned config imported. Save Local Settings to replace the current local registration with this provisioned node config.",
+            )
+        return (
+            imported_state,
+            "Provisioned config imported. Save Local Settings to write the agent token to config.yaml without using an enrollment key.",
+        )
+
+    return (
+        imported_state,
+        "Discovery report imported. Review the hub URL if needed, then save local settings.",
+    )
+
+
+def _pull_remote_setup_url(setup_url: Any, current_state: Any = None) -> tuple[dict[str, Any], str]:
+    url = _as_str(setup_url)
+    if not url:
+        raise ValueError("Setup URL is required.")
+    if not (url.lower().startswith("https://") or url.lower().startswith("http://")):
+        raise ValueError("Setup URL must start with http:// or https://")
+
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Failed to pull setup from {url}: {exc}") from exc
+
+    imported_state, message = _import_local_ui_state(response.text, current_state)
+    return imported_state, f"{message} Pulled from {url}."
+
+
 def _normalize_udp_input(player_id: str, udp_input: Any, index: int) -> dict[str, Any] | None:
     if not isinstance(udp_input, dict):
         return None
@@ -1204,7 +1514,7 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
 
     node_name = _as_str(raw.get("node_name") or raw.get("pc_name") or node_id)
     hub_url = _as_str(raw.get("hub_url"))
-    agent_token = _as_str(raw.get("agent_token"))
+    agent_token = _as_non_placeholder_str(raw.get("agent_token"))
     poll_interval_seconds = max(1, _as_int(raw.get("poll_interval_seconds"), 10))
 
     if not hub_url:
@@ -1622,6 +1932,7 @@ def _build_default_player_for_ui(index: int, node_id: str, existing_player: dict
         "process_selectors": _normalize_process_selectors(existing_player),
         "log_selectors": _normalize_log_selectors(existing_player),
         "udp_inputs": udp_inputs,
+        "advanced_open": _as_bool(existing_player.get("advanced_open"), False),
     }
 
 
@@ -1636,17 +1947,18 @@ def _config_for_local_ui(existing: dict[str, Any] | None = None) -> dict[str, An
         _build_default_player_for_ui(index, node_id, player if isinstance(player, dict) else {})
         for index, player in enumerate(existing_players)
     ]
-    if not players:
-        players = [_build_default_player_for_ui(0, node_id, {})]
+    agent_token = _as_non_placeholder_str(existing.get("agent_token"))
 
     return {
         "node_id": node_id,
         "node_name": _as_str(existing.get("node_name"), socket.gethostname()),
         "site_id": _as_str(existing.get("site_id"), _default_site_id(node_id)),
         "hub_url": _as_str(existing.get("hub_url"), DEFAULT_HUB_URL),
-        "agent_token": _as_str(existing.get("agent_token")),
+        "agent_token": agent_token,
         "enrollment_key": "",
-        "identity_locked": bool(_as_str(existing.get("agent_token"))),
+        "import_setup_url": "",
+        "imported_sensitive_override": False,
+        "identity_locked": bool(agent_token),
         "unlock_sensitive_fields": False,
         "locked_player_ids": [
             _as_str(player.get("player_id"))
@@ -1663,9 +1975,13 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
         raise ValueError("Invalid local configuration payload.")
 
     existing = copy.deepcopy(existing or {})
-    existing_agent_token = _as_str(existing.get("agent_token"))
+    existing_agent_token = _as_non_placeholder_str(existing.get("agent_token"))
     existing_registered = bool(existing_agent_token)
-    allow_sensitive_edits = (not existing_registered) or _as_bool(payload.get("unlock_sensitive_fields"), False)
+    allow_sensitive_edits = (
+        _as_bool(payload.get("imported_sensitive_override"), False)
+        or (not existing_registered)
+        or _as_bool(payload.get("unlock_sensitive_fields"), False)
+    )
 
     submitted_node_id = _as_str(payload.get("node_id"), socket.gethostname().lower().replace(" ", "-"))
     existing_node_id = _as_str(existing.get("node_id"))
@@ -1674,9 +1990,9 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
     site_id = _as_str(payload.get("site_id"), _default_site_id(node_id))
     submitted_hub_url = _as_str(payload.get("hub_url"), DEFAULT_HUB_URL)
     hub_url = submitted_hub_url if allow_sensitive_edits or not _as_str(existing.get("hub_url")) else _as_str(existing.get("hub_url"))
-    submitted_agent_token = _as_str(payload.get("agent_token"))
+    submitted_agent_token = _as_non_placeholder_str(payload.get("agent_token"))
     agent_token = submitted_agent_token if allow_sensitive_edits or not existing_agent_token else existing_agent_token
-    enrollment_key = _as_str(payload.get("enrollment_key")) if allow_sensitive_edits else ""
+    enrollment_key = _as_non_placeholder_str(payload.get("enrollment_key")) if allow_sensitive_edits else ""
     poll_interval_seconds = max(1, min(120, _as_int(payload.get("poll_interval_seconds"), 5)))
 
     if not node_id:
@@ -1819,7 +2135,9 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
     existing.pop("instances", None)
     existing.pop("identity_locked", None)
     existing.pop("unlock_sensitive_fields", None)
+    existing.pop("imported_sensitive_override", None)
     existing.pop("locked_player_ids", None)
+    existing.pop("import_setup_url", None)
     return existing
 
 
@@ -1880,7 +2198,10 @@ def _enroll_node_with_hub(config: dict[str, Any], enrollment_key: str) -> str:
         raise ValueError("Hub URL is required for enrollment.")
 
     payload = _build_enrollment_request(config, enrollment_key)
-    response = requests.post(f"{hub_url}/api/config/enroll", json=payload, timeout=20)
+    try:
+        response = requests.post(f"{hub_url}/api/config/enroll", json=payload, timeout=20)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Hub enrollment failed: {exc}") from exc
 
     try:
         body = response.json()
@@ -1889,6 +2210,9 @@ def _enroll_node_with_hub(config: dict[str, Any], enrollment_key: str) -> str:
 
     if response.status_code >= 400:
         message = _as_str(body.get("error")) if isinstance(body, dict) else ""
+        if response.status_code == 403:
+            hint = " If this node was already provisioned from the remote dashboard, upload the downloaded config.yaml here instead of using the enrollment key."
+            raise RuntimeError((message or "Enrollment key was rejected by the hub.") + hint)
         raise RuntimeError(message or f"Hub enrollment failed with HTTP {response.status_code}.")
 
     if not isinstance(body, dict):
@@ -1963,7 +2287,7 @@ def _start_persistent_local_ui_server() -> None:
                 self._send_json(404, {"error": "Not found"})
 
             def do_POST(self) -> None:
-                if self.path != "/api/save":
+                if self.path not in {"/api/save", "/api/import", "/api/import-url"}:
                     self._send_json(404, {"error": "Not found"})
                     return
 
@@ -1972,6 +2296,21 @@ def _start_persistent_local_ui_server() -> None:
 
                 try:
                     payload = json.loads(raw_body.decode("utf-8"))
+                    if self.path == "/api/import":
+                        config, message = _import_local_ui_state(
+                            payload.get("documentText"),
+                            payload.get("currentState"),
+                        )
+                        self._send_json(200, {"ok": True, "config": config, "message": message})
+                        return
+                    if self.path == "/api/import-url":
+                        config, message = _pull_remote_setup_url(
+                            payload.get("setupUrl"),
+                            payload.get("currentState"),
+                        )
+                        self._send_json(200, {"ok": True, "config": config, "message": message})
+                        return
+
                     config = _save_local_ui_config(payload)
                 except Exception as exc:
                     self._send_json(400, {"error": str(exc)})
@@ -2032,7 +2371,7 @@ def _run_local_config_ui(existing: dict[str, Any] | None = None) -> dict[str, An
             self._send_json(404, {"error": "Not found"})
 
         def do_POST(self) -> None:
-            if self.path != "/api/save":
+            if self.path not in {"/api/save", "/api/import", "/api/import-url"}:
                 self._send_json(404, {"error": "Not found"})
                 return
 
@@ -2041,6 +2380,25 @@ def _run_local_config_ui(existing: dict[str, Any] | None = None) -> dict[str, An
 
             try:
                 payload = json.loads(raw_body.decode("utf-8"))
+                if self.path == "/api/import":
+                    config, message = _import_local_ui_state(
+                        payload.get("documentText"),
+                        payload.get("currentState", initial_config),
+                    )
+                    initial_config.clear()
+                    initial_config.update(config)
+                    self._send_json(200, {"ok": True, "config": initial_config, "message": message})
+                    return
+                if self.path == "/api/import-url":
+                    config, message = _pull_remote_setup_url(
+                        payload.get("setupUrl"),
+                        payload.get("currentState", initial_config),
+                    )
+                    initial_config.clear()
+                    initial_config.update(config)
+                    self._send_json(200, {"ok": True, "config": initial_config, "message": message})
+                    return
+
                 config = _materialize_local_ui_config(payload, existing)
             except Exception as exc:
                 self._send_json(400, {"error": str(exc)})

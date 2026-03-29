@@ -4,7 +4,7 @@ import { computeHealth, Observations } from '../services/stateEngine';
 import { evaluateAlert } from '../services/alerting';
 import { getInstanceControls } from '../store/instanceControls';
 import { updateMirroredNodeConfig, MirroredNodeConfig } from '../store/nodeConfigMirror';
-import { getPlayer, markPlayerSeen, resolveNodeIdForToken, syncRegistryFromNodeMirror } from '../store/registry';
+import { getPlayer, markPlayerSeen, resolveNodeAuthForToken, syncRegistryFromNodeMirror } from '../store/registry';
 import { getState, updateState } from '../store/state';
 
 function bearerToken(req: Request): string | null {
@@ -29,10 +29,11 @@ export function createHeartbeatRouter(io: SocketServer): Router {
 
   router.post('/', async (req: Request, res: Response) => {
     const token = bearerToken(req);
-    const nodeId = token ? await resolveNodeIdForToken(token) : null;
-    if (!nodeId) {
+    const nodeAuth = token ? await resolveNodeAuthForToken(token) : null;
+    if (!nodeAuth) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
+    const { nodeId, tenantId } = nodeAuth;
 
     const { instanceId, playerId, agentId, nodeId: reportedNodeId, observations, nodeConfigMirror } = req.body as {
       instanceId?: string;
@@ -55,14 +56,15 @@ export function createHeartbeatRouter(io: SocketServer): Router {
 
     let mirroredConfig: MirroredNodeConfig | null = null;
     if (nodeConfigMirror !== undefined) {
-      mirroredConfig = await updateMirroredNodeConfig(nodeId, nodeConfigMirror);
+      mirroredConfig = await updateMirroredNodeConfig(tenantId, nodeId, nodeConfigMirror);
     } else {
       mirroredConfig = asMirroredNodeConfig(nodeConfigMirror);
     }
 
-    let playerRecord = await getPlayer(resolvedPlayerId);
+    let playerRecord = await getPlayer(resolvedPlayerId, tenantId);
     if ((!playerRecord || playerRecord.nodeId !== nodeId) && mirroredConfig) {
       await syncRegistryFromNodeMirror({
+        tenantId,
         nodeId,
         nodeName: mirroredConfig.nodeName,
         siteId: mirroredConfig.siteId,
@@ -72,7 +74,7 @@ export function createHeartbeatRouter(io: SocketServer): Router {
           label: `${mirroredConfig.nodeName} - ${player.playerId}`,
         })),
       });
-      playerRecord = await getPlayer(resolvedPlayerId);
+      playerRecord = await getPlayer(resolvedPlayerId, tenantId);
     }
 
     if (!playerRecord) {
@@ -109,7 +111,7 @@ export function createHeartbeatRouter(io: SocketServer): Router {
 
     await markPlayerSeen(resolvedPlayerId, current.lastHeartbeatAt ?? new Date().toISOString());
 
-    io.emit('state_update', {
+    io.to(`tenant:${tenantId}`).emit('state_update', {
       instanceId: resolvedPlayerId,
       playerId: resolvedPlayerId,
       nodeId,

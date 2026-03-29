@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$RepoRoot = 'D:\monitoring',
-    [string]$BundleRoot = 'D:\monitoring\packages\agent\release\pulse-generic-v1.9',
+    [string]$BundleRoot = 'D:\monitoring\packages\agent\release\clarix-pulse-v1.9',
     [string]$ConfigBackupPath = 'D:\monitoring\temp\optimum-config-before-current.yaml'
 )
 

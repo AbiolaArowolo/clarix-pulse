@@ -147,6 +147,89 @@ function normalizeToken(value: string): string {
 
 export async function initDb(): Promise<void> {
   await withTransaction(async (client) => {
+    const seedEmailRecipients = parseSeedList(process.env.SMTP_TO ?? '', normalizeEmail);
+    const seedTelegramChatIds = parseSeedList(process.env.TELEGRAM_CHAT_ID ?? '', normalizeToken);
+    const timestamp = new Date().toISOString();
+    const legacyTenantId = 'legacy-hub';
+    const legacyEnrollmentKey = normalizeToken(process.env.PULSE_ENROLLMENT_KEY ?? '') || 'legacy-hub-enrollment-disabled';
+
+    await exec(`
+      CREATE TABLE IF NOT EXISTS tenants (
+        tenant_id            TEXT PRIMARY KEY,
+        name                 TEXT NOT NULL,
+        slug                 TEXT NOT NULL,
+        enrollment_key       TEXT NOT NULL,
+        default_alert_email  TEXT,
+        created_at           TIMESTAMPTZ NOT NULL,
+        updated_at           TIMESTAMPTZ NOT NULL
+      );
+    `, [], client);
+
+    await exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_slug
+      ON tenants(slug);
+    `, [], client);
+
+    await exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_enrollment_key
+      ON tenants(enrollment_key);
+    `, [], client);
+
+    await exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        user_id         TEXT PRIMARY KEY,
+        tenant_id       TEXT NOT NULL REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+        email           TEXT NOT NULL,
+        display_name    TEXT NOT NULL,
+        password_hash   TEXT NOT NULL,
+        created_at      TIMESTAMPTZ NOT NULL,
+        updated_at      TIMESTAMPTZ NOT NULL
+      );
+    `, [], client);
+
+    await exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
+      ON users(email);
+    `, [], client);
+
+    await exec(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        session_id           TEXT PRIMARY KEY,
+        user_id              TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+        session_token_hash   TEXT NOT NULL,
+        expires_at           TIMESTAMPTZ NOT NULL,
+        created_at           TIMESTAMPTZ NOT NULL,
+        updated_at           TIMESTAMPTZ NOT NULL
+      );
+    `, [], client);
+
+    await exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_token_hash
+      ON sessions(session_token_hash);
+    `, [], client);
+
+    await exec(`
+      CREATE INDEX IF NOT EXISTS idx_sessions_user_id
+      ON sessions(user_id);
+    `, [], client);
+
+    await exec(`
+      INSERT INTO tenants (
+        tenant_id,
+        name,
+        slug,
+        enrollment_key,
+        default_alert_email,
+        created_at,
+        updated_at
+      )
+      VALUES ($1, 'Legacy Hub', 'legacy-hub', $2, $3, $4, $4)
+      ON CONFLICT (tenant_id) DO UPDATE SET
+        enrollment_key = EXCLUDED.enrollment_key,
+        default_alert_email = COALESCE(tenants.default_alert_email, EXCLUDED.default_alert_email),
+        updated_at = EXCLUDED.updated_at;
+    `, [legacyTenantId, legacyEnrollmentKey, seedEmailRecipients[0] ?? null, timestamp], client);
+
     await exec(`
       CREATE TABLE IF NOT EXISTS sites (
         site_id            TEXT PRIMARY KEY,
@@ -154,6 +237,43 @@ export async function initDb(): Promise<void> {
         created_at         TIMESTAMPTZ NOT NULL,
         updated_at         TIMESTAMPTZ NOT NULL
       );
+    `, [], client);
+
+    await exec(`
+      ALTER TABLE sites
+      ADD COLUMN IF NOT EXISTS tenant_id TEXT;
+    `, [], client);
+
+    await exec(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'sites_tenant_id_fkey'
+        ) THEN
+          ALTER TABLE sites
+          ADD CONSTRAINT sites_tenant_id_fkey
+          FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE RESTRICT;
+        END IF;
+      END
+      $$;
+    `, [], client);
+
+    await exec(`
+      UPDATE sites
+      SET tenant_id = $1
+      WHERE tenant_id IS NULL OR tenant_id = '';
+    `, [legacyTenantId], client);
+
+    await exec(`
+      ALTER TABLE sites
+      ALTER COLUMN tenant_id SET NOT NULL;
+    `, [], client);
+
+    await exec(`
+      CREATE INDEX IF NOT EXISTS idx_sites_tenant_id
+      ON sites(tenant_id);
     `, [], client);
 
     await exec(`
@@ -257,6 +377,19 @@ export async function initDb(): Promise<void> {
     `, [], client);
 
     await exec(`
+      CREATE TABLE IF NOT EXISTS tenant_alert_settings (
+        tenant_id          TEXT PRIMARY KEY REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+        email_recipients   JSONB NOT NULL DEFAULT '[]'::jsonb,
+        telegram_chat_ids  JSONB NOT NULL DEFAULT '[]'::jsonb,
+        phone_numbers      JSONB NOT NULL DEFAULT '[]'::jsonb,
+        email_enabled      BOOLEAN NOT NULL DEFAULT TRUE,
+        telegram_enabled   BOOLEAN NOT NULL DEFAULT TRUE,
+        phone_enabled      BOOLEAN NOT NULL DEFAULT TRUE,
+        updated_at         TIMESTAMPTZ NOT NULL
+      );
+    `, [], client);
+
+    await exec(`
       CREATE TABLE IF NOT EXISTS node_config_mirror (
         node_id           TEXT PRIMARY KEY REFERENCES nodes(node_id) ON DELETE CASCADE,
         payload           JSONB NOT NULL,
@@ -273,10 +406,6 @@ export async function initDb(): Promise<void> {
       );
     `, [], client);
 
-    const seedEmailRecipients = parseSeedList(process.env.SMTP_TO ?? '', normalizeEmail);
-    const seedTelegramChatIds = parseSeedList(process.env.TELEGRAM_CHAT_ID ?? '', normalizeToken);
-    const timestamp = new Date().toISOString();
-
     await exec(`
       INSERT INTO alert_settings
         (id, email_recipients, telegram_chat_ids, phone_numbers, email_enabled, telegram_enabled, phone_enabled, updated_at)
@@ -284,5 +413,28 @@ export async function initDb(): Promise<void> {
         (1, $1::jsonb, $2::jsonb, '[]'::jsonb, TRUE, TRUE, TRUE, $3)
       ON CONFLICT (id) DO NOTHING;
     `, [JSON.stringify(seedEmailRecipients), JSON.stringify(seedTelegramChatIds), timestamp], client);
+
+    await exec(`
+      INSERT INTO tenant_alert_settings (
+        tenant_id,
+        email_recipients,
+        telegram_chat_ids,
+        phone_numbers,
+        email_enabled,
+        telegram_enabled,
+        phone_enabled,
+        updated_at
+      )
+      SELECT
+        $1,
+        COALESCE((SELECT email_recipients FROM alert_settings WHERE id = 1), $2::jsonb),
+        COALESCE((SELECT telegram_chat_ids FROM alert_settings WHERE id = 1), $3::jsonb),
+        COALESCE((SELECT phone_numbers FROM alert_settings WHERE id = 1), '[]'::jsonb),
+        COALESCE((SELECT email_enabled FROM alert_settings WHERE id = 1), TRUE),
+        COALESCE((SELECT telegram_enabled FROM alert_settings WHERE id = 1), TRUE),
+        COALESCE((SELECT phone_enabled FROM alert_settings WHERE id = 1), TRUE),
+        $4
+      ON CONFLICT (tenant_id) DO NOTHING;
+    `, [legacyTenantId, JSON.stringify(seedEmailRecipients), JSON.stringify(seedTelegramChatIds), timestamp], client);
   });
 }

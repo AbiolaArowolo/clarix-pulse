@@ -9,7 +9,7 @@ export interface InstanceState {
   playerId: string;
   label: string;
   siteId: string;
-  playoutType: 'insta' | 'admax';
+  playoutType: string;
   commissioned: boolean;
   monitoringMode: MonitoringMode;
   monitoringEnabled: boolean;

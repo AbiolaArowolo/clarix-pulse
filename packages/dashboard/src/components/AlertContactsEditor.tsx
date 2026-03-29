@@ -245,7 +245,7 @@ export function AlertContactsEditor() {
       });
       setUpdatedAt(payload.settings.updatedAt ?? new Date().toISOString());
       setCapabilities(payload.capabilities);
-      setNotice('Saved. These contacts now apply to alerts from every monitored node.');
+      setNotice('Saved. These contacts now apply to alerts from every node in this account.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save alert contacts.');
     } finally {

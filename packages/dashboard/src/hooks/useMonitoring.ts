@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { socket } from '../lib/socket';
+import { getHubSocket } from '../lib/socket';
 import {
   SiteState,
   InstanceState,
@@ -21,6 +21,7 @@ export function useMonitoring() {
   const lastApiSuccessRef = useRef(0);
 
   useEffect(() => {
+    const socket = getHubSocket();
     const markConnected = () => setConnectionStatus('connected');
     const markDisconnectedIfHubUnreachable = () => {
       if (Date.now() - lastApiSuccessRef.current > DISCONNECT_THRESHOLD_MS && !socket.connected) {

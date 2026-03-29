@@ -1,8 +1,17 @@
 import { Request, Response, Router } from 'express';
+import {
+  buildEnrollmentInput,
+  buildMirrorPayload,
+  normalizeRemoteSetupDraft,
+  parseRemoteSetupReport,
+  serializeAgentConfigYaml,
+} from '../config/remoteSetup';
+import { requireSession } from '../serverAuth';
+import { findTenantByEnrollmentKey } from '../store/auth';
 import { getAlertSettings, updateAlertSettings } from '../store/alertSettings';
 import { getInstanceControls, updateInstanceControls } from '../store/instanceControls';
-import { getMirroredNodeConfig, getMirroredPlayerConfig } from '../store/nodeConfigMirror';
-import { enrollNode, getNode, getPlayer, resolveNodeIdForToken } from '../store/registry';
+import { getMirroredNodeConfig, getMirroredPlayerConfig, updateMirroredNodeConfig } from '../store/nodeConfigMirror';
+import { enrollNode, getNode, getPlayer, resolveNodeAuthForToken } from '../store/registry';
 
 function bearerToken(req: Request): string | null {
   const auth = req.headers.authorization ?? '';
@@ -102,25 +111,119 @@ async function listTelegramTargets(): Promise<TelegramTarget[]> {
   }
 }
 
-function validateEnrollmentKey(value: unknown): boolean {
-  const expected = process.env.PULSE_ENROLLMENT_KEY?.trim();
-  if (!expected) {
-    return false;
+function requestBaseUrl(req: Request): string {
+  const forwardedProto = asString(req.headers['x-forwarded-proto']);
+  const forwardedHost = asString(req.headers['x-forwarded-host']);
+  if (forwardedProto && forwardedHost) {
+    return `${forwardedProto}://${forwardedHost}`;
   }
 
-  return asString(value) === expected;
+  const host = req.get('host');
+  if (!host) {
+    return '';
+  }
+
+  return `${req.protocol}://${host}`;
 }
 
 export function createConfigRouter(): Router {
   const router = Router();
 
+  router.post('/enroll', async (req: Request, res: Response) => {
+    const tenant = await findTenantByEnrollmentKey(asString(req.body?.enrollmentKey));
+    if (!tenant) {
+      return res.status(403).json({ error: 'Invalid enrollment key.' });
+    }
+
+    const nodeId = asString(req.body?.nodeId);
+    const nodeName = asString(req.body?.nodeName, nodeId);
+    const siteId = asString(req.body?.siteId, nodeId);
+    const playersRaw: unknown[] = Array.isArray(req.body?.players) ? req.body.players : [];
+
+    if (!nodeId) {
+      return res.status(400).json({ error: 'nodeId is required.' });
+    }
+    if (playersRaw.length === 0) {
+      return res.status(400).json({ error: 'At least one player is required for enrollment.' });
+    }
+
+    const players = playersRaw
+      .map((entry: unknown) => {
+        const record = entry && typeof entry === 'object' && !Array.isArray(entry)
+          ? entry as Record<string, unknown>
+          : {};
+        const playoutType = asString(record.playoutType ?? record.playout_type, 'insta') || 'insta';
+        return {
+          playerId: asString(record.playerId ?? record.player_id),
+          playoutType,
+          label: asString(record.label),
+        };
+      })
+      .filter((entry: { playerId: string }) => entry.playerId);
+
+    if (players.length === 0) {
+      return res.status(400).json({ error: 'Enrollment did not include any valid player IDs.' });
+    }
+
+    try {
+      const enrollment = await enrollNode({
+        tenantId: tenant.tenantId,
+        nodeId,
+        nodeName,
+        siteId,
+        players,
+      });
+
+      return res.json({
+        ok: true,
+        nodeId: enrollment.nodeId,
+        siteId: enrollment.siteId,
+        agentToken: enrollment.agentToken,
+        localUiUrl: 'http://127.0.0.1:3210/',
+        players: enrollment.players,
+        updatedAt: enrollment.updatedAt,
+      });
+    } catch (error) {
+      return res.status(400).json({
+        error: error instanceof Error ? error.message : 'Enrollment failed.',
+      });
+    }
+  });
+
+  router.get('/node', async (req: Request, res: Response) => {
+    const token = bearerToken(req);
+    const nodeAuth = token ? await resolveNodeAuthForToken(token) : null;
+    if (!nodeAuth) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const node = await getNode(nodeAuth.tenantId, nodeAuth.nodeId);
+    const mirror = await getMirroredNodeConfig(nodeAuth.nodeId, nodeAuth.tenantId);
+    if (!node) {
+      return res.status(404).json({ error: 'Unknown node.' });
+    }
+
+    return res.json({
+      nodeId: node.nodeId,
+      siteId: node.siteId,
+      nodeName: node.nodeName,
+      commissioned: node.commissioned,
+      localUiUrl: node.localUiUrl,
+      updatedAt: node.updatedAt,
+      mirror,
+    });
+  });
+
+  router.use(requireSession);
+
   router.get('/player/:playerId', async (req: Request, res: Response) => {
-    const mirrored = await getMirroredPlayerConfig(req.params.playerId);
+    const tenantId = req.auth!.tenantId;
+    const mirrored = await getMirroredPlayerConfig(req.params.playerId, tenantId);
     if (mirrored) {
       return res.json(mirrored);
     }
 
-    const player = await getPlayer(req.params.playerId);
+    const player = await getPlayer(req.params.playerId, tenantId);
     if (!player) {
       return res.status(404).json({ error: 'Unknown player config.' });
     }
@@ -146,7 +249,7 @@ export function createConfigRouter(): Router {
   });
 
   router.get('/instance/:playerId/controls', async (req: Request, res: Response) => {
-    const player = await getPlayer(req.params.playerId);
+    const player = await getPlayer(req.params.playerId, req.auth!.tenantId);
     if (!player) {
       return res.status(404).json({ error: 'Unknown player.' });
     }
@@ -158,7 +261,7 @@ export function createConfigRouter(): Router {
   });
 
   router.post('/instance/:playerId/controls', async (req: Request, res: Response) => {
-    const player = await getPlayer(req.params.playerId);
+    const player = await getPlayer(req.params.playerId, req.auth!.tenantId);
     if (!player) {
       return res.status(404).json({ error: 'Unknown player.' });
     }
@@ -182,9 +285,9 @@ export function createConfigRouter(): Router {
     });
   });
 
-  router.get('/alerts', async (_req: Request, res: Response) => {
+  router.get('/alerts', async (req: Request, res: Response) => {
     return res.json({
-      settings: await getAlertSettings(),
+      settings: await getAlertSettings(req.auth!.tenantId),
       capabilities: {
         emailDeliveryConfigured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER),
         telegramDeliveryConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN),
@@ -215,6 +318,7 @@ export function createConfigRouter(): Router {
     }
 
     const settings = await updateAlertSettings({
+      tenantId: req.auth!.tenantId,
       emailRecipients,
       telegramChatIds,
       phoneNumbers,
@@ -234,87 +338,92 @@ export function createConfigRouter(): Router {
     });
   });
 
-  router.post('/enroll', async (req: Request, res: Response) => {
-    if (!process.env.PULSE_ENROLLMENT_KEY?.trim()) {
-      return res.status(503).json({ error: 'Enrollment is not configured on this hub.' });
+  router.post('/remote/import-report', async (req: Request, res: Response) => {
+    try {
+      const reportText = asString(req.body?.reportText);
+      const draft = parseRemoteSetupReport(reportText, asString(req.body?.hubUrl, requestBaseUrl(req)));
+      return res.json({
+        ok: true,
+        draft,
+      });
+    } catch (error) {
+      return res.status(400).json({
+        error: error instanceof Error ? error.message : 'Failed to import discovery report.',
+      });
     }
-
-    if (!validateEnrollmentKey(req.body?.enrollmentKey)) {
-      return res.status(403).json({ error: 'Invalid enrollment key.' });
-    }
-
-    const nodeId = asString(req.body?.nodeId);
-    const nodeName = asString(req.body?.nodeName, nodeId);
-    const siteId = asString(req.body?.siteId, nodeId);
-    const playersRaw: unknown[] = Array.isArray(req.body?.players) ? req.body.players : [];
-
-    if (!nodeId) {
-      return res.status(400).json({ error: 'nodeId is required.' });
-    }
-    if (playersRaw.length === 0) {
-      return res.status(400).json({ error: 'At least one player is required for enrollment.' });
-    }
-
-    const players = playersRaw
-      .map((entry: unknown) => {
-        const record = entry && typeof entry === 'object' && !Array.isArray(entry)
-          ? entry as Record<string, unknown>
-          : {};
-        const playoutType: 'insta' | 'admax' = asString(record.playoutType ?? record.playout_type, 'insta') === 'admax'
-          ? 'admax'
-          : 'insta';
-        return {
-          playerId: asString(record.playerId ?? record.player_id),
-          playoutType,
-          label: asString(record.label),
-        };
-      })
-      .filter((entry: { playerId: string }) => entry.playerId);
-
-    if (players.length === 0) {
-      return res.status(400).json({ error: 'Enrollment did not include any valid player IDs.' });
-    }
-
-    const enrollment = await enrollNode({
-      nodeId,
-      nodeName,
-      siteId,
-      players,
-    });
-
-    return res.json({
-      ok: true,
-      nodeId: enrollment.nodeId,
-      siteId: enrollment.siteId,
-      agentToken: enrollment.agentToken,
-      localUiUrl: 'http://127.0.0.1:3210/',
-      players: enrollment.players,
-      updatedAt: enrollment.updatedAt,
-    });
   });
 
-  router.get('/node', async (req: Request, res: Response) => {
-    const token = bearerToken(req);
-    const nodeId = token ? await resolveNodeIdForToken(token) : null;
-    if (!nodeId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+  router.post('/remote/provision', async (req: Request, res: Response) => {
+    try {
+      const normalized = normalizeRemoteSetupDraft(
+        req.body?.draft ?? req.body,
+        requestBaseUrl(req),
+      );
+      const draft = {
+        ...normalized,
+        nodeId: normalized.nodeId.trim(),
+        nodeName: normalized.nodeName.trim(),
+        siteId: normalized.siteId.trim() || normalized.nodeId.trim(),
+        hubUrl: normalized.hubUrl.trim() || requestBaseUrl(req),
+        players: normalized.players
+          .map((player) => ({
+            ...player,
+            playerId: player.playerId.trim(),
+            label: player.label.trim(),
+          }))
+          .filter((player) => player.playerId),
+      };
 
-    const node = await getNode(nodeId);
-    const mirror = await getMirroredNodeConfig(nodeId);
-    if (!node) {
-      return res.status(404).json({ error: 'Unknown node.' });
-    }
+      if (!draft.nodeId) {
+        return res.status(400).json({ error: 'Node ID is required.' });
+      }
+      if (!draft.nodeName) {
+        return res.status(400).json({ error: 'Node name is required.' });
+      }
+      if (!draft.siteId) {
+        return res.status(400).json({ error: 'Site ID is required.' });
+      }
+      if (!draft.hubUrl) {
+        return res.status(400).json({ error: 'Hub URL is required.' });
+      }
+      if (draft.players.length === 0) {
+        return res.status(400).json({ error: 'Add at least one player before provisioning.' });
+      }
 
-    return res.json({
-      nodeId: node.nodeId,
-      siteId: node.siteId,
-      nodeName: node.nodeName,
-      commissioned: node.commissioned,
-      localUiUrl: node.localUiUrl,
-      updatedAt: node.updatedAt,
-      mirror,
-    });
+      const enrollment = await enrollNode({
+        tenantId: req.auth!.tenantId,
+        ...buildEnrollmentInput(draft),
+      });
+      await updateMirroredNodeConfig(req.auth!.tenantId, draft.nodeId, buildMirrorPayload(draft));
+
+      for (const player of draft.players) {
+        await updateInstanceControls(player.playerId, {
+          monitoringEnabled: player.monitoringEnabled,
+        });
+      }
+
+      const configYaml = serializeAgentConfigYaml(draft, enrollment.agentToken);
+
+      return res.json({
+        ok: true,
+        nodeId: enrollment.nodeId,
+        siteId: enrollment.siteId,
+        agentToken: enrollment.agentToken,
+        localUiUrl: 'http://127.0.0.1:3210/',
+        configYaml,
+        downloadFileName: `${draft.nodeId}-pulse-config.yaml`,
+        players: draft.players.map((player) => ({
+          playerId: player.playerId,
+          monitoringEnabled: player.monitoringEnabled,
+          playoutType: player.playoutType,
+        })),
+        updatedAt: enrollment.updatedAt,
+      });
+    } catch (error) {
+      return res.status(400).json({
+        error: error instanceof Error ? error.message : 'Failed to provision remote node setup.',
+      });
+    }
   });
 
   return router;

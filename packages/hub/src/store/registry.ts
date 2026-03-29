@@ -4,6 +4,7 @@ import { INSTANCES, SITES } from '../config/instances';
 import { exec, query, queryOne, withTransaction } from './db';
 
 export interface SiteRecord {
+  tenantId: string;
   siteId: string;
   siteName: string;
   createdAt: string;
@@ -11,6 +12,7 @@ export interface SiteRecord {
 }
 
 export interface NodeRecord {
+  tenantId: string;
   nodeId: string;
   siteId: string;
   nodeName: string;
@@ -22,32 +24,36 @@ export interface NodeRecord {
 }
 
 export interface PlayerRecord {
+  tenantId: string;
   playerId: string;
   nodeId: string;
   siteId: string;
   siteName: string;
   nodeName: string;
   label: string;
-  playoutType: 'insta' | 'admax';
+  playoutType: string;
   udpMonitoringCapable: boolean;
   commissioned: boolean;
   createdAt: string;
   updatedAt: string;
   lastSeenAt: string | null;
+  lastEnrolledAt: string | null;
 }
 
 export interface EnrollmentInput {
+  tenantId: string;
   nodeId: string;
   nodeName: string;
   siteId: string;
   players: Array<{
     playerId: string;
-    playoutType: 'insta' | 'admax';
+    playoutType: string;
     label?: string;
   }>;
 }
 
 export interface EnrollmentResult {
+  tenantId: string;
   nodeId: string;
   siteId: string;
   agentToken: string;
@@ -56,6 +62,7 @@ export interface EnrollmentResult {
 }
 
 interface SiteRow extends QueryResultRow {
+  tenant_id: string;
   site_id: string;
   site_name: string;
   created_at: Date | string;
@@ -63,6 +70,7 @@ interface SiteRow extends QueryResultRow {
 }
 
 interface NodeRow extends QueryResultRow {
+  tenant_id: string;
   node_id: string;
   site_id: string;
   node_name: string;
@@ -74,6 +82,7 @@ interface NodeRow extends QueryResultRow {
 }
 
 interface PlayerRow extends QueryResultRow {
+  tenant_id: string;
   player_id: string;
   node_id: string;
   site_id: string;
@@ -86,9 +95,11 @@ interface PlayerRow extends QueryResultRow {
   created_at: Date | string;
   updated_at: Date | string;
   last_seen_at: Date | string | null;
+  last_enrolled_at: Date | string | null;
 }
 
 const DEFAULT_LOCAL_UI_URL = 'http://127.0.0.1:3210/';
+const LEGACY_TENANT_ID = 'legacy-hub';
 const LEGACY_SITE_NAME_MAP = new Map(SITES.map((site) => [site.id, site.name]));
 
 function toIso(value: Date | string | null | undefined): string | null {
@@ -131,12 +142,14 @@ function normalizePlayerLabel(nodeName: string, playerId: string, label?: string
   return legacy ?? `${nodeName} - ${playerId}`;
 }
 
-function normalizePlayoutType(value: string | undefined): 'insta' | 'admax' {
-  return value === 'admax' ? 'admax' : 'insta';
+function normalizePlayoutType(value: string | undefined): string {
+  const trimmed = value?.trim();
+  return trimmed || 'insta';
 }
 
 function rowToSite(row: SiteRow): SiteRecord {
   return {
+    tenantId: row.tenant_id,
     siteId: row.site_id,
     siteName: row.site_name,
     createdAt: toIso(row.created_at) ?? new Date().toISOString(),
@@ -146,6 +159,7 @@ function rowToSite(row: SiteRow): SiteRecord {
 
 function rowToNode(row: NodeRow): NodeRecord {
   return {
+    tenantId: row.tenant_id,
     nodeId: row.node_id,
     siteId: row.site_id,
     nodeName: row.node_name,
@@ -159,6 +173,7 @@ function rowToNode(row: NodeRow): NodeRecord {
 
 function rowToPlayer(row: PlayerRow): PlayerRecord {
   return {
+    tenantId: row.tenant_id,
     playerId: row.player_id,
     nodeId: row.node_id,
     siteId: row.site_id,
@@ -171,6 +186,7 @@ function rowToPlayer(row: PlayerRow): PlayerRecord {
     createdAt: toIso(row.created_at) ?? new Date().toISOString(),
     updatedAt: toIso(row.updated_at) ?? new Date().toISOString(),
     lastSeenAt: toIso(row.last_seen_at),
+    lastEnrolledAt: toIso(row.last_enrolled_at),
   };
 }
 
@@ -190,6 +206,44 @@ function parseLegacyTokens(): Array<{ nodeId: string; token: string }> {
   return parsed;
 }
 
+async function getSiteTenant(siteId: string, client?: Parameters<typeof queryOne>[2]): Promise<string | null> {
+  const row = await queryOne<{ tenant_id: string }>(`
+    SELECT tenant_id
+    FROM sites
+    WHERE site_id = $1
+  `, [siteId], client);
+
+  return row?.tenant_id ?? null;
+}
+
+async function getNodeTenant(nodeId: string, client?: Parameters<typeof queryOne>[2]): Promise<string | null> {
+  const row = await queryOne<{ tenant_id: string }>(`
+    SELECT s.tenant_id
+    FROM nodes n
+    JOIN sites s ON s.site_id = n.site_id
+    WHERE n.node_id = $1
+  `, [nodeId], client);
+
+  return row?.tenant_id ?? null;
+}
+
+async function getPlayerTenant(playerId: string, client?: Parameters<typeof queryOne>[2]): Promise<string | null> {
+  const row = await queryOne<{ tenant_id: string }>(`
+    SELECT s.tenant_id
+    FROM players p
+    JOIN sites s ON s.site_id = p.site_id
+    WHERE p.player_id = $1
+  `, [playerId], client);
+
+  return row?.tenant_id ?? null;
+}
+
+function assertTenantOwnership(entity: string, identifier: string, existingTenantId: string | null, tenantId: string) {
+  if (existingTenantId && existingTenantId !== tenantId) {
+    throw new Error(`${entity} "${identifier}" already belongs to another account.`);
+  }
+}
+
 export async function initRegistry(): Promise<void> {
   const legacyTokens = parseLegacyTokens();
   const timestamp = new Date().toISOString();
@@ -197,12 +251,13 @@ export async function initRegistry(): Promise<void> {
   await withTransaction(async (client) => {
     for (const site of SITES) {
       await exec(`
-        INSERT INTO sites (site_id, site_name, created_at, updated_at)
-        VALUES ($1, $2, $3, $3)
+        INSERT INTO sites (tenant_id, site_id, site_name, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $4)
         ON CONFLICT (site_id) DO UPDATE SET
+          tenant_id = EXCLUDED.tenant_id,
           site_name = EXCLUDED.site_name,
           updated_at = EXCLUDED.updated_at;
-      `, [site.id, site.name, timestamp], client);
+      `, [LEGACY_TENANT_ID, site.id, site.name, timestamp], client);
     }
 
     for (const instance of INSTANCES) {
@@ -258,27 +313,40 @@ export async function initRegistry(): Promise<void> {
   });
 }
 
-export async function getSite(siteId: string): Promise<SiteRecord | null> {
+export async function getSite(tenantId: string, siteId: string): Promise<SiteRecord | null> {
   const row = await queryOne<SiteRow>(`
-    SELECT site_id, site_name, created_at, updated_at
+    SELECT tenant_id, site_id, site_name, created_at, updated_at
     FROM sites
-    WHERE site_id = $1
-  `, [siteId]);
+    WHERE tenant_id = $1 AND site_id = $2
+  `, [tenantId, siteId]);
+
   return row ? rowToSite(row) : null;
 }
 
-export async function getNode(nodeId: string): Promise<NodeRecord | null> {
+export async function getNode(tenantId: string, nodeId: string): Promise<NodeRecord | null> {
   const row = await queryOne<NodeRow>(`
-    SELECT node_id, site_id, node_name, local_ui_url, commissioned, created_at, updated_at, last_enrolled_at
-    FROM nodes
-    WHERE node_id = $1
-  `, [nodeId]);
+    SELECT
+      s.tenant_id,
+      n.node_id,
+      n.site_id,
+      n.node_name,
+      n.local_ui_url,
+      n.commissioned,
+      n.created_at,
+      n.updated_at,
+      n.last_enrolled_at
+    FROM nodes n
+    JOIN sites s ON s.site_id = n.site_id
+    WHERE s.tenant_id = $1 AND n.node_id = $2
+  `, [tenantId, nodeId]);
+
   return row ? rowToNode(row) : null;
 }
 
-export async function getPlayer(playerId: string): Promise<PlayerRecord | null> {
+export async function getPlayer(playerId: string, tenantId?: string): Promise<PlayerRecord | null> {
   const row = await queryOne<PlayerRow>(`
     SELECT
+      s.tenant_id,
       p.player_id,
       p.node_id,
       p.site_id,
@@ -290,18 +358,22 @@ export async function getPlayer(playerId: string): Promise<PlayerRecord | null> 
       p.commissioned,
       p.created_at,
       p.updated_at,
-      p.last_seen_at
+      p.last_seen_at,
+      n.last_enrolled_at
     FROM players p
     JOIN sites s ON s.site_id = p.site_id
     JOIN nodes n ON n.node_id = p.node_id
     WHERE p.player_id = $1
-  `, [playerId]);
+      AND ($2::text IS NULL OR s.tenant_id = $2)
+  `, [playerId, tenantId ?? null]);
+
   return row ? rowToPlayer(row) : null;
 }
 
-export async function listPlayers(): Promise<PlayerRecord[]> {
+export async function listPlayers(tenantId: string): Promise<PlayerRecord[]> {
   const rows = await query<PlayerRow>(`
     SELECT
+      s.tenant_id,
       p.player_id,
       p.node_id,
       p.site_id,
@@ -313,19 +385,22 @@ export async function listPlayers(): Promise<PlayerRecord[]> {
       p.commissioned,
       p.created_at,
       p.updated_at,
-      p.last_seen_at
+      p.last_seen_at,
+      n.last_enrolled_at
     FROM players p
     JOIN sites s ON s.site_id = p.site_id
     JOIN nodes n ON n.node_id = p.node_id
+    WHERE s.tenant_id = $1
     ORDER BY s.site_name, n.node_name, p.label, p.player_id
-  `);
+  `, [tenantId]);
 
   return rows.map(rowToPlayer);
 }
 
-export async function listPlayersForNode(nodeId: string): Promise<PlayerRecord[]> {
+export async function listPlayersForNode(nodeId: string, tenantId?: string): Promise<PlayerRecord[]> {
   const rows = await query<PlayerRow>(`
     SELECT
+      s.tenant_id,
       p.player_id,
       p.node_id,
       p.site_id,
@@ -337,27 +412,62 @@ export async function listPlayersForNode(nodeId: string): Promise<PlayerRecord[]
       p.commissioned,
       p.created_at,
       p.updated_at,
-      p.last_seen_at
+      p.last_seen_at,
+      n.last_enrolled_at
     FROM players p
     JOIN sites s ON s.site_id = p.site_id
     JOIN nodes n ON n.node_id = p.node_id
     WHERE p.node_id = $1
+      AND ($2::text IS NULL OR s.tenant_id = $2)
     ORDER BY p.label, p.player_id
-  `, [nodeId]);
+  `, [nodeId, tenantId ?? null]);
 
   return rows.map(rowToPlayer);
 }
 
-export async function resolveNodeIdForToken(token: string): Promise<string | null> {
-  const row = await queryOne<{ node_id: string }>(`
-    SELECT node_id
-    FROM agent_tokens
-    WHERE token = $1 AND active = TRUE
+export async function resolveNodeAuthForToken(token: string): Promise<{ nodeId: string; tenantId: string } | null> {
+  const row = await queryOne<{ node_id: string; tenant_id: string }>(`
+    SELECT a.node_id, s.tenant_id
+    FROM agent_tokens a
+    JOIN nodes n ON n.node_id = a.node_id
+    JOIN sites s ON s.site_id = n.site_id
+    WHERE a.token = $1 AND a.active = TRUE
   `, [token]);
-  return row?.node_id ?? null;
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    nodeId: row.node_id,
+    tenantId: row.tenant_id,
+  };
+}
+
+export async function upsertSite(input: { tenantId: string; siteId: string; siteName?: string }): Promise<SiteRecord> {
+  const timestamp = new Date().toISOString();
+  const siteName = normalizeSiteName(input.siteId, input.siteName);
+  assertTenantOwnership('Site ID', input.siteId, await getSiteTenant(input.siteId), input.tenantId);
+
+  const row = await queryOne<SiteRow>(`
+    INSERT INTO sites (tenant_id, site_id, site_name, created_at, updated_at)
+    VALUES ($1, $2, $3, $4, $4)
+    ON CONFLICT (site_id) DO UPDATE SET
+      tenant_id = EXCLUDED.tenant_id,
+      site_name = EXCLUDED.site_name,
+      updated_at = EXCLUDED.updated_at
+    RETURNING tenant_id, site_id, site_name, created_at, updated_at
+  `, [input.tenantId, input.siteId, siteName, timestamp]);
+
+  if (!row) {
+    throw new Error(`Failed to upsert site ${input.siteId}`);
+  }
+
+  return rowToSite(row);
 }
 
 export async function upsertNode(input: {
+  tenantId: string;
   nodeId: string;
   siteId: string;
   nodeName: string;
@@ -366,6 +476,12 @@ export async function upsertNode(input: {
   lastEnrolledAt?: string | null;
 }): Promise<NodeRecord> {
   const timestamp = new Date().toISOString();
+  const siteTenantId = await getSiteTenant(input.siteId);
+  if (siteTenantId !== input.tenantId) {
+    throw new Error(`Site "${input.siteId}" does not belong to this account.`);
+  }
+  assertTenantOwnership('Node ID', input.nodeId, await getNodeTenant(input.nodeId), input.tenantId);
+
   const row = await queryOne<NodeRow>(`
     INSERT INTO nodes (
       node_id, site_id, node_name, local_ui_url, commissioned, created_at, updated_at, last_enrolled_at
@@ -378,7 +494,16 @@ export async function upsertNode(input: {
       commissioned = EXCLUDED.commissioned,
       updated_at = EXCLUDED.updated_at,
       last_enrolled_at = COALESCE(EXCLUDED.last_enrolled_at, nodes.last_enrolled_at)
-    RETURNING node_id, site_id, node_name, local_ui_url, commissioned, created_at, updated_at, last_enrolled_at
+    RETURNING
+      (SELECT tenant_id FROM sites WHERE site_id = nodes.site_id) AS tenant_id,
+      node_id,
+      site_id,
+      node_name,
+      local_ui_url,
+      commissioned,
+      created_at,
+      updated_at,
+      last_enrolled_at
   `, [
     input.nodeId,
     input.siteId,
@@ -396,26 +521,8 @@ export async function upsertNode(input: {
   return rowToNode(row);
 }
 
-export async function upsertSite(input: { siteId: string; siteName?: string }): Promise<SiteRecord> {
-  const timestamp = new Date().toISOString();
-  const siteName = normalizeSiteName(input.siteId, input.siteName);
-  const row = await queryOne<SiteRow>(`
-    INSERT INTO sites (site_id, site_name, created_at, updated_at)
-    VALUES ($1, $2, $3, $3)
-    ON CONFLICT (site_id) DO UPDATE SET
-      site_name = EXCLUDED.site_name,
-      updated_at = EXCLUDED.updated_at
-    RETURNING site_id, site_name, created_at, updated_at
-  `, [input.siteId, siteName, timestamp]);
-
-  if (!row) {
-    throw new Error(`Failed to upsert site ${input.siteId}`);
-  }
-
-  return rowToSite(row);
-}
-
 export async function upsertPlayer(input: {
+  tenantId: string;
   playerId: string;
   nodeId: string;
   siteId: string;
@@ -427,6 +534,16 @@ export async function upsertPlayer(input: {
   lastSeenAt?: string | null;
 }): Promise<PlayerRecord> {
   const timestamp = new Date().toISOString();
+  const nodeTenantId = await getNodeTenant(input.nodeId);
+  if (nodeTenantId !== input.tenantId) {
+    throw new Error(`Node "${input.nodeId}" does not belong to this account.`);
+  }
+  const siteTenantId = await getSiteTenant(input.siteId);
+  if (siteTenantId !== input.tenantId) {
+    throw new Error(`Site "${input.siteId}" does not belong to this account.`);
+  }
+  assertTenantOwnership('Player ID', input.playerId, await getPlayerTenant(input.playerId), input.tenantId);
+
   const nodeName = normalizeNodeName(input.nodeId, input.nodeName);
   const label = normalizePlayerLabel(nodeName, input.playerId, input.label);
   const row = await queryOne<PlayerRow>(`
@@ -445,6 +562,7 @@ export async function upsertPlayer(input: {
       updated_at = EXCLUDED.updated_at,
       last_seen_at = COALESCE(EXCLUDED.last_seen_at, players.last_seen_at)
     RETURNING
+      (SELECT tenant_id FROM sites WHERE site_id = players.site_id) AS tenant_id,
       players.player_id,
       players.node_id,
       players.site_id,
@@ -456,7 +574,8 @@ export async function upsertPlayer(input: {
       players.commissioned,
       players.created_at,
       players.updated_at,
-      players.last_seen_at
+      players.last_seen_at,
+      (SELECT last_enrolled_at FROM nodes WHERE node_id = players.node_id) AS last_enrolled_at
   `, [
     input.playerId,
     input.nodeId,
@@ -485,6 +604,7 @@ export async function markPlayerSeen(playerId: string, observedAt = new Date().t
 }
 
 export async function syncRegistryFromNodeMirror(input: {
+  tenantId: string;
   nodeId: string;
   nodeName?: string;
   siteId?: string;
@@ -496,10 +616,12 @@ export async function syncRegistryFromNodeMirror(input: {
 }): Promise<{ node: NodeRecord; players: PlayerRecord[] }> {
   const siteId = input.siteId?.trim() || input.nodeId;
   const site = await upsertSite({
+    tenantId: input.tenantId,
     siteId,
     siteName: normalizeSiteName(siteId),
   });
   const node = await upsertNode({
+    tenantId: input.tenantId,
     nodeId: input.nodeId,
     siteId: site.siteId,
     nodeName: normalizeNodeName(input.nodeId, input.nodeName),
@@ -511,6 +633,7 @@ export async function syncRegistryFromNodeMirror(input: {
   for (const player of input.players ?? []) {
     if (!player.playerId) continue;
     players.push(await upsertPlayer({
+      tenantId: input.tenantId,
       playerId: player.playerId,
       nodeId: node.nodeId,
       siteId: node.siteId,
@@ -532,8 +655,13 @@ export async function enrollNode(input: EnrollmentInput): Promise<EnrollmentResu
   const updatedAt = new Date().toISOString();
   const token = crypto.randomBytes(24).toString('hex');
 
-  await upsertSite({ siteId, siteName: normalizeSiteName(siteId) });
+  await upsertSite({
+    tenantId: input.tenantId,
+    siteId,
+    siteName: normalizeSiteName(siteId),
+  });
   await upsertNode({
+    tenantId: input.tenantId,
     nodeId,
     siteId,
     nodeName,
@@ -559,6 +687,7 @@ export async function enrollNode(input: EnrollmentInput): Promise<EnrollmentResu
     const playerId = player.playerId.trim();
     if (!playerId) continue;
     await upsertPlayer({
+      tenantId: input.tenantId,
       playerId,
       nodeId,
       siteId,
@@ -571,10 +700,11 @@ export async function enrollNode(input: EnrollmentInput): Promise<EnrollmentResu
   }
 
   return {
+    tenantId: input.tenantId,
     nodeId,
     siteId,
     agentToken: token,
-    players: await listPlayersForNode(nodeId),
+    players: await listPlayersForNode(nodeId, input.tenantId),
     updatedAt,
   };
 }

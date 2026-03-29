@@ -96,7 +96,16 @@ function rowToSettings(row: Record<string, unknown>): AlertSettings {
   };
 }
 
-export async function getAlertSettings(): Promise<AlertSettings> {
+async function ensureTenantAlertSettings(tenantId: string): Promise<AlertSettings> {
+  const tenant = await queryOne<Record<string, unknown>>(`
+    SELECT default_alert_email
+    FROM tenants
+    WHERE tenant_id = $1
+  `, [tenantId]);
+
+  const defaultEmail = typeof tenant?.default_alert_email === 'string'
+    ? normalizeEmail(tenant.default_alert_email)
+    : '';
   const row = await queryOne<Record<string, unknown>>(`
     SELECT
       email_recipients,
@@ -106,9 +115,9 @@ export async function getAlertSettings(): Promise<AlertSettings> {
       telegram_enabled,
       phone_enabled,
       updated_at
-    FROM alert_settings
-    WHERE id = 1
-  `);
+    FROM tenant_alert_settings
+    WHERE tenant_id = $1
+  `, [tenantId]);
 
   if (row) {
     return rowToSettings(row);
@@ -116,15 +125,16 @@ export async function getAlertSettings(): Promise<AlertSettings> {
 
   const timestamp = new Date().toISOString();
   await exec(`
-    INSERT INTO alert_settings (
-      id, email_recipients, telegram_chat_ids, phone_numbers,
+    INSERT INTO tenant_alert_settings (
+      tenant_id, email_recipients, telegram_chat_ids, phone_numbers,
       email_enabled, telegram_enabled, phone_enabled, updated_at
     )
-    VALUES (1, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, TRUE, TRUE, TRUE, $1)
-  `, [timestamp]);
+    VALUES ($1, $2::jsonb, '[]'::jsonb, '[]'::jsonb, TRUE, TRUE, TRUE, $3)
+    ON CONFLICT (tenant_id) DO NOTHING
+  `, [tenantId, JSON.stringify(defaultEmail ? [defaultEmail] : []), timestamp]);
 
   return {
-    emailRecipients: [],
+    emailRecipients: defaultEmail ? [defaultEmail] : [],
     telegramChatIds: [],
     phoneNumbers: [],
     emailEnabled: true,
@@ -134,7 +144,12 @@ export async function getAlertSettings(): Promise<AlertSettings> {
   };
 }
 
+export async function getAlertSettings(tenantId: string): Promise<AlertSettings> {
+  return ensureTenantAlertSettings(tenantId);
+}
+
 export async function updateAlertSettings(input: {
+  tenantId: string;
   emailRecipients?: unknown;
   telegramChatIds?: unknown;
   phoneNumbers?: unknown;
@@ -142,6 +157,8 @@ export async function updateAlertSettings(input: {
   telegramEnabled?: unknown;
   phoneEnabled?: unknown;
 }): Promise<AlertSettings> {
+  await ensureTenantAlertSettings(input.tenantId);
+
   const next: AlertSettings = {
     emailRecipients: normalizeList(input.emailRecipients, normalizeEmail),
     telegramChatIds: normalizeList(input.telegramChatIds, normalizeTelegramRecipient),
@@ -153,8 +170,8 @@ export async function updateAlertSettings(input: {
   };
 
   await exec(`
-    INSERT INTO alert_settings (
-      id,
+    INSERT INTO tenant_alert_settings (
+      tenant_id,
       email_recipients,
       telegram_chat_ids,
       phone_numbers,
@@ -164,7 +181,7 @@ export async function updateAlertSettings(input: {
       updated_at
     )
     VALUES ($1, $2::jsonb, $3::jsonb, $4::jsonb, $5, $6, $7, $8)
-    ON CONFLICT (id) DO UPDATE SET
+    ON CONFLICT (tenant_id) DO UPDATE SET
       email_recipients = EXCLUDED.email_recipients,
       telegram_chat_ids = EXCLUDED.telegram_chat_ids,
       phone_numbers = EXCLUDED.phone_numbers,
@@ -173,7 +190,7 @@ export async function updateAlertSettings(input: {
       phone_enabled = EXCLUDED.phone_enabled,
       updated_at = EXCLUDED.updated_at
   `, [
-    1,
+    input.tenantId,
     JSON.stringify(next.emailRecipients),
     JSON.stringify(next.telegramChatIds),
     JSON.stringify(next.phoneNumbers),

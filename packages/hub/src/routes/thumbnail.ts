@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { Server as SocketServer } from 'socket.io';
-import { getPlayer, resolveNodeIdForToken } from '../store/registry';
+import { getSessionFromRequest } from '../serverAuth';
+import { getPlayer, resolveNodeAuthForToken } from '../store/registry';
 import { updateThumbnailMeta } from '../store/state';
 import { readThumbnailDataUrl, saveThumbnail } from '../store/thumbnails';
 
@@ -17,6 +18,16 @@ export function createThumbnailRouter(io: SocketServer): Router {
 
   router.get('/:playerId', async (req: Request, res: Response) => {
     const playerId = req.params.playerId;
+    const session = await getSessionFromRequest(req);
+    if (!session) {
+      return res.status(401).json({ error: 'Sign in required.' });
+    }
+
+    const player = await getPlayer(playerId, session.tenantId);
+    if (!player) {
+      return res.status(404).json({ error: 'Thumbnail not found.' });
+    }
+
     const dataUrl = await readThumbnailDataUrl(playerId);
     if (!dataUrl) {
       return res.status(404).json({ error: 'Thumbnail not found.' });
@@ -30,10 +41,11 @@ export function createThumbnailRouter(io: SocketServer): Router {
 
   router.post('/', async (req: Request, res: Response) => {
     const token = bearerToken(req);
-    const nodeId = token ? await resolveNodeIdForToken(token) : null;
-    if (!nodeId) {
+    const nodeAuth = token ? await resolveNodeAuthForToken(token) : null;
+    if (!nodeAuth) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
+    const { nodeId, tenantId } = nodeAuth;
 
     const { instanceId, playerId, agentId, nodeId: reportedNodeId, dataUrl, capturedAt } = req.body as {
       instanceId?: string;
@@ -54,7 +66,7 @@ export function createThumbnailRouter(io: SocketServer): Router {
       return res.status(403).json({ error: 'Node ID does not match token' });
     }
 
-    const player = await getPlayer(resolvedPlayerId);
+    const player = await getPlayer(resolvedPlayerId, tenantId);
     if (!player || player.nodeId !== nodeId) {
       return res.status(403).json({ error: 'Player not allowed' });
     }
@@ -72,7 +84,7 @@ export function createThumbnailRouter(io: SocketServer): Router {
     await saveThumbnail(resolvedPlayerId, dataUrl);
     await updateThumbnailMeta(resolvedPlayerId, capturedAt ?? new Date().toISOString());
 
-    io.emit('thumbnail_update', {
+    io.to(`tenant:${tenantId}`).emit('thumbnail_update', {
       instanceId: resolvedPlayerId,
       playerId: resolvedPlayerId,
       nodeId,

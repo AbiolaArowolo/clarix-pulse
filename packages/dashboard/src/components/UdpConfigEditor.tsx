@@ -10,7 +10,7 @@ interface UdpInputConfig {
 interface PlayerConfigPayload {
   playerId: string;
   nodeId: string;
-  playoutType: 'insta' | 'admax';
+  playoutType: string;
   paths: Record<string, unknown>;
   processSelectors: Record<string, unknown>;
   logSelectors: Record<string, unknown>;

@@ -74,11 +74,11 @@ async function listTelegramTargets(token: string): Promise<TelegramResolvedTarge
   }
 }
 
-async function sendTelegram(message: string): Promise<void> {
+async function sendTenantTelegram(tenantId: string, message: string): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return;
 
-  const settings = await getAlertSettings();
+  const settings = await getAlertSettings(tenantId);
   if (!settings.telegramEnabled) return;
   if (settings.telegramChatIds.length === 0) return;
 
@@ -261,10 +261,10 @@ function buildAlertMessage(
   };
 }
 
-async function sendEmail(subject: string, body: string): Promise<void> {
+async function sendTenantEmail(tenantId: string, subject: string, body: string): Promise<void> {
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER) return;
 
-  const settings = await getAlertSettings();
+  const settings = await getAlertSettings(tenantId);
   if (!settings.emailEnabled) return;
   if (settings.emailRecipients.length === 0) return;
 
@@ -294,6 +294,8 @@ function isRecovery(prev: BroadcastHealth | undefined, current: BroadcastHealth)
 
 export async function evaluateAlert(ctx: AlertContext): Promise<void> {
   const { instanceId, broadcastHealth, runtimeHealth, previousBroadcast, observations } = ctx;
+  const player = await getPlayer(instanceId);
+  const tenantId = player?.tenantId;
 
   if (isAlertingSuppressed(instanceId)) {
     await logEvent(
@@ -314,8 +316,10 @@ export async function evaluateAlert(ctx: AlertContext): Promise<void> {
       runtimeHealth,
     });
     console.log(`[alert] RECOVERY ${instanceId}`);
-    await sendTelegram(alert.body);
-    await sendEmail(alert.subject, alert.body);
+    if (tenantId) {
+      await sendTenantTelegram(tenantId, alert.body);
+      await sendTenantEmail(tenantId, alert.subject, alert.body);
+    }
     await logEvent(
       instanceId,
       'alert_recovered',
@@ -333,8 +337,10 @@ export async function evaluateAlert(ctx: AlertContext): Promise<void> {
     const label = broadcastHealth === 'off_air_confirmed' ? 'OFF AIR' : 'OFF AIR LIKELY';
     const alert = buildAlertMessage(label, ctx);
     console.log(`[alert] CRITICAL ${instanceId} - ${broadcastHealth}`);
-    await sendTelegram(alert.body);
-    await sendEmail(alert.subject, alert.body);
+    if (tenantId) {
+      await sendTenantTelegram(tenantId, alert.body);
+      await sendTenantEmail(tenantId, alert.subject, alert.body);
+    }
     await logEvent(
       instanceId,
       'state_change',
@@ -372,6 +378,8 @@ export async function sendNetworkIssueAlert(instanceId: string, instanceLabel: s
   });
 
   console.log(`[alert] NETWORK ISSUE ${instanceId}`);
-  await sendTelegram(alert.body);
-  await sendEmail(alert.subject, `${alert.body}\n- Heartbeat missing, so the latest playback state is unknown.`);
+  if (player?.tenantId) {
+    await sendTenantTelegram(player.tenantId, alert.body);
+    await sendTenantEmail(player.tenantId, alert.subject, `${alert.body}\n- Heartbeat missing, so the latest playback state is unknown.`);
+  }
 }

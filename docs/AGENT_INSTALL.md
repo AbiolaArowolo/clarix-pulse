@@ -1,229 +1,267 @@
-# Pulse - Agent Installation Guide
+# Clarix Pulse - Agent Installation Guide
 
-**Document Date**: `2026-03-28 07:22:24 -04:00`  
+**Document Date**: `2026-03-29 -04:00`  
 **Current Bundle Baseline**: `v1.9`
 
 ## Purpose
 
-This guide covers Windows node installation after the generic-installer refactor.
+This is the current Windows node install guide for Clarix Pulse.
 
-Pulse bundles now support two onboarding paths:
+The supported product path is now:
 
-1. generic installer with hub enrollment
-2. prepared convenience bundle with prefilled config
+1. create or sign into a Clarix Pulse account
+2. open that tenant's dashboard
+3. run discovery on the Windows node
+4. provision the node from the dashboard
+5. import the provisioned `config.yaml` into the local UI
+6. install the Windows service
 
-The generic installer is now the default product path.
+Prepared site-specific bundles are no longer part of the supported product path.
 
 ---
 
-## Bundle Contents
+## Supported Artifact
 
-Every release bundle contains:
+Use:
+
+- [clarix-pulse-v1.9.zip](/D:/monitoring/packages/agent/release/clarix-pulse-v1.9.zip)
+
+Release folder:
+
+- [packages/agent/release](/D:/monitoring/packages/agent/release)
+
+Every shipped bundle contains:
 
 - `clarix-agent.exe`
 - `install.bat`
 - `configure.bat`
 - `uninstall.bat`
+- `discover-node.ps1`
+- `install-from-url.ps1`
 - `config.yaml`
 - `config.example.yaml`
 - `nssm.exe`
 - `ffmpeg.exe`
 - `ffprobe.exe`
 
-Release folder:
-
-- [packages/agent/release](/D:/monitoring/packages/agent/release)
-
-Current bundles:
-
-- `pulse-generic-v1.9`
-- `nj-optimum-v1.9`
-- `ny-main-v1.9`
-- `ny-backup-v1.9`
-- `digicel-v1.9`
-
 ---
 
-## What Changed In `v1.9`
+## What Each File Does
 
-- install now gathers or validates config before the final admin prompt
-- local UI still stays fixed at `http://127.0.0.1:3210/`
-- local UI now exposes process selectors and log selectors
-- node can enroll itself through the hub if you provide an enrollment key
-- prepared bundles remain available, but generic rollout is now first-class
-- playout type is now profile-driven instead of being limited to just `Insta` and `Admax`
-- new profile choices now include `Cinegy Air`, `PlayBox Neo`, `Grass Valley iTX`, `Imagine Versio`, `BroadStream OASYS`, `Pebble Marina`, `Evertz StreamPro / Overture`, and `Generic Windows Playout`
-- non-native vendor profiles now save generic log/process settings safely instead of falling back to `Insta` assumptions
-- sensitive identity fields are now locked by default after registration in the local UI
-- the local save path now preserves those locked IDs and registration fields unless the operator explicitly unlocks them
+- `clarix-agent.exe`: the Windows monitoring runtime
+- `install.bat`: final install/update flow for the node
+- `configure.bat`: reopens the local setup UI without reinstalling
+- `discover-node.ps1`: PowerShell scanner that inspects the PC and writes a discovery report
+- `pulse-node-discovery-report.json`: discovery output used for auto-fill
+- `config.yaml`: the final node configuration file
+- `install-from-url.ps1`: downloads the Clarix Pulse bundle zip from a direct HTTPS link
 
-Unchanged by design:
+Important:
 
-- play / pause / stop runtime behavior
-- current alert trigger behavior
+- `discover-node.ps1` is a PowerShell script, not a clickable app like `.exe`
+- it usually runs with:
 
----
-
-## Supported Inputs
-
-### Option A - Agent token already known
-
-Fill:
-
-- `hub_url`
-- `agent_token`
-
-### Option B - Generic enrollment
-
-Fill:
-
-- `hub_url`
-- `enrollment_key`
-
-If `agent_token` is blank and `enrollment_key` is present, the local UI enrolls the node and saves the returned token into `config.yaml`.
-
----
-
-## Install Flow
-
-### 1. Copy the bundle to the node
-
-Folder or zip is fine.
-
-Suggested temp location:
-
-```text
-C:\pulse-node-bundle\
+```powershell
+powershell -ExecutionPolicy Bypass -File .\discover-node.ps1
 ```
 
-### 2. Double-click `install.bat`
+---
 
-You no longer need to start by manually elevating the whole setup.
+## Current Onboarding Model
 
-Current behavior:
+Clarix Pulse is now account-based and tenant-isolated:
 
-1. Pulse opens or prepares local setup
-2. node-specific config is collected or validated
-3. optional hub enrollment happens if needed
-4. Windows asks for one Administrator approval for the final service install
-5. Pulse installs or updates the `ClarixPulseAgent` service
-6. Pulse starts the service
-7. `install.bat` opens the persistent local UI after success
+- the public site opens to a landing page
+- each customer registers with email and password
+- the registration email becomes the default off-air alert email for that tenant
+- new dashboards start empty by default
+- nodes only appear after local setup mirrors into that tenant's hub
 
-### 3. Use the persistent local UI for future edits
+That means node install should start from the signed-in dashboard, not from a shared global hub.
 
-Persistent local UI:
+---
+
+## Recommended Install Flow
+
+### 1. Create or sign into the tenant dashboard
+
+Open:
+
+- [pulse.clarixtech.com](https://pulse.clarixtech.com/)
+
+Register the company or sign in.
+
+Use the dashboard's onboarding page first if this is the first node for that customer.
+
+### 2. Get the bundle onto the Windows node
+
+Copy the zip manually, or pull it from a direct HTTPS link:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-from-url.ps1 -BundleUrl "https://pulse.clarixtech.com/downloads/clarix-pulse/latest/clarix-pulse-v1.9.zip"
+```
+
+Suggested working folder:
+
+```text
+C:\clarix-pulse\
+```
+
+### 3. Start the playout application if possible
+
+Discovery is more accurate when the player is already running.
+
+### 4. Run discovery on the Windows node
+
+Typical command:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\discover-node.ps1
+```
+
+If you want to bias generic detection:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\discover-node.ps1 -PlayoutHint generic_windows
+```
+
+That creates:
+
+```text
+.\pulse-node-discovery-report.json
+```
+
+The discovery report can include:
+
+- inferred node ID and node name
+- inferred site ID
+- detected player candidates
+- likely log locations
+- nearby log folders relative to a running player executable
+- existing `hub_url`, `agent_token`, or `enrollment_key` if Clarix Pulse was already installed on that PC
+- timezone hints for operator context
+
+### 5. Upload the discovery report in the dashboard
+
+In the signed-in dashboard:
+
+1. open the monitoring dashboard
+2. find `Remote Setup`
+3. upload the discovery report
+4. review auto-filled node identity, player list, and paths
+5. click `Provision node and download config`
+
+Provisioning now:
+
+- creates inventory in the current tenant
+- mirrors the node config to the hub
+- creates a fresh `agent_token`
+- downloads a ready `config.yaml`
+
+### 6. Import the provisioned config into the local UI
+
+Open the local UI on the Windows node:
 
 ```text
 http://127.0.0.1:3210/
 ```
 
-Use that UI, or `configure.bat`, for future local changes.
+Then either:
 
----
+- upload the downloaded `config.yaml`
+- or paste a direct hosted `config.yaml` URL and pull it
 
-## Current Config Ownership
+The local UI can also import the discovery report directly, but the provisioned `config.yaml` is the final source of truth for node identity and token.
 
-Machine-local config belongs on the node. That includes:
+### 7. Save local settings
 
-- paths
-- player list
-- playout type
-- playout vendor profile
-- process selectors
-- log selectors
-- UDP inputs
+In the local UI:
 
-The hub mirrors this config for visibility, but it is not the primary live editor for these fields.
+1. confirm `node_id`, `site_id`, `hub_url`, and players
+2. confirm monitoring-enabled toggles per player
+3. click `Save Local Settings`
 
----
+### 8. Install the service
 
-## What You Can Rename
+Run:
 
-If you only want the label in the UI to look different, change `node_name`.
-
-Pulse now helps protect operators here:
-
-- registered nodes open with sensitive identity fields locked by default
-- operators must explicitly unlock them before changing node identity or registration fields
-- the save handler still preserves those values even if someone tries to bypass the browser field lock
-
-Safe to change:
-
-- `node_name`: display label only
-- local paths
-- playout vendor profile
-- process selectors
-- log selectors
-- UDP inputs
-- `poll_interval_seconds`
-
-Change with intent:
-
-- `site_id`: moves the node under a different site grouping in the dashboard
-- `playout_type`: valid when you are intentionally switching the player to a different vendor profile and updating its paths/selectors to match
-
-Keep stable unless you mean to create a new identity:
-
-- `node_id`: this is the node identity used by the hub
-- `player_id`: this is the player identity used for state, alerts, and history
-
-Do not casually edit:
-
-- `hub_url`: only change if the node should report to a different hub
-- `agent_token`: only change if you are rotating or replacing the node registration
-- `enrollment_key`: bootstrap-only field used when `agent_token` is blank
-
-Practical rule:
-
-- rename `node_name` if you want a nicer label
-- leave `node_id` and `player_id` alone unless you intentionally want Pulse to treat them as different objects
-
----
-
-## High-Value Config Fields
-
-```yaml
-node_id: site-a-node-1
-node_name: Site A Node 1
-site_id: site-a
-hub_url: https://pulse.example.com
-agent_token: ""
-# enrollment_key: REPLACE_WITH_HUB_ENROLLMENT_KEY
-poll_interval_seconds: 5
-
-players:
-  - player_id: site-a-insta-1
-    playout_type: insta
-    paths:
-      shared_log_dir: C:\Program Files\Indytek\Insta log
-      instance_root: C:\Program Files\Indytek\Insta Playout\Settings
-    process_selectors:
-      window_title_contains:
-        - Insta 1
-    log_selectors:
-      include_contains:
-        - Insta 1
-      paused_regex: (?i)paused
-    udp_inputs: []
-
-  - player_id: site-a-cinegy-1
-    playout_type: cinegy_air
-    paths:
-      log_path: C:\Cinegy\Logs
-    process_selectors:
-      process_names:
-        - CinegyAirEngine.exe
-    log_selectors:
-      paused_regex: (?i)pause
-      exited_regex: (?i)stop|shutdown|exit
-    udp_inputs: []
+```bat
+install.bat
 ```
 
-Installed runtime config path:
+Current installer shape:
 
-```text
-%ProgramData%\ClarixPulse\Agent\config.yaml
+1. local setup is gathered or validated first
+2. Windows elevation is only requested for the final service-install phase
+3. the `ClarixPulseAgent` service is installed
+4. the service starts
+
+---
+
+## Enrollment Key Fallback
+
+The preferred flow is:
+
+- discovery report
+- dashboard provisioning
+- import provisioned `config.yaml`
+
+If you still need local self-enrollment, each signed-in tenant has its own enrollment key on the account/onboarding screens.
+
+The local UI can still enroll if:
+
+- `agent_token` is blank
+- `enrollment_key` is present
+- the hub accepts that tenant's enrollment key
+
+---
+
+## Fresh Reinstall / Uninstall
+
+To remove an existing Clarix Pulse install from a node:
+
+```bat
+echo y| "C:\ProgramData\ClarixPulse\Agent\clarix-agent.exe" --uninstall-service
+```
+
+Alternate path:
+
+```bat
+C:\ProgramData\ClarixPulse\Agent\uninstall.bat
+```
+
+That removes:
+
+- the `ClarixPulseAgent` Windows service
+- `C:\ProgramData\ClarixPulse`
+
+Verification:
+
+```bat
+sc query ClarixPulseAgent
+```
+
+Expected result:
+
+- Windows error `1060`
+
+Also check:
+
+```powershell
+Test-Path 'C:\ProgramData\ClarixPulse'
+```
+
+Expected result:
+
+- `False`
+
+Manual fallback in an elevated shell:
+
+```bat
+sc stop ClarixPulseAgent
+sc delete ClarixPulseAgent
+taskkill /F /IM clarix-agent.exe
+rmdir /s /q C:\ProgramData\ClarixPulse
 ```
 
 ---
@@ -249,6 +287,13 @@ Pulse Agent starting - node_id=..., node_name=..., hub=...
 Monitoring N player(s): [...]
 ```
 
+In the dashboard, confirm:
+
+1. the node appears only inside the correct customer account
+2. the player list matches the local config
+3. alert contacts belong to that tenant
+4. monitoring toggles work without any shared write key
+
 ---
 
 ## Troubleshooting
@@ -256,16 +301,16 @@ Monitoring N player(s): [...]
 | Symptom | Check |
 |---|---|
 | Service does not start | `%ProgramData%\ClarixPulse\Agent\clarix-agent.log` |
-| Enrollment fails | verify `hub_url` and `enrollment_key` |
-| `401 Unauthorized` | wrong or stale `agent_token` |
-| `403 Player not allowed for this node` | node and player inventory is wrong on the hub |
-| Local UI does not open from `configure.bat` | open `http://127.0.0.1:3210/` directly |
-| UDP probe not working | verify stream URL and bundled `ffmpeg.exe` / `ffprobe.exe` |
-| Non-native playout profile shows little runtime detail | add vendor-specific `process_selectors` and `log_selectors`, plus `paths.log_path` if the system writes local text logs |
-| Dashboard does not reflect new local settings yet | wait for the next heartbeat / mirror refresh |
+| Enrollment fails | use the provisioned `config.yaml` path instead of relying on the key |
+| `401 Unauthorized` from node traffic | stale or wrong `agent_token` |
+| Dashboard still shows no nodes | confirm the node saved config locally and the service has heartbeat connectivity |
+| Discovery report looks incomplete | rerun discovery while the playout app is actively running |
+| Local UI cannot pull a URL | use a direct file URL or presigned URL, not a login page |
 
 ---
 
-## Operational Note
+## Related Docs
 
-Prepared per-node bundles still exist in `v1.9`, but they are now optional convenience artifacts. The architecture target is that any machine can take the generic bundle, be configured locally, enroll itself, and start reporting without a special installer build for that one node.
+- onboarding: [ONBOARDING.md](/D:/monitoring/docs/ONBOARDING.md)
+- deployment: [DEPLOYMENT.md](/D:/monitoring/docs/DEPLOYMENT.md)
+- VPS downloads: [VPS_ARTIFACT_LAYOUT.md](/D:/monitoring/docs/VPS_ARTIFACT_LAYOUT.md)
