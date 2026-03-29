@@ -40,10 +40,16 @@ Important:
 
 ## Server-Side Artifact Source
 
-By default the hub serves the bundle from:
+For local development, the hub serves the bundle by default from:
 
 ```text
 packages/agent/release/clarix-pulse-v1.9.zip
+```
+
+For the artifact-deployed VPS flow, the deploy helper now syncs the installer bundle to:
+
+```text
+/var/lib/clarix-pulse/downloads/clarix-pulse-v1.9.zip
 ```
 
 Optional override:
@@ -88,6 +94,7 @@ The current model gives:
 - direct signed-in downloads for human operators
 - secure expiring links for nodes and scripts that need a plain HTTPS GET
 - no dependence on external cloud login pages
+- resilience across clean redeploys because the VPS bundle no longer has to live inside the replaceable app directory
 
 ---
 

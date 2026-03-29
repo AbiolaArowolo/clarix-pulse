@@ -69,6 +69,7 @@ What to confirm:
 - `/api/health` reports `ok: true`
 - database check is healthy
 - thumbnail store check is healthy
+- installer bundle is present at the configured VPS download path if download issues were reported
 - alerting does not show repeated consecutive failures
 - memory usage is not climbing abnormally
 - disk still has room for logs, thumbnails, and backups

@@ -83,6 +83,7 @@ Notes:
 - `PULSE_DOWNLOAD_SIGNING_SECRET` is required if you want secure installer/config links for node-side pulls
 - `PULSE_DOWNLOAD_LINK_TTL_MINUTES` controls how long signed node-side download links remain valid
 - `PULSE_DOWNLOAD_BUNDLE_PATH` is optional if you want the bundle served from a custom path
+- for artifact-deployed VPS installs, the deploy helper now syncs the bundle to a stable external path under `/var/lib/clarix-pulse/downloads/`
 - `SMTP_*` must be configured if you want access keys and self-service password reset links emailed
 - `SMTP_FROM_NAME` is optional branding for outbound account emails
 - if SMTP is not configured, the UI falls back to showing the generated access key once during registration or renewal, and platform admins can copy one-time password reset links from `/app/admin`
@@ -94,6 +95,7 @@ Notes:
 ```text
 /var/www/clarix-pulse                  # live deployed application files
 /var/lib/clarix-pulse/thumbnails       # thumbnail cache
+/var/lib/clarix-pulse/downloads        # stable installer bundle storage
 /etc/clarix-pulse/.env.local           # env file or symlink target
 ```
 
@@ -130,13 +132,21 @@ python scripts\vps_clean_redeploy.py --archive D:\monitoring\deploy\clarix-pulse
 That process now:
 
 1. uploads the release archive and deployment metadata
-2. verifies the remote archive SHA-256 before extraction
-3. restores remote `.env` and `.env.local` into a staging directory
-4. runs `npm ci` in staging
-5. builds hub and dashboard in staging
-6. cuts over only after the staged build is ready
-7. verifies `/api/version` reports the expected deployed metadata
-8. rolls back to the previous release if cutover verification fails
+2. uploads the installer bundle to a stable VPS path outside the live app directory when a local bundle is available
+3. verifies the remote archive SHA-256 before extraction
+4. verifies the uploaded installer bundle SHA-256 before cutover
+5. restores remote `.env` and `.env.local` into a staging directory
+6. runs `npm ci` in staging
+7. builds hub and dashboard in staging
+8. cuts over only after the staged build is ready
+9. verifies `/api/version` reports the expected deployed metadata
+10. rolls back to the previous release if cutover verification fails
+
+Default stable bundle path used by the deploy helper:
+
+```text
+/var/lib/clarix-pulse/downloads/clarix-pulse-v1.9.zip
+```
 
 ### 2. Start or restart the hub
 

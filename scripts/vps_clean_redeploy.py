@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -18,6 +19,10 @@ ENV_SYNC_KEYS = (
     "PULSE_DOWNLOAD_SIGNING_SECRET",
     "PULSE_DOWNLOAD_LINK_TTL_MINUTES",
 )
+
+WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_BUNDLE_NAME = "clarix-pulse-v1.9.zip"
+DEFAULT_REMOTE_BUNDLE_DIR = "/var/lib/clarix-pulse/downloads"
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -44,13 +49,55 @@ def sha256_file(path: Path) -> str:
 
 
 def build_env_override_lines(env: dict[str, str]) -> str:
+    return build_env_override_lines_with_extra(env, {})
+
+
+def build_env_override_lines_with_extra(env: dict[str, str], extra_overrides: dict[str, str]) -> str:
     lines: list[str] = []
+    values: dict[str, str] = {}
     for key in ENV_SYNC_KEYS:
         value = env.get(key)
         if value is None or value == "":
             continue
+        values[key] = value
+    for key, value in extra_overrides.items():
+        if value is None or value == "":
+            continue
+        values[key] = value
+    for key in ENV_SYNC_KEYS:
+        value = values.get(key)
+        if value is None or value == "":
+            continue
         lines.append(f"{key}={value}")
     return "\n".join(lines)
+
+
+def resolve_bundle_deploy_plan(
+    env: dict[str, str],
+    workspace_root: Path = WORKSPACE_ROOT,
+) -> dict[str, str] | None:
+    bundle_name = (env.get("PULSE_DOWNLOAD_BUNDLE_NAME") or DEFAULT_BUNDLE_NAME).strip() or DEFAULT_BUNDLE_NAME
+    configured_local_path = (env.get("PULSE_DOWNLOAD_BUNDLE_PATH") or "").strip()
+    local_candidates: list[Path] = []
+    if configured_local_path:
+        configured_path = Path(configured_local_path)
+        if configured_path.exists():
+            local_candidates.append(configured_path)
+    local_candidates.append(workspace_root / "packages" / "agent" / "release" / bundle_name)
+
+    local_path = next((candidate for candidate in local_candidates if candidate.exists()), None)
+    if not local_path:
+        return None
+
+    remote_path = (env.get("VPS_DOWNLOAD_BUNDLE_PATH") or "").strip() or f"{DEFAULT_REMOTE_BUNDLE_DIR}/{bundle_name}"
+    if not remote_path.startswith("/"):
+        raise ValueError("VPS_DOWNLOAD_BUNDLE_PATH must be an absolute Linux path.")
+
+    return {
+        "local_path": str(local_path),
+        "remote_path": remote_path,
+        "file_name": bundle_name,
+    }
 
 
 def run(ssh: paramiko.SSHClient, command: str, timeout: int = 900) -> str:
@@ -132,6 +179,8 @@ def main() -> int:
         raise FileNotFoundError(f"Archive not found: {archive_path}")
 
     archive_sha256 = sha256_file(archive_path)
+    bundle_plan = resolve_bundle_deploy_plan(env)
+    bundle_sha256 = sha256_file(Path(bundle_plan["local_path"])) if bundle_plan else None
     source_dirty = detect_dirty_tree()
     timestamp = time.strftime("%Y%m%d%H%M%S")
     backup_root = f"/root/pulse-deploy-backup-{timestamp}"
@@ -141,7 +190,11 @@ def main() -> int:
     staging_app = f"{args.remote_app}.staging-{timestamp}"
     previous_app = f"{args.remote_app}.previous-{timestamp}"
     failed_app = f"{args.remote_app}.failed-{timestamp}"
-    env_override = build_env_override_lines(env)
+    bundle_env_overrides = {
+        "PULSE_DOWNLOAD_BUNDLE_PATH": bundle_plan["remote_path"],
+        "PULSE_DOWNLOAD_BUNDLE_NAME": bundle_plan["file_name"],
+    } if bundle_plan else {}
+    env_override = build_env_override_lines_with_extra(env, bundle_env_overrides)
     build_info = json.dumps(
         {
             "revision": args.revision,
@@ -161,9 +214,18 @@ def main() -> int:
 
     try:
         print("=== upload ===")
+        if bundle_plan:
+            remote_bundle_dir = bundle_plan["remote_path"].rsplit("/", 1)[0]
+            run(
+                ssh,
+                f"bash -lc \"mkdir -p {shlex.quote(remote_bundle_dir)}\"",
+                timeout=120,
+            )
         sftp = ssh.open_sftp()
         try:
             sftp.put(str(archive_path), remote_archive)
+            if bundle_plan:
+                sftp.put(bundle_plan["local_path"], bundle_plan["remote_path"])
             with sftp.file(remote_build_info, "w") as remote_file:
                 remote_file.write(build_info)
             if env_override:
@@ -182,6 +244,18 @@ def main() -> int:
             raise RuntimeError(
                 f"Uploaded archive hash mismatch. Local={archive_sha256} Remote={remote_sha}"
             )
+
+        if bundle_plan and bundle_sha256:
+            print("=== verify bundle sha ===")
+            remote_bundle_sha = run(
+                ssh,
+                f"bash -lc \"sha256sum {shlex.quote(bundle_plan['remote_path'])} | awk '{{print \\$1}}'\"",
+                timeout=120,
+            ).strip()
+            if remote_bundle_sha.lower() != bundle_sha256.lower():
+                raise RuntimeError(
+                    f"Uploaded bundle hash mismatch. Local={bundle_sha256} Remote={remote_bundle_sha}"
+                )
 
         print("=== backup env ===")
         run(
@@ -285,7 +359,12 @@ def main() -> int:
                 "pm2 status --no-color && "
                 "systemctl is-active caddy && "
                 f"cat {args.remote_app}/DEPLOYED_REVISION.json && "
-                f"ls -la {args.remote_app}/packages/dashboard/dist | head'"
+                f"ls -la {args.remote_app}/packages/dashboard/dist | head"
+                + (
+                    f" && ls -lh {shlex.quote(bundle_plan['remote_path'])}'"
+                    if bundle_plan
+                    else "'"
+                )
             ),
             timeout=300,
         )
