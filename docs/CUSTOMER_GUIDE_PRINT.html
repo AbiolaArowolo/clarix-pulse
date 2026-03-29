@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clarix Pulse Customer Guide</title>
+  <style>
+    :root {
+      --ink: #102033;
+      --muted: #516174;
+      --line: #d8e2ec;
+      --panel: #f6fafc;
+      --accent: #0f766e;
+      --accent-soft: #dff6f2;
+      --warn: #92400e;
+      --warn-soft: #fff4e5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      color: var(--ink);
+      background: #eef4f8;
+      line-height: 1.55;
+    }
+    .page {
+      max-width: 900px;
+      margin: 24px auto;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      box-shadow: 0 12px 34px rgba(16, 32, 51, 0.08);
+      padding: 40px;
+    }
+    h1, h2, h3 { margin: 0; }
+    h1 { font-size: 32px; }
+    h2 {
+      margin-top: 28px;
+      font-size: 20px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
+    }
+    h3 {
+      margin-top: 20px;
+      font-size: 16px;
+    }
+    p, li { font-size: 14px; }
+    .eyebrow {
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+    .lede {
+      margin-top: 16px;
+      font-size: 16px;
+      color: var(--muted);
+    }
+    .panel {
+      margin-top: 18px;
+      padding: 16px 18px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--panel);
+    }
+    .accent {
+      background: var(--accent-soft);
+      border-color: #b6e8df;
+    }
+    .warn {
+      background: var(--warn-soft);
+      border-color: #f3d6ad;
+    }
+    .grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      margin-top: 16px;
+    }
+    .grid-3 {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-top: 16px;
+    }
+    .card {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #ffffff;
+    }
+    ol, ul {
+      margin: 10px 0 0 20px;
+      padding: 0;
+    }
+    code {
+      padding: 1px 4px;
+      border-radius: 4px;
+      background: #edf3f8;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 13px;
+    }
+    .footer {
+      margin-top: 28px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    @media print {
+      body {
+        background: #ffffff;
+      }
+      .page {
+        margin: 0;
+        max-width: none;
+        box-shadow: none;
+        border: 0;
+        padding: 24px;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+    }
+    @media (max-width: 760px) {
+      .page {
+        padding: 24px;
+      }
+      .grid, .grid-3 {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <p class="eyebrow">Clarix Pulse</p>
+    <h1>Customer Guide</h1>
+    <p class="lede">
+      This guide is written for customer operators. It explains how to get your first node online,
+      how to finish setup on the Windows machine, and how to use the dashboard after the node starts reporting.
+    </p>
+
+    <div class="panel accent">
+      <strong>What Clarix Pulse does</strong>
+      <p>
+        Clarix Pulse uses a Windows node agent plus a central dashboard. You prepare the node from the dashboard,
+        finish the local setup on the Windows machine, and then monitor the node from the live hub.
+      </p>
+    </div>
+
+    <h2>1. What You Need Before Starting</h2>
+    <ul>
+      <li>Your Clarix Pulse email, password, and access key.</li>
+      <li>A Windows machine where the node software will be installed.</li>
+      <li>Access to the monitored playout application if possible while it is running.</li>
+      <li>An enabled customer account. New accounts may need a platform admin to enable them first.</li>
+    </ul>
+
+    <h2>2. Sign In And Open Onboarding</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Login Page</h3>
+        <p>Enter your email, password, and access key, then click <strong>Sign in</strong>.</p>
+        <p>Use <strong>Forgot password</strong> if you cannot remember your password.</p>
+      </div>
+      <div class="card">
+        <h3>Onboarding Page</h3>
+        <p>
+          This is the easiest place to start your first node. It shows the installer, the setup flow,
+          and the fallback enrollment key.
+        </p>
+      </div>
+    </div>
+
+    <h2>3. Get The Installer To The Windows Node</h2>
+    <div class="grid-3">
+      <div class="card">
+        <h3>Download installer</h3>
+        <p>Downloads the Windows bundle directly in your signed-in browser.</p>
+      </div>
+      <div class="card">
+        <h3>Create secure link</h3>
+        <p>Creates an expiring direct download link for the installer.</p>
+      </div>
+      <div class="card">
+        <h3>Copy secure link</h3>
+        <p>Copies the installer link so another operator can use it on the Windows node.</p>
+      </div>
+    </div>
+    <p>
+      After the bundle is downloaded, move it to the Windows machine and unzip it.
+    </p>
+
+    <h2>4. Run Discovery On The Windows Node</h2>
+    <p>
+      Discovery helps Clarix Pulse detect likely players, logs, and paths before you provision the node.
+    </p>
+    <div class="panel">
+      <strong>Run this command on the Windows node</strong>
+      <p><code>powershell -ExecutionPolicy Bypass -File .\discover-node.ps1</code></p>
+    </div>
+    <p>
+      This creates the discovery report that you will upload in the dashboard.
+    </p>
+
+    <h2>5. Provision The Node In Remote Setup</h2>
+    <ol>
+      <li>Open the dashboard.</li>
+      <li>Find the <strong>Remote Setup</strong> panel.</li>
+      <li>Click <strong>Upload discovery report</strong>.</li>
+      <li>Review the node identity fields and each player block.</li>
+      <li>Click <strong>Provision node and download config</strong>.</li>
+    </ol>
+
+    <div class="grid">
+      <div class="card">
+        <h3>What Remote Setup does</h3>
+        <p>
+          It creates the node in your workspace, rotates a fresh agent token, mirrors the configuration to the hub,
+          and downloads the final <code>config.yaml</code>.
+        </p>
+      </div>
+      <div class="card">
+        <h3>Optional handoff</h3>
+        <p>
+          After provisioning, you can click <strong>Create install handoff page</strong> and send that temporary page
+          to a field operator who will finish the Windows-side setup.
+        </p>
+      </div>
+    </div>
+
+    <h2>6. Finish The Setup On The Windows Node</h2>
+    <ol>
+      <li>Run <code>configure.bat</code>.</li>
+      <li>Use <strong>Upload report or config</strong> to import the downloaded <code>config.yaml</code>.</li>
+      <li>Or paste the secure config link into <strong>Pull Setup From URL</strong> and press <strong>Pull from link</strong>.</li>
+      <li>Review the imported values.</li>
+      <li>Click <strong>Save Local Settings</strong>.</li>
+      <li>Run <code>install.bat</code>.</li>
+    </ol>
+
+    <div class="panel warn">
+      <strong>Important</strong>
+      <p>
+        Saving local settings is required. Provisioning in the hub does not finish the install by itself.
+        The Windows node must still save the final config locally and install the service.
+      </p>
+    </div>
+
+    <h2>7. Confirm The Node Is Live</h2>
+    <ul>
+      <li>Return to the dashboard.</li>
+      <li>Confirm the node appears under the correct site.</li>
+      <li>Check that the last heartbeat is updating.</li>
+      <li>Confirm player badges, connectivity, and stream thumbnails look correct.</li>
+    </ul>
+
+    <h2>8. Daily Monitoring Basics</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Alarm banner</h3>
+        <p>
+          When a live alarm is active, the red banner appears at the top. Use
+          <strong> Enable sound</strong> if your browser blocked audio, or
+          <strong> Turn off alarm sound</strong> to silence the tone.
+        </p>
+      </div>
+      <div class="card">
+        <h3>Per-player controls</h3>
+        <p>
+          Use <strong>Maintenance on/off</strong> to pause alerts during engineering work.
+          Use <strong>Monitoring on/off</strong> only when you intentionally want that player out of live alarming.
+        </p>
+      </div>
+    </div>
+
+    <h2>9. Common Mistakes To Avoid</h2>
+    <ul>
+      <li>Do not stop at provisioning. The Windows node must still save the config and install the service.</li>
+      <li>Do not rely on the enrollment key if you already have a provisioned config.</li>
+      <li>Do not leave a player in maintenance after work is finished.</li>
+      <li>Do not expect the handoff page to last forever. It is expiring by design.</li>
+    </ul>
+
+    <div class="footer">
+      Customer-facing version. For the full internal reference, see the repo documents
+      <code>docs/USER_MANUAL.md</code>, <code>docs/HUB_MANUAL.md</code>, and <code>docs/NODE_MANUAL.md</code>.
+    </div>
+  </main>
+</body>
+</html>
