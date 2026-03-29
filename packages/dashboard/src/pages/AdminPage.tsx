@@ -16,6 +16,18 @@ interface TenantSummary {
   updatedAt: string;
 }
 
+interface AdminAuditEvent {
+  eventId: string;
+  actorEmail: string;
+  targetTenantId: string | null;
+  targetTenantName: string | null;
+  targetUserId: string | null;
+  targetEmail: string | null;
+  action: string;
+  details: Record<string, unknown> | null;
+  createdAt: string;
+}
+
 async function readJsonResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
   if (!text.trim()) {
@@ -38,18 +50,28 @@ export function AdminPage({
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
   const [revealedResetLink, setRevealedResetLink] = useState<{ url: string; expiresAt: string | null } | null>(null);
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
+  const [events, setEvents] = useState<AdminAuditEvent[]>([]);
   const [pendingTenantId, setPendingTenantId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/admin/tenants');
-      const payload = await readJsonResponse<{ tenants?: TenantSummary[]; error?: string }>(response);
-      if (!response.ok) {
-        throw new Error(payload.error ?? 'Failed to load tenants.');
+      const [tenantsResponse, auditResponse] = await Promise.all([
+        fetch('/api/admin/tenants'),
+        fetch('/api/admin/audit?limit=25'),
+      ]);
+      const tenantPayload = await readJsonResponse<{ tenants?: TenantSummary[]; error?: string }>(tenantsResponse);
+      if (!tenantsResponse.ok) {
+        throw new Error(tenantPayload.error ?? 'Failed to load tenants.');
       }
-      setTenants(payload.tenants ?? []);
+      const auditPayload = await readJsonResponse<{ events?: AdminAuditEvent[]; error?: string }>(auditResponse);
+      if (!auditResponse.ok) {
+        throw new Error(auditPayload.error ?? 'Failed to load admin activity.');
+      }
+
+      setTenants(tenantPayload.tenants ?? []);
+      setEvents(auditPayload.events ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load tenants.');
     } finally {
@@ -316,6 +338,36 @@ export function AdminPage({
                 </div>
               );
             })}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-3xl border border-slate-800 bg-slate-900/58 p-5 shadow-[0_20px_60px_rgba(2,6,23,0.28)] backdrop-blur">
+        <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-100">Recent support activity</h3>
+        {loading ? (
+          <p className="mt-4 text-sm text-slate-400">Loading admin activity...</p>
+        ) : events.length === 0 ? (
+          <p className="mt-4 text-sm text-slate-400">No admin activity recorded yet.</p>
+        ) : (
+          <div className="mt-4 space-y-3">
+            {events.map((event) => (
+              <div
+                key={event.eventId}
+                className="rounded-3xl border border-slate-800 bg-slate-950/55 p-4"
+              >
+                <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-white">{event.action.replace(/_/g, ' ')}</p>
+                    <p className="mt-1 text-sm text-slate-400">
+                      Actor: <span className="text-slate-200">{event.actorEmail}</span>
+                      {event.targetTenantName ? ` | Tenant: ${event.targetTenantName}` : ''}
+                      {event.targetEmail ? ` | Target: ${event.targetEmail}` : ''}
+                    </p>
+                  </div>
+                  <p className="text-xs text-slate-500">{event.createdAt}</p>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </section>

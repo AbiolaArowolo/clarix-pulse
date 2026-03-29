@@ -66,6 +66,7 @@ SMTP_HOST=
 SMTP_PORT=587
 SMTP_USER=
 SMTP_PASS=
+SMTP_FROM_NAME=Clarix Pulse
 SMTP_FROM=alerts@example.com
 TELEGRAM_BOT_TOKEN=
 AGENT_TOKENS=
@@ -82,6 +83,7 @@ Notes:
 - `PULSE_DOWNLOAD_LINK_TTL_MINUTES` controls how long signed node-side download links remain valid
 - `PULSE_DOWNLOAD_BUNDLE_PATH` is optional if you want the bundle served from a custom path
 - `SMTP_*` must be configured if you want access keys and self-service password reset links emailed
+- `SMTP_FROM_NAME` is optional branding for outbound account emails
 - if SMTP is not configured, the UI falls back to showing the generated access key once during registration or renewal, and platform admins can copy one-time password reset links from `/app/admin`
 
 ---
