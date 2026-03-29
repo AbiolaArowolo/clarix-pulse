@@ -60,3 +60,17 @@ export async function hasThumbnailFile(playerId: string): Promise<boolean> {
     return false;
   }
 }
+
+export async function deleteThumbnailsForPlayers(playerIds: readonly string[]): Promise<void> {
+  ensureThumbnailDir();
+
+  await Promise.all(playerIds.map(async (playerId) => {
+    try {
+      await fs.promises.unlink(thumbnailPath(playerId));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') {
+        throw error;
+      }
+    }
+  }));
+}

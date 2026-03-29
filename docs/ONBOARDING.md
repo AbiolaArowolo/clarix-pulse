@@ -33,7 +33,8 @@
 3. If SMTP is unavailable, a platform admin can issue a reset from `/app/admin` and copy the one-time fallback reset link.
 4. Platform admins can also open the customer workspace directly from `/app/admin` without asking for the customer password.
 5. When support mode is active, the app shows a banner until the admin returns to the admin workspace.
-6. Recent support actions are visible in the admin activity feed.
+6. Unwanted customer accounts can be deleted from `/app/admin`.
+7. Recent support and admin actions are visible in the admin activity feed.
 
 ### For a new Windows node
 
@@ -75,4 +76,5 @@ sc query ClarixPulseAgent
 - the enrollment key still exists as a fallback on the account and onboarding screens
 - the login screen includes `Forgot password`
 - `/app/admin` can now issue password reset links and open a tenant workspace in support mode
+- `/app/admin` can also permanently delete unwanted customer accounts
 - `/app/admin` also shows the recent support audit feed

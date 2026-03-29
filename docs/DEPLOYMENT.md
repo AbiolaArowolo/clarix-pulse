@@ -13,6 +13,7 @@ Current product shape:
 - authenticated monitoring app under `/app`
 - admin-controlled tenant activation
 - admin password-reset and workspace-support controls
+- admin delete-account control for unwanted customer workspaces
 - 365-day access keys
 - self-service password reset links
 - browser downloads for signed-in users
@@ -197,6 +198,7 @@ The current hub is workspace-aware:
 - sign-in requires email, password, and access key
 - platform admins can enable or disable tenants and renew keys
 - platform admins can issue password reset links and open a tenant workspace in support mode
+- platform admins can permanently delete unwanted customer accounts
 - support mode is implemented as an impersonated customer session plus a saved admin return cookie
 - users can request their own password reset link from `/forgot-password`
 - `/api/status` and dashboard config routes are session-protected
@@ -269,6 +271,7 @@ pm2 logs clarix-hub --lines 100 --nostream
 9. Confirm `/app/admin` can issue a reset link and open a tenant workspace.
 10. Confirm the support banner appears while impersonating and disappears after returning to admin.
 11. Confirm the action appears in the admin activity feed.
+12. Confirm `/app/admin` can delete an unwanted non-admin customer account.
 
 ### Downloads
 

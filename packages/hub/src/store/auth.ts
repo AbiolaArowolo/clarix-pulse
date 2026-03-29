@@ -1,6 +1,9 @@
 import crypto from 'crypto';
 import { QueryResultRow } from 'pg';
 import { exec, query, queryOne, withTransaction } from './db';
+import { clearInstanceControlsCacheForInstances } from './instanceControls';
+import { clearStateCacheForInstances } from './state';
+import { deleteThumbnailsForPlayers } from './thumbnails';
 
 export interface AuthenticatedSession {
   sessionId: string;
@@ -56,6 +59,17 @@ export interface TenantAccessSummary {
 export interface TenantAccessKeyRotation {
   summary: TenantAccessSummary;
   accessKey: string;
+}
+
+export interface TenantDeletionResult {
+  tenantId: string;
+  tenantName: string;
+  tenantSlug: string;
+  ownerEmail: string | null;
+  ownerDisplayName: string | null;
+  deletedAt: string;
+  deletedSiteCount: number;
+  deletedPlayerCount: number;
 }
 
 export interface AdminAuditEvent {
@@ -857,7 +871,7 @@ export async function listAdminAuditEvents(input?: {
       e.event_id,
       e.actor_email,
       e.target_tenant_id,
-      t.name AS target_tenant_name,
+      COALESCE(t.name, e.details->>'tenantName') AS target_tenant_name,
       e.target_user_id,
       e.target_email,
       e.action,
@@ -1382,5 +1396,101 @@ export async function rotateTenantAccessKey(input: {
   return {
     summary,
     accessKey,
+  };
+}
+
+export async function deleteTenantAccount(input: {
+  tenantId: string;
+  actorUserId: string;
+  actorEmail: string;
+  actorTenantId: string;
+}): Promise<TenantDeletionResult> {
+  const summary = await getTenantAccessSummary(input.tenantId);
+  if (!summary) {
+    throw new Error('Unknown tenant.');
+  }
+
+  if (summary.tenantId === 'legacy-hub' || summary.tenantSlug === 'legacy-hub') {
+    throw new Error('The built-in legacy workspace cannot be deleted.');
+  }
+
+  if (input.actorTenantId === input.tenantId) {
+    throw new Error('You cannot delete the workspace you are currently signed into.');
+  }
+
+  const deletedAt = new Date().toISOString();
+  const playerIds = await query<{ player_id: string }>(`
+    SELECT p.player_id
+    FROM players p
+    JOIN sites s ON s.site_id = p.site_id
+    WHERE s.tenant_id = $1
+  `, [input.tenantId]);
+  const playerIdList = playerIds.map((row) => row.player_id);
+  const siteRows = await query<{ site_id: string }>(`
+    SELECT site_id
+    FROM sites
+    WHERE tenant_id = $1
+  `, [input.tenantId]);
+  const siteIds = siteRows.map((row) => row.site_id);
+
+  await withTransaction(async (client) => {
+    const tenantUsers = await query<{ email: string }>(`
+      SELECT email
+      FROM users
+      WHERE tenant_id = $1
+    `, [input.tenantId], client);
+
+    if (tenantUsers.some((row) => isPlatformAdminEmail(row.email))) {
+      throw new Error('A platform-admin workspace cannot be deleted.');
+    }
+
+    await recordAdminAuditEvent({
+      actorUserId: input.actorUserId,
+      actorEmail: input.actorEmail,
+      targetTenantId: summary.tenantId,
+      targetEmail: summary.ownerEmail,
+      action: 'tenant_deleted',
+      details: {
+        tenantName: summary.tenantName,
+        tenantSlug: summary.tenantSlug,
+        ownerEmail: summary.ownerEmail,
+        deletedSiteCount: siteIds.length,
+        deletedPlayerCount: playerIdList.length,
+      },
+    }, client);
+
+    if (siteIds.length > 0) {
+      await exec(`
+        DELETE FROM nodes
+        WHERE site_id = ANY($1::text[])
+      `, [siteIds], client);
+
+      await exec(`
+        DELETE FROM sites
+        WHERE tenant_id = $1
+      `, [input.tenantId], client);
+    }
+
+    await deleteSessionsForTenant(input.tenantId, client);
+
+    await exec(`
+      DELETE FROM tenants
+      WHERE tenant_id = $1
+    `, [input.tenantId], client);
+  });
+
+  clearStateCacheForInstances(playerIdList);
+  clearInstanceControlsCacheForInstances(playerIdList);
+  await deleteThumbnailsForPlayers(playerIdList);
+
+  return {
+    tenantId: summary.tenantId,
+    tenantName: summary.tenantName,
+    tenantSlug: summary.tenantSlug,
+    ownerEmail: summary.ownerEmail,
+    ownerDisplayName: summary.ownerDisplayName,
+    deletedAt,
+    deletedSiteCount: siteIds.length,
+    deletedPlayerCount: playerIdList.length,
   };
 }

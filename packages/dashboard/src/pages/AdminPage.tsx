@@ -198,6 +198,34 @@ export function AdminPage({
     }
   };
 
+  const deleteTenant = async (tenantId: string, tenantName: string) => {
+    const confirmed = window.confirm(
+      `Delete "${tenantName}" permanently? This removes the account, its nodes, players, and local dashboard inventory. This cannot be undone.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setPendingTenantId(tenantId);
+    try {
+      resetFeedback();
+      const response = await fetch(`/api/admin/tenants/${encodeURIComponent(tenantId)}`, {
+        method: 'DELETE',
+      });
+      const payload = await readJsonResponse<{ ok?: boolean; error?: string; deleted?: { tenantName?: string } }>(response);
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error ?? 'Failed to delete the tenant account.');
+      }
+
+      setNotice(`Tenant deleted: ${payload.deleted?.tenantName ?? tenantName}.`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete the tenant account.');
+    } finally {
+      setPendingTenantId(null);
+    }
+  };
+
   const copyValue = async (value: string, successMessage: string) => {
     try {
       await copyTextToClipboard(value);
@@ -212,7 +240,7 @@ export function AdminPage({
       <section className="rounded-3xl border border-slate-800 bg-slate-900/58 p-5 shadow-[0_20px_60px_rgba(2,6,23,0.28)] backdrop-blur">
         <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-100">Platform controls</h3>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
-          Accounts register disabled by default. Enable them here when you are ready, renew their 365-day keys, issue password reset links, or open the customer workspace directly for support.
+          Accounts register disabled by default. Enable them here when you are ready, renew their 365-day keys, issue password reset links, open the customer workspace directly for support, or permanently delete unwanted customer accounts.
         </p>
       </section>
 
@@ -332,6 +360,14 @@ export function AdminPage({
                         className="rounded-full border border-emerald-400/35 bg-emerald-400/12 px-4 py-2 text-sm font-semibold text-emerald-50 transition-colors hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {pending ? 'Working...' : 'Renew 365-day key'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deleteTenant(tenant.tenantId, tenant.tenantName)}
+                        disabled={pending}
+                        className="rounded-full border border-red-500/35 bg-red-500/12 px-4 py-2 text-sm font-semibold text-red-50 transition-colors hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {pending ? 'Working...' : 'Delete account'}
                       </button>
                     </div>
                   </div>

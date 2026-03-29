@@ -3,6 +3,7 @@ import {
   appendAdminAuditEvent,
   createImpersonationSessionForTenant,
   createPasswordResetForTenantOwner,
+  deleteTenantAccount,
   listAdminAuditEvents,
   listTenantsForAdmin,
   rotateTenantAccessKey,
@@ -251,6 +252,31 @@ export function createAdminRouter(): Router {
     } catch (error) {
       return res.status(400).json({
         error: error instanceof Error ? error.message : 'Failed to open the tenant workspace.',
+      });
+    }
+  });
+
+  router.delete('/tenants/:tenantId', async (req: Request, res: Response) => {
+    try {
+      const session = req.auth;
+      if (!session) {
+        return res.status(401).json({ error: 'Sign in required.' });
+      }
+
+      const deleted = await deleteTenantAccount({
+        tenantId: req.params.tenantId,
+        actorUserId: session.userId,
+        actorEmail: session.email,
+        actorTenantId: session.tenantId,
+      });
+
+      return res.json({
+        ok: true,
+        deleted,
+      });
+    } catch (error) {
+      return res.status(400).json({
+        error: error instanceof Error ? error.message : 'Failed to delete the tenant account.',
       });
     }
   });

@@ -52,6 +52,12 @@ export function getInstanceControls(instanceId: string): InstanceControls {
   };
 }
 
+export function clearInstanceControlsCacheForInstances(instanceIds: readonly string[]): void {
+  for (const instanceId of instanceIds) {
+    cache.delete(instanceId);
+  }
+}
+
 export async function updateInstanceControls(
   instanceId: string,
   patch: {

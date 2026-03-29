@@ -88,6 +88,12 @@ export function getAllStates(): InstanceState[] {
   return Array.from(cache.values());
 }
 
+export function clearStateCacheForInstances(instanceIds: readonly string[]): void {
+  for (const instanceId of instanceIds) {
+    cache.delete(instanceId);
+  }
+}
+
 export async function updateState(
   instanceId: string,
   agentId: string,
