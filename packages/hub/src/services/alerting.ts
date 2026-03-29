@@ -26,6 +26,70 @@ interface AlertMessage {
   body: string;
 }
 
+interface AlertChannelDeliveryHealth {
+  configured: boolean;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  consecutiveFailures: number;
+  totalSuccesses: number;
+  totalFailures: number;
+  lastError: string | null;
+}
+
+type AlertChannelName = 'email' | 'telegram';
+
+const alertDeliveryHealth: Record<AlertChannelName, AlertChannelDeliveryHealth> = {
+  email: {
+    configured: false,
+    lastSuccessAt: null,
+    lastFailureAt: null,
+    consecutiveFailures: 0,
+    totalSuccesses: 0,
+    totalFailures: 0,
+    lastError: null,
+  },
+  telegram: {
+    configured: false,
+    lastSuccessAt: null,
+    lastFailureAt: null,
+    consecutiveFailures: 0,
+    totalSuccesses: 0,
+    totalFailures: 0,
+    lastError: null,
+  },
+};
+
+function refreshAlertChannelConfiguration(): void {
+  alertDeliveryHealth.email.configured = Boolean(
+    process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS,
+  );
+  alertDeliveryHealth.telegram.configured = Boolean(process.env.TELEGRAM_BOT_TOKEN);
+}
+
+function noteAlertDeliverySuccess(channel: AlertChannelName): void {
+  refreshAlertChannelConfiguration();
+  alertDeliveryHealth[channel].lastSuccessAt = new Date().toISOString();
+  alertDeliveryHealth[channel].consecutiveFailures = 0;
+  alertDeliveryHealth[channel].totalSuccesses += 1;
+  alertDeliveryHealth[channel].lastError = null;
+}
+
+function noteAlertDeliveryFailure(channel: AlertChannelName, error: string): void {
+  refreshAlertChannelConfiguration();
+  alertDeliveryHealth[channel].lastFailureAt = new Date().toISOString();
+  alertDeliveryHealth[channel].consecutiveFailures += 1;
+  alertDeliveryHealth[channel].totalFailures += 1;
+  alertDeliveryHealth[channel].lastError = error;
+}
+
+export function getAlertDeliveryHealth(): Record<AlertChannelName, AlertChannelDeliveryHealth> {
+  refreshAlertChannelConfiguration();
+  return {
+    email: { ...alertDeliveryHealth.email },
+    telegram: { ...alertDeliveryHealth.telegram },
+  };
+}
+
 function normalizeTelegramRecipient(value: string): string {
   return value.trim().replace(/^@+/, '').toLowerCase();
 }
@@ -86,10 +150,14 @@ async function sendTenantTelegram(tenantId: string, message: string): Promise<vo
   const targetByUsername = new Map(
     discoveredTargets.map((target) => [target.username, target.chatId]),
   );
+  let attempted = 0;
+  let delivered = 0;
+  let lastError = '';
 
   for (const recipient of settings.telegramChatIds) {
     const trimmedRecipient = recipient.trim();
     if (!trimmedRecipient) continue;
+    attempted += 1;
 
     const resolvedChatId = isNumericTelegramChatId(trimmedRecipient)
       ? trimmedRecipient
@@ -104,13 +172,23 @@ async function sendTenantTelegram(tenantId: string, message: string): Promise<vo
 
       const payload = await response.json().catch(() => null) as { ok?: boolean; description?: string } | null;
       if (!response.ok || payload?.ok === false) {
+        lastError = payload?.description ?? response.statusText;
         console.error(
-          `[alerting] Telegram send failed for recipient ${trimmedRecipient}: ${payload?.description ?? response.statusText}`,
+          `[alerting] Telegram send failed for recipient ${trimmedRecipient}: ${lastError}`,
         );
+        continue;
       }
+      delivered += 1;
     } catch (err) {
+      lastError = err instanceof Error ? err.message : 'unknown telegram error';
       console.error(`[alerting] Telegram send failed for recipient ${trimmedRecipient}:`, err);
     }
+  }
+
+  if (delivered > 0) {
+    noteAlertDeliverySuccess('telegram');
+  } else if (attempted > 0) {
+    noteAlertDeliveryFailure('telegram', lastError || 'telegram delivery failed');
   }
 }
 
@@ -278,8 +356,10 @@ async function sendTenantEmail(tenantId: string, subject: string, body: string):
       subject,
       text: body,
     });
+    noteAlertDeliverySuccess('email');
   } catch (err) {
     console.error('[alerting] Email send failed:', err);
+    noteAlertDeliveryFailure('email', err instanceof Error ? err.message : 'email delivery failed');
   }
 }
 

@@ -45,6 +45,19 @@ interface RemoteProvisionResponse {
   error?: string;
 }
 
+interface InstallHandoffLinkResponse {
+  ok?: boolean;
+  nodeId?: string;
+  nodeName?: string;
+  url?: string;
+  expiresAt?: string;
+  metrics?: {
+    createdEvent?: string;
+    openedEvent?: string;
+  };
+  error?: string;
+}
+
 interface PlayerFormState {
   playerId: string;
   label: string;
@@ -216,6 +229,8 @@ export function RemoteSetupPanel() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [lastProvision, setLastProvision] = useState<RemoteProvisionResponse | null>(null);
+  const [handoffLink, setHandoffLink] = useState<InstallHandoffLinkResponse | null>(null);
+  const [creatingHandoffLink, setCreatingHandoffLink] = useState(false);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
 
   const stats = useMemo(() => ({
@@ -292,6 +307,7 @@ export function RemoteSetupPanel() {
   const clearForm = () => {
     setForm(blankDraft());
     setLastProvision(null);
+    setHandoffLink(null);
     setNotice('Remote setup form cleared.');
     setError(null);
   };
@@ -369,6 +385,7 @@ export function RemoteSetupPanel() {
 
       downloadTextFile(payload.downloadFileName, payload.configYaml);
       setLastProvision(payload);
+      setHandoffLink(null);
       setNotice(`Provisioned ${payload.nodeId}. The node config downloaded with a fresh agent token.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to provision remote node setup.');
@@ -384,6 +401,44 @@ export function RemoteSetupPanel() {
       setCopyNotice('Secure config link copied.');
     } catch {
       setCopyNotice('Copy failed. Select the link and copy it manually.');
+    }
+  };
+
+  const createInstallHandoffLink = async () => {
+    if (!lastProvision?.nodeId) return;
+
+    setCreatingHandoffLink(true);
+    setError(null);
+    setNotice(null);
+    setCopyNotice(null);
+
+    try {
+      const response = await fetch('/api/config/remote/install-handoff-link', {
+        method: 'POST',
+        headers: requestHeaders(),
+        body: JSON.stringify({ nodeId: lastProvision.nodeId }),
+      });
+      const payload = await response.json() as InstallHandoffLinkResponse;
+      if (!response.ok || !payload.ok || !payload.url || !payload.expiresAt) {
+        throw new Error(String(payload?.error ?? 'Failed to create the install handoff link.'));
+      }
+
+      setHandoffLink(payload);
+      setNotice(`Install handoff page ready for ${payload.nodeName ?? payload.nodeId}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create the install handoff link.');
+    } finally {
+      setCreatingHandoffLink(false);
+    }
+  };
+
+  const copyInstallHandoffLink = async () => {
+    if (!handoffLink?.url) return;
+    try {
+      await copyTextToClipboard(handoffLink.url);
+      setCopyNotice('Install handoff link copied.');
+    } catch {
+      setCopyNotice('Copy failed. Select the handoff link and copy it manually.');
     }
   };
 
@@ -753,6 +808,42 @@ export function RemoteSetupPanel() {
                   </div>
                 </div>
               )}
+              <div className="mt-4 rounded-2xl border border-cyan-400/20 bg-slate-950/60 p-4">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-cyan-100/80">Shareable install handoff</p>
+                <p className="mt-2 text-sm leading-6 text-cyan-50">
+                  Create one public handoff page with the installer and this node&apos;s secure config link so a field operator can finish setup without signing in.
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void createInstallHandoffLink()}
+                    disabled={creatingHandoffLink}
+                    className="rounded-full border border-cyan-400/35 bg-cyan-400/12 px-4 py-2 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {creatingHandoffLink ? 'Creating handoff page...' : 'Create install handoff page'}
+                  </button>
+                  {handoffLink?.metrics?.createdEvent && (
+                    <span className="text-xs text-cyan-100/70">Metric: {handoffLink.metrics.createdEvent}</span>
+                  )}
+                </div>
+                {handoffLink?.url && (
+                  <div className="mt-4 rounded-2xl border border-cyan-400/20 bg-slate-950 p-4">
+                    <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 font-mono text-xs text-cyan-100">
+                      {handoffLink.url}
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => void copyInstallHandoffLink()}
+                        className="rounded-full border border-cyan-400/35 bg-cyan-400/12 px-4 py-2 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300"
+                      >
+                        Copy handoff link
+                      </button>
+                      <span className="text-xs text-cyan-100/70">Expires: {handoffLink.expiresAt}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

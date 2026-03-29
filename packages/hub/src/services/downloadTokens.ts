@@ -15,6 +15,15 @@ export type DownloadTokenClaims =
       agentToken: string;
       mirrorUpdatedAt: string;
       expiresAt: string;
+    }
+  | {
+      kind: 'install-handoff';
+      tenantId: string;
+      nodeId: string;
+      fileName: string;
+      agentToken: string;
+      mirrorUpdatedAt: string;
+      expiresAt: string;
     };
 
 interface SignedDownloadLink {
@@ -71,6 +80,20 @@ function tokenExpiryIso(minutes = linkValidityMinutes()): string {
   return new Date(Date.now() + minutes * 60 * 1000).toISOString();
 }
 
+function resolveExpiryIso(expiresAt?: string): string {
+  const trimmed = expiresAt?.trim();
+  if (!trimmed) {
+    return tokenExpiryIso();
+  }
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime()) || parsed.getTime() <= Date.now()) {
+    throw new Error('Signed download link expiry must be a future timestamp.');
+  }
+
+  return parsed.toISOString();
+}
+
 function buildUrl(baseUrl: string, pathName: string, token: string): string {
   const url = new URL(pathName, baseUrl);
   url.searchParams.set('token', token);
@@ -115,7 +138,7 @@ export function verifyDownloadToken(token: string): DownloadTokenClaims | null {
       };
     }
 
-    if (kind === 'node-config') {
+    if (kind === 'node-config' || kind === 'install-handoff') {
       const nodeId = typeof parsed.nodeId === 'string' ? parsed.nodeId.trim() : '';
       const agentToken = typeof parsed.agentToken === 'string' ? parsed.agentToken.trim() : '';
       const mirrorUpdatedAt = typeof parsed.mirrorUpdatedAt === 'string' ? parsed.mirrorUpdatedAt.trim() : '';
@@ -144,8 +167,9 @@ export function createBundleDownloadLink(input: {
   baseUrl: string;
   tenantId: string;
   fileName: string;
+  expiresAt?: string;
 }): SignedDownloadLink {
-  const expiresAt = tokenExpiryIso();
+  const expiresAt = resolveExpiryIso(input.expiresAt);
   const token = createToken({
     kind: 'bundle',
     tenantId: input.tenantId,
@@ -166,8 +190,9 @@ export function createNodeConfigDownloadLink(input: {
   fileName: string;
   agentToken: string;
   mirrorUpdatedAt: string;
+  expiresAt?: string;
 }): SignedDownloadLink {
-  const expiresAt = tokenExpiryIso();
+  const expiresAt = resolveExpiryIso(input.expiresAt);
   const token = createToken({
     kind: 'node-config',
     tenantId: input.tenantId,
@@ -180,6 +205,31 @@ export function createNodeConfigDownloadLink(input: {
 
   return {
     url: buildUrl(input.baseUrl, `/api/downloads/nodes/${encodeURIComponent(input.nodeId)}/config.yaml`, token),
+    expiresAt,
+  };
+}
+
+export function createInstallHandoffLink(input: {
+  baseUrl: string;
+  tenantId: string;
+  nodeId: string;
+  agentToken: string;
+  mirrorUpdatedAt: string;
+  expiresAt?: string;
+}): SignedDownloadLink {
+  const expiresAt = resolveExpiryIso(input.expiresAt);
+  const token = createToken({
+    kind: 'install-handoff',
+    tenantId: input.tenantId,
+    nodeId: input.nodeId,
+    fileName: `${input.nodeId}-install-handoff`,
+    agentToken: input.agentToken,
+    mirrorUpdatedAt: input.mirrorUpdatedAt,
+    expiresAt,
+  });
+
+  return {
+    url: buildUrl(input.baseUrl, '/install-handoff', token),
     expiresAt,
   };
 }

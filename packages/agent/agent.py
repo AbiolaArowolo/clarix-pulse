@@ -82,6 +82,10 @@ SERVICE_DISPLAY_NAME = "Pulse Agent"
 DEFAULT_HUB_URL = "https://monitor.example.com"
 LOCAL_UI_HOST = "127.0.0.1"
 LOCAL_UI_PORT = 3210
+DEFAULT_POLL_INTERVAL_SECONDS = 10
+HEARTBEAT_POST_TIMEOUT_SECONDS = 5
+HEARTBEAT_RETRY_DELAYS_SECONDS = (1.0, 2.0)
+RETRYABLE_HTTP_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 DEFAULT_INSTA_LOG_DIR = r"C:\Program Files\Indytek\Insta log"
 DEFAULT_INSTA_INSTANCE_ROOT = r"C:\Program Files\Indytek\Insta Playout\Settings"
 NSSM_PACKAGE_URL = "https://community.chocolatey.org/api/v2/package/nssm"
@@ -474,7 +478,7 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
       document.getElementById("hub_url").value = state.hub_url || DEFAULTS.hubUrl;
       document.getElementById("agent_token").value = state.agent_token || "";
       document.getElementById("enrollment_key").value = state.enrollment_key || "";
-      document.getElementById("poll_interval_seconds").value = state.poll_interval_seconds || 5;
+      document.getElementById("poll_interval_seconds").value = state.poll_interval_seconds || 10;
       document.getElementById("import_setup_url").value = state.import_setup_url || "";
       document.getElementById("unlock_sensitive_fields").checked = !!state.unlock_sensitive_fields;
       document.getElementById("node_id").readOnly = lock;
@@ -1218,7 +1222,7 @@ def _import_local_ui_state(document_text: str, current_state: Any = None) -> tup
             120,
             _as_int(
                 document.get("poll_interval_seconds", document.get("pollIntervalSeconds")),
-                _as_int(current.get("poll_interval_seconds"), 5),
+                _as_int(current.get("poll_interval_seconds"), DEFAULT_POLL_INTERVAL_SECONDS),
             ),
         ),
     )
@@ -1965,7 +1969,7 @@ def _config_for_local_ui(existing: dict[str, Any] | None = None) -> dict[str, An
             for player in existing_players
             if isinstance(player, dict) and _as_str(player.get("player_id"))
         ],
-        "poll_interval_seconds": max(1, _as_int(existing.get("poll_interval_seconds"), 5)),
+        "poll_interval_seconds": max(1, _as_int(existing.get("poll_interval_seconds"), DEFAULT_POLL_INTERVAL_SECONDS)),
         "players": players,
     }
 
@@ -1993,7 +1997,7 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
     submitted_agent_token = _as_non_placeholder_str(payload.get("agent_token"))
     agent_token = submitted_agent_token if allow_sensitive_edits or not existing_agent_token else existing_agent_token
     enrollment_key = _as_non_placeholder_str(payload.get("enrollment_key")) if allow_sensitive_edits else ""
-    poll_interval_seconds = max(1, min(120, _as_int(payload.get("poll_interval_seconds"), 5)))
+    poll_interval_seconds = max(1, min(120, _as_int(payload.get("poll_interval_seconds"), DEFAULT_POLL_INTERVAL_SECONDS)))
 
     if not node_id:
         raise ValueError("Node ID is required.")
@@ -2691,7 +2695,7 @@ def _run_config_wizard(existing: dict[str, Any] | None = None) -> dict[str, Any]
     )
     poll_interval = _prompt_int(
         "Poll interval seconds",
-        _as_int(existing.get("poll_interval_seconds"), 5),
+        _as_int(existing.get("poll_interval_seconds"), DEFAULT_POLL_INTERVAL_SECONDS),
         1,
         120,
     )
@@ -2883,6 +2887,52 @@ def interactive_entrypoint() -> int:
 
 # --- Heartbeat ----------------------------------------------------------------
 
+def _should_retry_http_status(status_code: int) -> bool:
+    return status_code in RETRYABLE_HTTP_STATUS_CODES
+
+
+def _post_json_with_retry(
+    url: str,
+    token: str,
+    payload: dict[str, Any],
+    log_label: str,
+    timeout_seconds: int = HEARTBEAT_POST_TIMEOUT_SECONDS,
+    retry_delays_seconds: tuple[float, ...] = HEARTBEAT_RETRY_DELAYS_SECONDS,
+) -> requests.Response:
+    headers = {"Authorization": f"Bearer {token}"}
+    attempts = len(retry_delays_seconds) + 1
+
+    for attempt_index in range(attempts):
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=timeout_seconds)
+        except requests.RequestException as error:
+            if attempt_index >= len(retry_delays_seconds):
+                raise
+
+            delay_seconds = retry_delays_seconds[attempt_index]
+            log.warning(
+                f"{log_label} failed ({error}); retrying in {delay_seconds:.1f}s "
+                f"(attempt {attempt_index + 2}/{attempts})"
+            )
+            time.sleep(delay_seconds)
+            continue
+
+        if response.status_code == 200 or attempt_index >= len(retry_delays_seconds):
+            return response
+
+        if not _should_retry_http_status(response.status_code):
+            return response
+
+        delay_seconds = retry_delays_seconds[attempt_index]
+        log.warning(
+            f"{log_label} temporary failure ({response.status_code}); retrying in {delay_seconds:.1f}s "
+            f"(attempt {attempt_index + 2}/{attempts})"
+        )
+        time.sleep(delay_seconds)
+
+    raise RuntimeError(f"{log_label} retry loop exited unexpectedly")
+
+
 def post_heartbeat(
     hub_url: str,
     token: str,
@@ -2903,7 +2953,12 @@ def post_heartbeat(
     if node_config_mirror is not None:
         payload["nodeConfigMirror"] = node_config_mirror
     try:
-        r = requests.post(url, json=payload, headers={"Authorization": f"Bearer {token}"}, timeout=10)
+        r = _post_json_with_retry(
+            url,
+            token,
+            payload,
+            f"Heartbeat POST for {player_id}",
+        )
         if r.status_code == 200:
             try:
                 payload = r.json()
@@ -2936,7 +2991,12 @@ def post_thumbnail(
         "capturedAt": datetime.utcnow().isoformat() + "Z",
     }
     try:
-        requests.post(url, json=payload, headers={"Authorization": f"Bearer {token}"}, timeout=10)
+        requests.post(
+            url,
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=HEARTBEAT_POST_TIMEOUT_SECONDS,
+        )
     except requests.RequestException as e:
         log.debug(f"Thumbnail POST failed for {player_id}/{udp_input_id}: {e}")
 

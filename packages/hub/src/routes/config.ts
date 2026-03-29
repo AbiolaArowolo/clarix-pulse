@@ -7,12 +7,12 @@ import {
   serializeAgentConfigYaml,
 } from '../config/remoteSetup';
 import { requireSession } from '../serverAuth';
-import { createNodeConfigDownloadLink } from '../services/downloadTokens';
-import { findTenantByEnrollmentKey } from '../store/auth';
+import { createBundleDownloadLink, createInstallHandoffLink, createNodeConfigDownloadLink, verifyDownloadToken } from '../services/downloadTokens';
+import { appendAdminAuditEvent, findTenantByEnrollmentKey, getTenantAccessSummary } from '../store/auth';
 import { getAlertSettings, updateAlertSettings } from '../store/alertSettings';
 import { getInstanceControls, updateInstanceControls } from '../store/instanceControls';
 import { getMirroredNodeConfig, getMirroredPlayerConfig, updateMirroredNodeConfig } from '../store/nodeConfigMirror';
-import { enrollNode, getNode, getPlayer, resolveNodeAuthForToken } from '../store/registry';
+import { enrollNode, getActiveAgentToken, getNode, getPlayer, resolveNodeAuthForToken } from '../store/registry';
 
 function bearerToken(req: Request): string | null {
   const auth = req.headers.authorization ?? '';
@@ -127,6 +127,25 @@ function requestBaseUrl(req: Request): string {
   return `${req.protocol}://${host}`;
 }
 
+function tenantAccessError(input: {
+  enabled: boolean;
+  disabledReason: string | null;
+  accessKeyExpiresAt: string | null;
+}): string | null {
+  if (!input.enabled) {
+    return input.disabledReason?.trim() || 'Workspace access is currently disabled.';
+  }
+
+  if (input.accessKeyExpiresAt) {
+    const expiry = new Date(input.accessKeyExpiresAt);
+    if (!Number.isNaN(expiry.getTime()) && expiry.getTime() < Date.now()) {
+      return 'Workspace access has expired.';
+    }
+  }
+
+  return null;
+}
+
 export function createConfigRouter(): Router {
   const router = Router();
 
@@ -215,7 +234,156 @@ export function createConfigRouter(): Router {
     });
   });
 
+  router.get('/remote/install-handoff', async (req: Request, res: Response) => {
+    const token = asString(req.query.token);
+    const claims = token ? verifyDownloadToken(token) : null;
+    if (!claims || claims.kind !== 'install-handoff') {
+      return res.status(401).json({ error: 'A valid install handoff link is required.' });
+    }
+
+    const tenant = await getTenantAccessSummary(claims.tenantId);
+    if (!tenant) {
+      return res.status(404).json({ error: 'Unknown workspace.' });
+    }
+
+    const accessError = tenantAccessError({
+      enabled: tenant.enabled,
+      disabledReason: tenant.disabledReason,
+      accessKeyExpiresAt: tenant.accessKeyExpiresAt,
+    });
+    if (accessError) {
+      return res.status(403).json({ error: accessError });
+    }
+
+    const node = await getNode(claims.tenantId, claims.nodeId);
+    if (!node) {
+      return res.status(404).json({ error: 'Unknown node.' });
+    }
+
+    const mirror = await getMirroredNodeConfig(claims.nodeId, claims.tenantId);
+    if (!mirror) {
+      return res.status(404).json({ error: 'No mirrored config is available for this node.' });
+    }
+
+    if (mirror.updatedAt !== claims.mirrorUpdatedAt) {
+      return res.status(409).json({ error: 'This handoff link is stale. Generate a fresh one from the dashboard.' });
+    }
+
+    const baseUrl = requestBaseUrl(req);
+    const installerLink = createBundleDownloadLink({
+      baseUrl,
+      tenantId: claims.tenantId,
+      fileName: 'clarix-pulse-v1.9.zip',
+      expiresAt: claims.expiresAt,
+    });
+    const configLink = createNodeConfigDownloadLink({
+      baseUrl,
+      tenantId: claims.tenantId,
+      nodeId: claims.nodeId,
+      fileName: `${claims.nodeId}-pulse-config.yaml`,
+      agentToken: claims.agentToken,
+      mirrorUpdatedAt: claims.mirrorUpdatedAt,
+      expiresAt: claims.expiresAt,
+    });
+
+    await appendAdminAuditEvent({
+      actorUserId: null,
+      actorEmail: 'public-install-handoff',
+      targetTenantId: claims.tenantId,
+      action: 'install_handoff_link_opened',
+      details: {
+        nodeId: node.nodeId,
+        nodeName: node.nodeName,
+        siteId: node.siteId,
+        expiresAt: claims.expiresAt,
+      },
+    });
+
+    return res.json({
+      ok: true,
+      tenant: {
+        tenantId: tenant.tenantId,
+        name: tenant.tenantName,
+        slug: tenant.tenantSlug,
+      },
+      node: {
+        nodeId: node.nodeId,
+        nodeName: node.nodeName,
+        siteId: node.siteId,
+      },
+      handoff: {
+        expiresAt: claims.expiresAt,
+        installerUrl: installerLink.url,
+        configUrl: configLink.url,
+      },
+      metrics: {
+        openedEvent: 'install_handoff_link_opened',
+      },
+    });
+  });
+
   router.use(requireSession);
+
+  router.post('/remote/install-handoff-link', async (req: Request, res: Response) => {
+    const nodeId = asString(req.body?.nodeId);
+    if (!nodeId) {
+      return res.status(400).json({ error: 'nodeId is required.' });
+    }
+
+    const node = await getNode(req.auth!.tenantId, nodeId);
+    if (!node) {
+      return res.status(404).json({ error: 'Unknown node.' });
+    }
+
+    const mirror = await getMirroredNodeConfig(node.nodeId, req.auth!.tenantId);
+    if (!mirror) {
+      return res.status(404).json({ error: 'No mirrored config is available for this node yet.' });
+    }
+
+    const agentToken = await getActiveAgentToken(node.nodeId, req.auth!.tenantId);
+    if (!agentToken) {
+      return res.status(409).json({ error: 'No active agent token is available for this node.' });
+    }
+
+    try {
+      const link = createInstallHandoffLink({
+        baseUrl: requestBaseUrl(req),
+        tenantId: req.auth!.tenantId,
+        nodeId: node.nodeId,
+        agentToken,
+        mirrorUpdatedAt: mirror.updatedAt,
+      });
+
+      await appendAdminAuditEvent({
+        actorUserId: req.auth!.userId,
+        actorEmail: req.auth!.email,
+        targetTenantId: req.auth!.tenantId,
+        action: 'install_handoff_link_created',
+        details: {
+          nodeId: node.nodeId,
+          nodeName: node.nodeName,
+          siteId: node.siteId,
+          expiresAt: link.expiresAt,
+        },
+      });
+
+      return res.json({
+        ok: true,
+        nodeId: node.nodeId,
+        nodeName: node.nodeName,
+        url: link.url,
+        expiresAt: link.expiresAt,
+        metrics: {
+          createdEvent: 'install_handoff_link_created',
+          openedEvent: 'install_handoff_link_opened',
+        },
+      });
+    } catch (error) {
+      return res.status(503).json({
+        error: error instanceof Error ? error.message : 'Install handoff links are not configured on this server.',
+      });
+    }
+  });
 
   router.get('/player/:playerId', async (req: Request, res: Response) => {
     const tenantId = req.auth!.tenantId;

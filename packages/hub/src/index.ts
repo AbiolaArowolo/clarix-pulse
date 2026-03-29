@@ -13,13 +13,13 @@ import { createHeartbeatRouter } from './routes/heartbeat';
 import { buildStatusPayload, createStatusRouter } from './routes/status';
 import { createThumbnailRouter } from './routes/thumbnail';
 import { SESSION_COOKIE_NAME, readCookie, requirePlatformAdmin, requireSession } from './serverAuth';
-import { sendNetworkIssueAlert } from './services/alerting';
+import { getAlertDeliveryHealth, sendNetworkIssueAlert } from './services/alerting';
 import { getSessionFromToken } from './store/auth';
-import { DATABASE_URL_DISPLAY, initDb } from './store/db';
+import { checkDbHealth, DATABASE_URL_DISPLAY, initDb } from './store/db';
 import { getInstanceControls, initInstanceControls, isAlertingSuppressed } from './store/instanceControls';
 import { getPlayer, initRegistry } from './store/registry';
 import { getAllStates, initState, markInstanceOffline, setConnectivity } from './store/state';
-import { getThumbnailStorePath } from './store/thumbnails';
+import { checkThumbnailStoreHealth, getThumbnailStorePath } from './store/thumbnails';
 
 const repoRoot = path.resolve(__dirname, '../../../..');
 dotenv.config({ path: path.join(repoRoot, '.env') });
@@ -52,11 +52,32 @@ app.use('/api/thumbnail', createThumbnailRouter(io));
 app.use('/api/status', requireSession, createStatusRouter());
 app.use('/api/admin', requirePlatformAdmin, createAdminRouter());
 
-app.get('/api/health', (_req, res) => res.json({
-  ok: true,
-  ts: new Date().toISOString(),
-  build: readBuildInfo(),
-}));
+const processStartedAt = Date.now();
+
+app.get('/api/health', async (_req, res) => {
+  const [db, thumbnailStore] = await Promise.all([
+    checkDbHealth(),
+    checkThumbnailStoreHealth(),
+  ]);
+  const ok = db.ok && thumbnailStore.ok;
+
+  return res.status(ok ? 200 : 503).json({
+    ok,
+    ts: new Date().toISOString(),
+    uptimeSeconds: Math.floor((Date.now() - processStartedAt) / 1000),
+    trackedInstances: getAllStates().length,
+    memory: {
+      rssMb: Math.round(process.memoryUsage().rss / (1024 * 1024)),
+      heapUsedMb: Math.round(process.memoryUsage().heapUsed / (1024 * 1024)),
+    },
+    components: {
+      database: db,
+      thumbnailStore,
+      alerting: getAlertDeliveryHealth(),
+    },
+    build: readBuildInfo(),
+  });
+});
 app.get('/api/version', (_req, res) => res.json(readBuildInfo()));
 
 io.use(async (socket, next) => {

@@ -5,6 +5,7 @@ import { navigate, usePathname } from './hooks/usePathname';
 import { AccountPage } from './pages/AccountPage';
 import { AdminPage } from './pages/AdminPage';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
+import { InstallHandoffPage } from './pages/InstallHandoffPage';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
 import { MonitoringDashboardPage } from './pages/MonitoringDashboardPage';
@@ -98,6 +99,10 @@ export default function App() {
 
   if (pathname === '/reset-password') {
     return <ResetPasswordPage onNavigate={go} />;
+  }
+
+  if (pathname === '/install-handoff') {
+    return <InstallHandoffPage onNavigate={go} />;
   }
 
   if (!auth.authenticated) {

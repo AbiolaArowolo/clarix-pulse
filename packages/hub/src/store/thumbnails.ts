@@ -33,6 +33,28 @@ export function getThumbnailStorePath(): string {
   return THUMBNAIL_DIR;
 }
 
+export async function checkThumbnailStoreHealth(): Promise<{
+  ok: boolean;
+  path: string;
+  error: string | null;
+}> {
+  try {
+    ensureThumbnailDir();
+    await fs.promises.access(THUMBNAIL_DIR, fs.constants.R_OK | fs.constants.W_OK);
+    return {
+      ok: true,
+      path: THUMBNAIL_DIR,
+      error: null,
+    };
+  } catch {
+    return {
+      ok: false,
+      path: THUMBNAIL_DIR,
+      error: 'thumbnail store unavailable',
+    };
+  }
+}
+
 export async function saveThumbnail(playerId: string, dataUrl: string): Promise<void> {
   const imageBuffer = parseDataUrl(dataUrl);
   if (!imageBuffer) {

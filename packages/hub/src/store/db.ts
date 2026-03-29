@@ -57,6 +57,28 @@ pool.on('error', (err) => {
   console.error('[db] PostgreSQL pool error', err);
 });
 
+export async function checkDbHealth(): Promise<{
+  ok: boolean;
+  latencyMs: number | null;
+  error: string | null;
+}> {
+  const startedAt = Date.now();
+  try {
+    await pool.query('SELECT 1');
+    return {
+      ok: true,
+      latencyMs: Date.now() - startedAt,
+      error: null,
+    };
+  } catch {
+    return {
+      ok: false,
+      latencyMs: Date.now() - startedAt,
+      error: 'database unavailable',
+    };
+  }
+}
+
 export type BroadcastHealth = 'healthy' | 'degraded' | 'off_air_likely' | 'off_air_confirmed' | 'unknown';
 export type RuntimeHealth = 'healthy' | 'paused' | 'restarting' | 'stalled' | 'stopped' | 'content_error' | 'unknown';
 export type ConnectivityHealth = 'online' | 'stale' | 'offline';

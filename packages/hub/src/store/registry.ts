@@ -206,6 +206,14 @@ function parseLegacyTokens(): Array<{ nodeId: string; token: string }> {
   return parsed;
 }
 
+export function filterLegacyTokensByExistingNodes(
+  legacyTokens: Array<{ nodeId: string; token: string }>,
+  existingNodeIds: Iterable<string>,
+): Array<{ nodeId: string; token: string }> {
+  const knownNodeIds = new Set(existingNodeIds);
+  return legacyTokens.filter(({ nodeId }) => knownNodeIds.has(nodeId));
+}
+
 async function getSiteTenant(siteId: string, client?: Parameters<typeof queryOne>[2]): Promise<string | null> {
   const row = await queryOne<{ tenant_id: string }>(`
     SELECT tenant_id
@@ -299,7 +307,22 @@ export async function initRegistry(): Promise<void> {
       ], client);
     }
 
-    for (const { nodeId, token } of legacyTokens) {
+    if (legacyTokens.length === 0) {
+      return;
+    }
+
+    const existingNodeRows = await query<{ node_id: string }>(`
+      SELECT node_id
+      FROM nodes
+      WHERE node_id = ANY($1::text[])
+    `, [legacyTokens.map(({ nodeId }) => nodeId)], client);
+
+    const seedableLegacyTokens = filterLegacyTokensByExistingNodes(
+      legacyTokens,
+      existingNodeRows.map((row) => row.node_id),
+    );
+
+    for (const { nodeId, token } of seedableLegacyTokens) {
       await exec(`
         UPDATE agent_tokens
         SET active = FALSE, updated_at = $2
