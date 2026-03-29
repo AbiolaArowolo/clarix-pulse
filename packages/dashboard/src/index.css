@@ -28,4 +28,28 @@
   .status-red    { @apply bg-red-500/20 border-red-500 text-red-300; }
   .status-orange { @apply bg-orange-500/20 border-orange-500 text-orange-300; }
   .status-gray   { @apply bg-slate-700/50 border-slate-600 text-slate-400; }
+
+  .pulse-logo {
+    filter: drop-shadow(0 0 10px rgba(96, 165, 250, 0.18)) drop-shadow(0 0 26px rgba(56, 189, 248, 0.12));
+    animation: pulse-logo-breathe 4.4s ease-in-out infinite;
+    transform-origin: center;
+  }
+}
+
+@keyframes pulse-logo-breathe {
+  0%, 100% {
+    opacity: 0.92;
+    filter: drop-shadow(0 0 8px rgba(96, 165, 250, 0.14)) drop-shadow(0 0 20px rgba(56, 189, 248, 0.1));
+  }
+
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 14px rgba(125, 211, 252, 0.24)) drop-shadow(0 0 32px rgba(59, 130, 246, 0.18));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-logo {
+    animation: none;
+  }
 }

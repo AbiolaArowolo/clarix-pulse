@@ -84,9 +84,9 @@ export function AppFrame({
               <button
                 type="button"
                 onClick={() => onNavigate('/')}
-                className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border border-blue-400/20 bg-[#071538] shadow-[0_16px_34px_rgba(7,21,56,0.52)]"
+                className="flex h-12 w-12 items-center justify-center rounded-2xl transition-transform hover:scale-[1.02]"
               >
-                <img src="/pulse.svg" alt="Pulse logo" className="h-full w-full object-cover" />
+                <img src="/pulse.svg" alt="Pulse logo" className="pulse-logo h-full w-full object-contain" />
               </button>
               <div className="min-w-0">
                 <p className="text-[11px] uppercase tracking-[0.24em] text-cyan-200">{session.tenant.slug}</p>

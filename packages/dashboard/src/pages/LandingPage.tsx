@@ -34,8 +34,8 @@ export function LandingPage({
       <div className="mx-auto flex min-h-dvh max-w-6xl flex-col px-4 py-6 sm:px-6 lg:px-8">
         <header className="flex items-center justify-between border-b border-slate-800/80 pb-5">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl border border-slate-700 bg-slate-950">
-              <img src="/pulse.svg" alt="Clarix Pulse logo" className="h-full w-full object-cover" />
+            <div className="flex h-12 w-12 items-center justify-center">
+              <img src="/pulse.svg" alt="Clarix Pulse logo" className="pulse-logo h-full w-full object-contain" />
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-200">Clarix Pulse</p>

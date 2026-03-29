@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { InstallWorkspacePanel } from '../components/InstallWorkspacePanel';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { downloadAuthenticatedFile, requestAuthenticatedDownloadLink } from '../lib/downloads';
 
@@ -155,6 +156,8 @@ export function AccountPage({
             </div>
           )}
         </div>
+
+        <InstallWorkspacePanel />
       </section>
 
       <aside className="space-y-5">

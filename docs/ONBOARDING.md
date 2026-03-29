@@ -16,6 +16,16 @@
 8. Sign in with email, password, and the access key.
 9. Open the dashboard's `Onboarding` page.
 
+### For the platform admin first login
+
+1. Use the email listed in `PULSE_ADMIN_EMAILS`.
+2. If that email has not been registered yet, go to `/register` and create the account once.
+3. Then sign in at `/login` with that email and password.
+4. Leave the access-key field blank for the platform admin account.
+5. Open `/app/admin`.
+6. Find the customer account and click `Enable account`.
+7. If needed, use `Open workspace` to enter the customer workspace without their password.
+
 ### If access help is needed
 
 1. If the user forgot the password, use `Forgot password` on the login page.

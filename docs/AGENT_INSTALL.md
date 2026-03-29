@@ -80,6 +80,7 @@ Clarix Pulse is now account-based and workspace-isolated:
 - if SMTP is configured, that key is emailed automatically
 - if SMTP is unavailable, the key is shown once in the registration flow as a fallback
 - new accounts are disabled by default until a platform admin enables them
+- the platform admin uses the email listed in `PULSE_ADMIN_EMAILS`, can register that email once if needed, and signs in without an access key
 - the registration email becomes the default alert email for that workspace
 - new dashboards start empty by default
 - nodes only appear after local setup mirrors into that workspace

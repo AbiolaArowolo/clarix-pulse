@@ -1,57 +1,109 @@
 <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <radialGradient id="pulseGlowRed" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(256 256) rotate(90) scale(180 180)">
-      <stop offset="0" stop-color="#ff2547" stop-opacity="0.32" />
-      <stop offset="0.55" stop-color="#ff2547" stop-opacity="0.12" />
-      <stop offset="1" stop-color="#ff2547" stop-opacity="0" />
+    <linearGradient id="cardFill" x1="88" y1="72" x2="424" y2="440" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#07111d" />
+      <stop offset="0.55" stop-color="#040a13" />
+      <stop offset="1" stop-color="#02060c" />
+    </linearGradient>
+    <radialGradient id="centerGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(256 256) rotate(90) scale(144 176)">
+      <stop offset="0" stop-color="#3B9BFF" stop-opacity="0.42" />
+      <stop offset="0.5" stop-color="#1D5FB5" stop-opacity="0.16" />
+      <stop offset="1" stop-color="#08121F" stop-opacity="0" />
     </radialGradient>
-    <linearGradient id="pulseBlue" x1="36" y1="256" x2="476" y2="256" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#2f6fff" />
-      <stop offset="1" stop-color="#1a43cf" />
-    </linearGradient>
-    <linearGradient id="pulseRed" x1="188" y1="256" x2="324" y2="256" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ff5572" />
-      <stop offset="0.45" stop-color="#ff2747" />
-      <stop offset="1" stop-color="#ffd0d7" />
-    </linearGradient>
-    <filter id="redSoftGlow" x="132" y="76" width="248" height="360" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+    <filter id="cardAura" x="8" y="8" width="496" height="496" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
       <feFlood flood-opacity="0" result="BackgroundImageFix" />
-      <feGaussianBlur in="SourceGraphic" stdDeviation="16" result="blur" />
-      <feColorMatrix in="blur" type="matrix" values="1 0 0 0 0  0 0.18 0 0 0  0 0 0.05 0 0  0 0 0 1 0" result="glow" />
+      <feGaussianBlur in="SourceGraphic" stdDeviation="18" result="blur" />
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.28 0 0 0 0 0.58 0 0 0 0 0.95 0 0 0 0.36 0" result="glow" />
+      <feBlend mode="screen" in="glow" in2="BackgroundImageFix" result="shape" />
+    </filter>
+    <filter id="waveGlow" x="74" y="102" width="364" height="308" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix" />
+      <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="blur" />
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.34 0 0 0 0 0.72 0 0 0 0 1 0 0 0 1 0" result="glow" />
       <feBlend mode="screen" in="glow" in2="BackgroundImageFix" result="shape" />
       <feBlend mode="screen" in="SourceGraphic" in2="shape" result="effect1" />
     </filter>
-    <filter id="blueSoftGlow" x="-8" y="88" width="528" height="336" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+    <filter id="waveCoreGlow" x="108" y="132" width="296" height="248" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
       <feFlood flood-opacity="0" result="BackgroundImageFix" />
-      <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur" />
-      <feColorMatrix in="blur" type="matrix" values="0.16 0 0 0 0  0 0.34 0 0 0  0 0 0.95 0 0  0 0 0 1 0" result="glow" />
+      <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur" />
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.68 0 0 0 0 0.88 0 0 0 0 1 0 0 0 1 0" result="glow" />
       <feBlend mode="screen" in="glow" in2="BackgroundImageFix" result="shape" />
       <feBlend mode="screen" in="SourceGraphic" in2="shape" result="effect1" />
     </filter>
+    <style>
+      .logo-aura {
+        animation: cardBreathe 4.4s ease-in-out infinite;
+        transform-origin: 50% 50%;
+      }
+
+      .logo-wave {
+        animation: waveBreathe 4.4s ease-in-out infinite;
+        transform-origin: 50% 50%;
+      }
+
+      .logo-core {
+        animation: waveCoreBreathe 4.4s ease-in-out infinite;
+        transform-origin: 50% 50%;
+      }
+
+      @keyframes cardBreathe {
+        0%, 100% {
+          opacity: 0.66;
+        }
+        50% {
+          opacity: 0.94;
+        }
+      }
+
+      @keyframes waveBreathe {
+        0%, 100% {
+          opacity: 0.78;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+
+      @keyframes waveCoreBreathe {
+        0%, 100% {
+          opacity: 0.88;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .logo-aura,
+        .logo-wave,
+        .logo-core {
+          animation: none;
+        }
+      }
+    </style>
   </defs>
-  <rect width="512" height="512" rx="118" fill="#071538" />
-  <rect x="18" y="18" width="476" height="476" rx="100" stroke="#16326e" stroke-opacity="0.7" stroke-width="4" />
-  <rect x="30" y="30" width="452" height="452" rx="88" fill="url(#pulseGlowRed)" />
-  <g filter="url(#blueSoftGlow)">
+
+  <g class="logo-aura" filter="url(#cardAura)">
+    <rect x="58" y="58" width="396" height="396" rx="34" fill="#2B6CC9" fill-opacity="0.16" />
+  </g>
+
+  <rect x="60" y="60" width="392" height="392" rx="30" fill="url(#cardFill)" />
+  <rect x="60" y="60" width="392" height="392" rx="30" fill="url(#centerGlow)" />
+
+  <g class="logo-wave" filter="url(#waveGlow)">
     <path
-      d="M0 256H106L124 226L140 290L166 96L196 338L228 220H512"
-      stroke="url(#pulseBlue)"
-      stroke-width="8"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-    />
-    <path
-      d="M284 220H318L334 290L352 96L380 338L410 226L426 256H512"
-      stroke="url(#pulseBlue)"
-      stroke-width="8"
+      d="M110 256H192C205 256 209 216 224 216C239 216 243 310 258 310C273 310 285 132 302 132C320 132 321 366 338 366C355 366 360 234 381 234C395 234 406 256 420 256H402"
+      stroke="#6FC2FF"
+      stroke-width="18"
       stroke-linecap="round"
       stroke-linejoin="round"
     />
   </g>
-  <g filter="url(#redSoftGlow)">
+
+  <g class="logo-core" filter="url(#waveCoreGlow)">
     <path
-      d="M228 256H250L274 176L294 290L320 120L342 338L366 220H388"
-      stroke="url(#pulseRed)"
+      d="M110 256H192C205 256 209 216 224 216C239 216 243 310 258 310C273 310 285 132 302 132C320 132 321 366 338 366C355 366 360 234 381 234C395 234 406 256 420 256H402"
+      stroke="#F5FCFF"
       stroke-width="9"
       stroke-linecap="round"
       stroke-linejoin="round"

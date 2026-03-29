@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlarmBanner } from '../components/AlarmBanner';
 import { AlertContactsEditor } from '../components/AlertContactsEditor';
-import { InstallBar, InstallBarMode } from '../components/InstallBar';
 import { RemoteSetupPanel } from '../components/RemoteSetupPanel';
 import { SiteGroup } from '../components/SiteGroup';
 import { useAlarm } from '../hooks/useAlarm';
@@ -24,7 +23,6 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
   const { sites, connectionStatus } = useMonitoring();
   const { alarmActive, muted, audioBlocked, toggleMute, enableSound } = useAlarm(sites);
   const [showInactive, setShowInactive] = useState(() => readStoredBoolean(SHOW_INACTIVE_KEY));
-  const [installBarMode, setInstallBarMode] = useState<InstallBarMode>('expanded');
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -50,12 +48,6 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
       .filter((site) => site.instances.length > 0),
     [showInactive, sites],
   );
-
-  const installPadding = installBarMode === 'expanded'
-    ? 'pb-80 sm:pb-44'
-    : installBarMode === 'collapsed'
-      ? 'pb-24 sm:pb-16'
-      : 'pb-8 sm:pb-6';
 
   const connDot: Record<typeof connectionStatus, string> = {
     connected: 'bg-emerald-400 shadow-[0_0_18px_rgba(52,211,153,0.8)]',
@@ -83,7 +75,7 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
   }).format(now);
 
   return (
-    <div className={`relative ${installPadding}`}>
+    <div className="relative pb-8 sm:pb-6">
       <AlarmBanner
         sites={sites}
         muted={muted}
@@ -168,8 +160,6 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
           <span className="text-xs text-slate-500">{new Date().getFullYear()} Live workflow visibility</span>
         </footer>
       </div>
-
-      <InstallBar onModeChange={setInstallBarMode} />
     </div>
   );
 }
