@@ -301,6 +301,12 @@ export async function initRegistry(): Promise<void> {
 
     for (const { nodeId, token } of legacyTokens) {
       await exec(`
+        UPDATE agent_tokens
+        SET active = FALSE, updated_at = $2
+        WHERE node_id = $1 AND active = TRUE AND token <> $3
+      `, [nodeId, timestamp, token], client);
+
+      await exec(`
         INSERT INTO agent_tokens (token, node_id, description, active, created_at, updated_at)
         VALUES ($1, $2, 'Seeded from AGENT_TOKENS', TRUE, $3, $3)
         ON CONFLICT (token) DO UPDATE SET
