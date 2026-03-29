@@ -245,10 +245,44 @@ export async function initDb(): Promise<void> {
         session_id           TEXT PRIMARY KEY,
         user_id              TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
         session_token_hash   TEXT NOT NULL,
+        impersonator_user_id TEXT REFERENCES users(user_id) ON DELETE SET NULL,
+        impersonator_email   TEXT,
+        impersonation_started_at TIMESTAMPTZ,
         expires_at           TIMESTAMPTZ NOT NULL,
         created_at           TIMESTAMPTZ NOT NULL,
         updated_at           TIMESTAMPTZ NOT NULL
       );
+    `, [], client);
+
+    await exec(`
+      ALTER TABLE sessions
+      ADD COLUMN IF NOT EXISTS impersonator_user_id TEXT;
+    `, [], client);
+
+    await exec(`
+      ALTER TABLE sessions
+      ADD COLUMN IF NOT EXISTS impersonator_email TEXT;
+    `, [], client);
+
+    await exec(`
+      ALTER TABLE sessions
+      ADD COLUMN IF NOT EXISTS impersonation_started_at TIMESTAMPTZ;
+    `, [], client);
+
+    await exec(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'sessions_impersonator_user_id_fkey'
+        ) THEN
+          ALTER TABLE sessions
+          ADD CONSTRAINT sessions_impersonator_user_id_fkey
+          FOREIGN KEY (impersonator_user_id) REFERENCES users(user_id) ON DELETE SET NULL;
+        END IF;
+      END
+      $$;
     `, [], client);
 
     await exec(`
@@ -259,6 +293,60 @@ export async function initDb(): Promise<void> {
     await exec(`
       CREATE INDEX IF NOT EXISTS idx_sessions_user_id
       ON sessions(user_id);
+    `, [], client);
+
+    await exec(`
+      CREATE INDEX IF NOT EXISTS idx_sessions_impersonator_user_id
+      ON sessions(impersonator_user_id);
+    `, [], client);
+
+    await exec(`
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        reset_id            TEXT PRIMARY KEY,
+        user_id             TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+        token_hash          TEXT NOT NULL,
+        created_by_admin    BOOLEAN NOT NULL DEFAULT FALSE,
+        actor_user_id       TEXT REFERENCES users(user_id) ON DELETE SET NULL,
+        actor_email         TEXT,
+        expires_at          TIMESTAMPTZ NOT NULL,
+        consumed_at         TIMESTAMPTZ,
+        created_at          TIMESTAMPTZ NOT NULL,
+        updated_at          TIMESTAMPTZ NOT NULL
+      );
+    `, [], client);
+
+    await exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_password_reset_tokens_hash
+      ON password_reset_tokens(token_hash);
+    `, [], client);
+
+    await exec(`
+      CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id
+      ON password_reset_tokens(user_id);
+    `, [], client);
+
+    await exec(`
+      CREATE TABLE IF NOT EXISTS admin_audit_events (
+        event_id            TEXT PRIMARY KEY,
+        actor_user_id       TEXT REFERENCES users(user_id) ON DELETE SET NULL,
+        actor_email         TEXT NOT NULL,
+        target_tenant_id    TEXT REFERENCES tenants(tenant_id) ON DELETE SET NULL,
+        target_user_id      TEXT REFERENCES users(user_id) ON DELETE SET NULL,
+        target_email        TEXT,
+        action              TEXT NOT NULL,
+        details             JSONB,
+        created_at          TIMESTAMPTZ NOT NULL
+      );
+    `, [], client);
+
+    await exec(`
+      CREATE INDEX IF NOT EXISTS idx_admin_audit_events_created_at
+      ON admin_audit_events(created_at DESC);
+    `, [], client);
+
+    await exec(`
+      CREATE INDEX IF NOT EXISTS idx_admin_audit_events_target_tenant_id
+      ON admin_audit_events(target_tenant_id);
     `, [], client);
 
     await exec(`

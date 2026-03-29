@@ -4,6 +4,10 @@ function smtpReady(): boolean {
   return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER);
 }
 
+export function accountEmailReady(): boolean {
+  return smtpReady();
+}
+
 function transporter() {
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST,
@@ -33,6 +37,15 @@ interface AccountEmailInput {
   enabled: boolean;
 }
 
+interface PasswordResetEmailInput {
+  to: string;
+  companyName: string;
+  displayName: string;
+  resetUrl: string;
+  expiresAt: string;
+  appUrl: string;
+}
+
 export async function sendRegistrationAccessKeyEmail(input: AccountEmailInput): Promise<boolean> {
   if (!smtpReady()) {
     return false;
@@ -53,6 +66,35 @@ export async function sendRegistrationAccessKeyEmail(input: AccountEmailInput): 
       : 'Your account is pending activation by Clarix. Keep this key safe. Once the account is enabled, use your email, password, and this key to sign in.',
     '',
     `Sign in: ${input.appUrl}/login`,
+    '',
+    'Clarix Pulse',
+  ];
+
+  await transporter().sendMail({
+    from: fromAddress(),
+    to: input.to,
+    subject,
+    text: lines.join('\n'),
+  });
+
+  return true;
+}
+
+export async function sendPasswordResetEmail(input: PasswordResetEmailInput): Promise<boolean> {
+  if (!smtpReady()) {
+    return false;
+  }
+
+  const subject = `Reset your Clarix Pulse password for ${input.companyName}`;
+  const lines = [
+    `Hello ${input.displayName || input.companyName},`,
+    '',
+    'A password reset was requested for your Clarix Pulse account.',
+    '',
+    `Reset link: ${input.resetUrl}`,
+    `Link expires: ${input.expiresAt}`,
+    '',
+    `If you did not request this, ignore this email and sign in at ${input.appUrl}/login.`,
     '',
     'Clarix Pulse',
   ];

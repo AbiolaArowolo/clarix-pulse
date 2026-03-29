@@ -16,6 +16,15 @@
 8. Sign in with email, password, and the access key.
 9. Open the dashboard's `Onboarding` page.
 
+### If access help is needed
+
+1. If the user forgot the password, use `Forgot password` on the login page.
+2. If SMTP is configured, Clarix Pulse emails the reset link.
+3. If SMTP is unavailable, a platform admin can issue a reset from `/app/admin` and copy the one-time fallback reset link.
+4. Platform admins can also open the customer workspace directly from `/app/admin` without asking for the customer password.
+5. When support mode is active, the app shows a banner until the admin returns to the admin workspace.
+6. Recent support actions are visible in the admin activity feed.
+
 ### For a new Windows node
 
 1. While signed in, download the installer bundle from the onboarding or account page, or generate a secure expiring installer link if hub signing is configured.
@@ -54,3 +63,6 @@ sc query ClarixPulseAgent
 - secure installer/config links are expiring URLs created from the dashboard for node-side pulls
 - the provisioned `config.yaml` flow is preferred over enrollment-key setup
 - the enrollment key still exists as a fallback on the account and onboarding screens
+- the login screen includes `Forgot password`
+- `/app/admin` can now issue password reset links and open a tenant workspace in support mode
+- `/app/admin` also shows the recent support audit feed

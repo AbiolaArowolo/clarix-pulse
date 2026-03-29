@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import { AuthenticatedSession, deleteSession, getSessionFromToken } from './store/auth';
 
 export const SESSION_COOKIE_NAME = 'clarix_pulse_session';
+export const ADMIN_RETURN_COOKIE_NAME = 'clarix_pulse_admin_return';
 
 function asBool(value: string | undefined, fallback: boolean): boolean {
   if (!value) return fallback;
@@ -36,8 +37,17 @@ export function serializeSessionCookie(sessionToken: string, maxAgeSeconds = 60 
   return `${SESSION_COOKIE_NAME}=${encoded}; ${cookieAttributes(maxAgeSeconds).join('; ')}`;
 }
 
+export function serializeAdminReturnCookie(sessionToken: string, maxAgeSeconds = 60 * 60 * 24 * 30): string {
+  const encoded = encodeURIComponent(sessionToken);
+  return `${ADMIN_RETURN_COOKIE_NAME}=${encoded}; ${cookieAttributes(maxAgeSeconds).join('; ')}`;
+}
+
 export function serializeClearedSessionCookie(): string {
   return `${SESSION_COOKIE_NAME}=; ${cookieAttributes(0).join('; ')}`;
+}
+
+export function serializeClearedAdminReturnCookie(): string {
+  return `${ADMIN_RETURN_COOKIE_NAME}=; ${cookieAttributes(0).join('; ')}`;
 }
 
 export function readCookie(headerValue: string | undefined, cookieName: string): string | null {
@@ -104,9 +114,16 @@ export async function requirePlatformAdmin(req: Request, res: Response, next: Ne
 
 export async function clearSessionFromRequest(req: Request, res: Response): Promise<void> {
   const sessionToken = readCookie(req.headers.cookie, SESSION_COOKIE_NAME);
+  const adminReturnToken = readCookie(req.headers.cookie, ADMIN_RETURN_COOKIE_NAME);
   if (sessionToken) {
     await deleteSession(sessionToken);
   }
+  if (adminReturnToken && adminReturnToken !== sessionToken) {
+    await deleteSession(adminReturnToken);
+  }
 
-  res.setHeader('Set-Cookie', serializeClearedSessionCookie());
+  res.setHeader('Set-Cookie', [
+    serializeClearedSessionCookie(),
+    serializeClearedAdminReturnCookie(),
+  ]);
 }

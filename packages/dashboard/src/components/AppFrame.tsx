@@ -13,6 +13,11 @@ interface SessionShape {
     enabled?: boolean;
     accessKeyExpiresAt?: string | null;
   };
+  impersonation?: {
+    active: boolean;
+    impersonatorEmail?: string | null;
+    startedAt?: string | null;
+  } | null;
 }
 
 interface Props {
@@ -21,6 +26,7 @@ interface Props {
   title: string;
   description: string;
   onNavigate: (pathname: string) => void;
+  onStopImpersonation: () => void;
   onLogout: () => void;
   children: React.ReactNode;
 }
@@ -35,6 +41,7 @@ export function AppFrame({
   title,
   description,
   onNavigate,
+  onStopImpersonation,
   onLogout,
   children,
 }: Props) {
@@ -53,6 +60,25 @@ export function AppFrame({
 
       <header className="relative z-20 border-b border-slate-800/80 bg-slate-950/82 backdrop-blur-xl">
         <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6">
+          {session.impersonation?.active && (
+            <div className="mb-4 flex flex-col gap-3 rounded-3xl border border-amber-400/30 bg-amber-400/10 px-4 py-4 text-sm text-amber-50 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="font-semibold">Support workspace view</p>
+                <p className="mt-1 text-amber-100/85">
+                  You are viewing this tenant as an administrator.
+                  {session.impersonation.impersonatorEmail ? ` Original admin account: ${session.impersonation.impersonatorEmail}.` : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onStopImpersonation}
+                className="rounded-full border border-amber-200/35 bg-amber-200/10 px-4 py-2 text-sm font-semibold text-amber-50 transition-colors hover:border-amber-100"
+              >
+                Return to admin
+              </button>
+            </div>
+          )}
+
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex min-w-0 items-center gap-4">
               <button

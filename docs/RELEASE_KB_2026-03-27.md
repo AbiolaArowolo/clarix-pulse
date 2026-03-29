@@ -11,6 +11,8 @@ This KB now reflects the current product state after:
 - emailed 365-day access keys
 - registration fallback key reveal when SMTP is unavailable
 - registration/login/account experience
+- self-service password reset flow
+- admin-issued password reset and workspace support mode
 - authenticated installer downloads plus secure expiring node-side links
 - tenant-scoped status, sockets, and alert settings
 - discovery-first onboarding
@@ -26,11 +28,13 @@ This KB now reflects the current product state after:
 - every new account gets a generated access key and starts disabled by default
 - the registration email becomes the default alert email for that tenant
 - `/app` requires an authenticated session
+- `/forgot-password` and `/reset-password` are now part of the public auth flow
 - browser downloads use `/api/downloads/...`
 - node-side direct pulls use secure expiring links minted from the dashboard
 - new tenants start with no nodes
 - nodes appear only after their local setup mirrors into that tenant
 - one default installer bundle is supported: `clarix-pulse-v1.9`
+- platform admins can issue password reset links and open a tenant workspace without the customer password
 
 ---
 
@@ -83,6 +87,8 @@ Manifest:
 - landing page: [LandingPage.tsx](/D:/monitoring/packages/dashboard/src/pages/LandingPage.tsx)
 - login page: [LoginPage.tsx](/D:/monitoring/packages/dashboard/src/pages/LoginPage.tsx)
 - register page: [RegisterPage.tsx](/D:/monitoring/packages/dashboard/src/pages/RegisterPage.tsx)
+- forgot password page: [ForgotPasswordPage.tsx](/D:/monitoring/packages/dashboard/src/pages/ForgotPasswordPage.tsx)
+- reset password page: [ResetPasswordPage.tsx](/D:/monitoring/packages/dashboard/src/pages/ResetPasswordPage.tsx)
 - monitoring page: [MonitoringDashboardPage.tsx](/D:/monitoring/packages/dashboard/src/pages/MonitoringDashboardPage.tsx)
 - admin page: [AdminPage.tsx](/D:/monitoring/packages/dashboard/src/pages/AdminPage.tsx)
 

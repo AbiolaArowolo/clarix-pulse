@@ -8,6 +8,13 @@ interface AuthUser {
   isPlatformAdmin?: boolean;
 }
 
+interface AuthImpersonation {
+  active: boolean;
+  impersonatorUserId?: string | null;
+  impersonatorEmail?: string | null;
+  startedAt?: string | null;
+}
+
 interface AuthTenant {
   tenantId: string;
   name: string;
@@ -25,6 +32,7 @@ interface AuthSessionState {
   user: AuthUser | null;
   tenant: AuthTenant | null;
   expiresAt: string | null;
+  impersonation: AuthImpersonation | null;
 }
 
 interface AuthContextValue extends AuthSessionState {
@@ -49,6 +57,9 @@ interface AuthContextValue extends AuthSessionState {
     email: string;
     password: string;
   }) => Promise<boolean>;
+  requestPasswordReset: (email: string) => Promise<boolean>;
+  resetPassword: (input: { token: string; password: string }) => Promise<boolean>;
+  stopImpersonation: () => Promise<boolean>;
   logout: () => Promise<void>;
   clearError: () => void;
 }
@@ -69,6 +80,7 @@ interface SessionPayload {
   session?: {
     expiresAt?: string;
   };
+  impersonation?: AuthImpersonation;
   notice?: string;
   registered?: boolean;
   error?: string;
@@ -81,6 +93,7 @@ const EMPTY_STATE: AuthSessionState = {
   user: null,
   tenant: null,
   expiresAt: null,
+  impersonation: null,
 };
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
@@ -98,6 +111,7 @@ function sessionFromPayload(payload: SessionPayload): AuthSessionState {
     user: payload.user ?? null,
     tenant: payload.tenant ?? null,
     expiresAt: payload.session?.expiresAt ?? null,
+    impersonation: payload.impersonation ?? null,
   };
 }
 
@@ -185,6 +199,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     register: async ({ companyName, displayName, email, password }) => (
       submit('/api/auth/register', { companyName, displayName, email, password })
     ),
+    requestPasswordReset: async (email) => (
+      submit('/api/auth/forgot-password', { email })
+    ),
+    resetPassword: async ({ token, password }) => (
+      submit('/api/auth/reset-password', { token, password })
+    ),
+    stopImpersonation: async () => {
+      setLoading(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const response = await fetch('/api/auth/impersonation/stop', {
+          method: 'POST',
+        });
+        const payload = await readJsonResponse<SessionPayload>(response);
+        if (!response.ok) {
+          throw new Error(String(payload.error ?? 'Failed to stop impersonation.'));
+        }
+        disconnectHubSocket();
+        await refreshSession();
+        setNotice(payload.notice ?? 'Returned to the admin workspace.');
+        return true;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to stop impersonation.');
+        return false;
+      } finally {
+        setLoading(false);
+      }
+    },
     logout: async () => {
       setLoading(true);
       try {

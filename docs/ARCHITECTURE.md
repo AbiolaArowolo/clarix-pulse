@@ -85,6 +85,8 @@ The hub now stores:
 - `tenants`
 - `users`
 - `sessions`
+- `password_reset_tokens`
+- `admin_audit_events`
 - tenant access state and 365-day access keys
 - tenant-scoped alert settings
 
@@ -101,6 +103,9 @@ Important product rule:
 - the registration email seeds the default alert email for that tenant
 - that alert email can later be changed from the dashboard
 - new accounts stay disabled until a platform admin enables them
+- users can request a password reset from `/forgot-password`
+- platform admins can issue a password reset or open a tenant workspace from `/app/admin`
+- support-mode workspace access is implemented as an impersonated session with a saved admin return session cookie
 - signed-in browser downloads use `/api/downloads`
 - node-side direct pulls use secure expiring links minted from the signed-in dashboard
 
@@ -134,6 +139,8 @@ Main tables:
 - `tenants`
 - `users`
 - `sessions`
+- `password_reset_tokens`
+- `admin_audit_events`
 - `sites`
 - `nodes`
 - `players`

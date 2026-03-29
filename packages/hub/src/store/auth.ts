@@ -18,6 +18,10 @@ export interface AuthenticatedSession {
   disabledReason: string | null;
   accessKeyHint: string | null;
   accessKeyExpiresAt: string | null;
+  impersonating: boolean;
+  impersonatorUserId: string | null;
+  impersonatorEmail: string | null;
+  impersonationStartedAt: string | null;
 }
 
 export interface RegistrationResult {
@@ -54,11 +58,45 @@ export interface TenantAccessKeyRotation {
   accessKey: string;
 }
 
+export interface AdminAuditEvent {
+  eventId: string;
+  actorEmail: string;
+  targetTenantId: string | null;
+  targetTenantName: string | null;
+  targetUserId: string | null;
+  targetEmail: string | null;
+  action: string;
+  details: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface PasswordResetIssueResult {
+  userId: string;
+  email: string;
+  displayName: string;
+  tenantId: string;
+  tenantName: string;
+  resetToken: string;
+  expiresAt: string;
+}
+
 export interface AuthenticationResult {
   ok: boolean;
   statusCode: number;
   error?: string;
   userId?: string;
+}
+
+export interface PasswordResetRequestResult {
+  resetToken: string;
+  resetUrl: string;
+  expiresAt: string;
+  userId: string;
+  email: string;
+  displayName: string;
+  tenantId: string;
+  tenantName: string;
+  createdByAdmin: boolean;
 }
 
 interface SessionRow extends QueryResultRow {
@@ -76,6 +114,9 @@ interface SessionRow extends QueryResultRow {
   disabled_reason: string | null;
   access_key_hint: string | null;
   access_key_expires_at: Date | string | null;
+  impersonator_user_id: string | null;
+  impersonator_email: string | null;
+  impersonation_started_at: Date | string | null;
 }
 
 interface UserRow extends QueryResultRow {
@@ -100,9 +141,37 @@ interface UserAuthRow extends QueryResultRow {
 interface UserAccessRow extends QueryResultRow {
   user_id: string;
   email: string;
+  display_name: string;
+  tenant_id: string;
+  tenant_name: string;
+  tenant_slug: string;
   enabled: boolean;
   disabled_reason: string | null;
   access_key_expires_at: Date | string | null;
+}
+
+interface TenantOwnerRow extends QueryResultRow {
+  user_id: string;
+  email: string;
+  display_name: string;
+  tenant_id: string;
+  tenant_name: string;
+  tenant_slug: string;
+}
+
+interface PasswordResetRow extends QueryResultRow {
+  reset_id: string;
+  user_id: string;
+  email: string;
+  display_name: string;
+  tenant_id: string;
+  tenant_name: string;
+  token_hash: string;
+  expires_at: Date | string;
+  created_by_admin: boolean;
+  actor_user_id: string | null;
+  actor_email: string | null;
+  consumed_at: Date | string | null;
 }
 
 interface TenantSummaryRow extends QueryResultRow {
@@ -121,7 +190,28 @@ interface TenantSummaryRow extends QueryResultRow {
   updated_at: Date | string;
 }
 
+interface AdminAuditEventRow extends QueryResultRow {
+  event_id: string;
+  actor_email: string;
+  target_tenant_id: string | null;
+  target_tenant_name: string | null;
+  target_user_id: string | null;
+  target_email: string | null;
+  action: string;
+  details: Record<string, unknown> | null;
+  created_at: Date | string;
+}
+
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+
+function passwordResetValidityMinutes(): number {
+  const parsed = Number.parseInt(process.env.PULSE_PASSWORD_RESET_TTL_MINUTES ?? '60', 10);
+  if (!Number.isFinite(parsed)) {
+    return 60;
+  }
+
+  return Math.min(24 * 60, Math.max(5, parsed));
+}
 
 function accessKeyValidityDays(): number {
   const parsed = Number.parseInt(process.env.PULSE_ACCESS_KEY_TTL_DAYS ?? '365', 10);
@@ -181,6 +271,10 @@ function hashSessionToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
+function hashOpaqueToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
 function normalizeAccessKey(value: string): string {
   return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
@@ -201,6 +295,10 @@ function createAccessKey(): string {
 
 function accessKeyExpiryIso(validityDays = accessKeyValidityDays()): string {
   return new Date(Date.now() + validityDays * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function passwordResetExpiryIso(validityMinutes = passwordResetValidityMinutes()): string {
+  return new Date(Date.now() + validityMinutes * 60 * 1000).toISOString();
 }
 
 function platformAdminEmails(): Set<string> {
@@ -298,6 +396,7 @@ function tenantAccessError(input: {
 }
 
 function rowToSession(row: SessionRow, isPlatformAdmin: boolean): AuthenticatedSession {
+  const impersonating = Boolean(row.impersonator_user_id);
   return {
     sessionId: row.session_id,
     userId: row.user_id,
@@ -309,11 +408,15 @@ function rowToSession(row: SessionRow, isPlatformAdmin: boolean): AuthenticatedS
     email: row.email,
     displayName: row.display_name,
     expiresAt: toIso(row.expires_at),
-    isPlatformAdmin,
+    isPlatformAdmin: impersonating ? false : isPlatformAdmin,
     tenantEnabled: !!row.enabled,
     disabledReason: row.disabled_reason,
     accessKeyHint: row.access_key_hint,
     accessKeyExpiresAt: toOptionalIso(row.access_key_expires_at),
+    impersonating,
+    impersonatorUserId: row.impersonator_user_id,
+    impersonatorEmail: row.impersonator_email,
+    impersonationStartedAt: toOptionalIso(row.impersonation_started_at),
   };
 }
 
@@ -335,6 +438,20 @@ function rowToTenantSummary(row: TenantSummaryRow): TenantAccessSummary {
   };
 }
 
+function rowToAdminAuditEvent(row: AdminAuditEventRow): AdminAuditEvent {
+  return {
+    eventId: row.event_id,
+    actorEmail: row.actor_email,
+    targetTenantId: row.target_tenant_id,
+    targetTenantName: row.target_tenant_name,
+    targetUserId: row.target_user_id,
+    targetEmail: row.target_email,
+    action: row.action,
+    details: row.details ?? null,
+    createdAt: toIso(row.created_at),
+  };
+}
+
 async function sessionForHash(sessionTokenHash: string): Promise<AuthenticatedSession | null> {
   const row = await queryOne<SessionRow>(`
     SELECT
@@ -351,7 +468,10 @@ async function sessionForHash(sessionTokenHash: string): Promise<AuthenticatedSe
       t.access_key_expires_at,
       u.email,
       u.display_name,
-      s.expires_at
+      s.expires_at,
+      s.impersonator_user_id,
+      s.impersonator_email,
+      s.impersonation_started_at
     FROM sessions s
     JOIN users u ON u.user_id = s.user_id
     JOIN tenants t ON t.tenant_id = u.tenant_id
@@ -364,11 +484,12 @@ async function sessionForHash(sessionTokenHash: string): Promise<AuthenticatedSe
   }
 
   const isPlatformAdmin = isPlatformAdminEmail(row.email);
+  const bypassTenantAccess = Boolean(row.impersonator_user_id || isPlatformAdmin);
   const accessError = tenantAccessError({
     enabled: !!row.enabled,
     disabledReason: row.disabled_reason,
     accessKeyExpiresAt: row.access_key_expires_at,
-    isPlatformAdmin,
+    isPlatformAdmin: bypassTenantAccess,
   });
 
   if (accessError) {
@@ -420,11 +541,94 @@ async function deleteSessionsForTenant(tenantId: string, client?: Parameters<typ
   `, [tenantId], client);
 }
 
+async function deleteSessionsForUser(userId: string, client?: Parameters<typeof exec>[2]): Promise<void> {
+  await exec(`
+    DELETE FROM sessions
+    WHERE user_id = $1
+       OR impersonator_user_id = $1
+  `, [userId], client);
+}
+
+async function deletePasswordResetTokensForUser(userId: string, client?: Parameters<typeof exec>[2]): Promise<void> {
+  await exec(`
+    DELETE FROM password_reset_tokens
+    WHERE user_id = $1
+  `, [userId], client);
+}
+
+async function tenantOwnerRowForTenantId(tenantId: string, client?: Parameters<typeof exec>[2]): Promise<TenantOwnerRow | null> {
+  return queryOne<TenantOwnerRow>(`
+    SELECT
+      u.user_id,
+      u.email,
+      u.display_name,
+      t.tenant_id,
+      t.name AS tenant_name,
+      t.slug AS tenant_slug
+    FROM tenants t
+    JOIN users u ON u.tenant_id = t.tenant_id
+    WHERE t.tenant_id = $1
+    ORDER BY u.created_at ASC
+    LIMIT 1
+  `, [tenantId], client);
+}
+
+async function recordAdminAuditEvent(input: {
+  actorUserId: string | null;
+  actorEmail: string;
+  targetTenantId?: string | null;
+  targetUserId?: string | null;
+  targetEmail?: string | null;
+  action: string;
+  details?: Record<string, unknown>;
+}, client?: Parameters<typeof exec>[2]): Promise<void> {
+  await exec(`
+    INSERT INTO admin_audit_events (
+      event_id,
+      actor_user_id,
+      actor_email,
+      target_tenant_id,
+      target_user_id,
+      target_email,
+      action,
+      details,
+      created_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+  `, [
+    randomId('audit'),
+    input.actorUserId,
+    normalizeEmail(input.actorEmail),
+    input.targetTenantId ?? null,
+    input.targetUserId ?? null,
+    input.targetEmail ? normalizeEmail(input.targetEmail) : null,
+    input.action,
+    JSON.stringify(input.details ?? {}),
+    new Date().toISOString(),
+  ], client);
+}
+
+export async function appendAdminAuditEvent(input: {
+  actorUserId: string | null;
+  actorEmail: string;
+  targetTenantId?: string | null;
+  targetUserId?: string | null;
+  targetEmail?: string | null;
+  action: string;
+  details?: Record<string, unknown>;
+}): Promise<void> {
+  await recordAdminAuditEvent(input);
+}
+
 async function userAccessRowForUserId(userId: string): Promise<UserAccessRow | null> {
   return queryOne<UserAccessRow>(`
     SELECT
       u.user_id,
       u.email,
+      u.display_name,
+      t.tenant_id,
+      t.name AS tenant_name,
+      t.slug AS tenant_slug,
       t.enabled,
       t.disabled_reason,
       t.access_key_expires_at
@@ -638,10 +842,47 @@ export async function createSessionForUser(userId: string): Promise<{ sessionTok
     throw new Error(accessError);
   }
 
+  return createStoredSession({
+    userId,
+  });
+}
+
+export async function listAdminAuditEvents(input?: {
+  tenantId?: string | null;
+  limit?: number;
+}): Promise<AdminAuditEvent[]> {
+  const limit = Math.min(100, Math.max(1, input?.limit ?? 40));
+  const rows = await query<AdminAuditEventRow>(`
+    SELECT
+      e.event_id,
+      e.actor_email,
+      e.target_tenant_id,
+      t.name AS target_tenant_name,
+      e.target_user_id,
+      e.target_email,
+      e.action,
+      e.details,
+      e.created_at
+    FROM admin_audit_events e
+    LEFT JOIN tenants t ON t.tenant_id = e.target_tenant_id
+    WHERE ($1::text IS NULL OR e.target_tenant_id = $1)
+    ORDER BY e.created_at DESC
+    LIMIT $2
+  `, [input?.tenantId ?? null, limit]);
+
+  return rows.map(rowToAdminAuditEvent);
+}
+
+async function createStoredSession(input: {
+  userId: string;
+  impersonatorUserId?: string | null;
+  impersonatorEmail?: string | null;
+}): Promise<{ sessionToken: string; session: AuthenticatedSession }> {
   const sessionId = randomId('session');
   const sessionToken = randomSecret(32);
   const sessionTokenHash = hashSessionToken(sessionToken);
   const timestamp = new Date().toISOString();
+  const impersonationStartedAt = input.impersonatorUserId ? timestamp : null;
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
 
   await exec(`
@@ -649,12 +890,24 @@ export async function createSessionForUser(userId: string): Promise<{ sessionTok
       session_id,
       user_id,
       session_token_hash,
+      impersonator_user_id,
+      impersonator_email,
+      impersonation_started_at,
       expires_at,
       created_at,
       updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $5)
-  `, [sessionId, userId, sessionTokenHash, expiresAt, timestamp]);
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+  `, [
+    sessionId,
+    input.userId,
+    sessionTokenHash,
+    input.impersonatorUserId ?? null,
+    input.impersonatorEmail ? normalizeEmail(input.impersonatorEmail) : null,
+    impersonationStartedAt,
+    expiresAt,
+    timestamp,
+  ]);
 
   const session = await sessionForHash(sessionTokenHash);
   if (!session) {
@@ -664,6 +917,275 @@ export async function createSessionForUser(userId: string): Promise<{ sessionTok
   return {
     sessionToken,
     session,
+  };
+}
+
+export async function createImpersonationSessionForTenant(input: {
+  tenantId: string;
+  adminUserId: string;
+  adminEmail: string;
+}): Promise<{ sessionToken: string; session: AuthenticatedSession; target: TenantOwnerRow }> {
+  const adminAccess = await userAccessRowForUserId(input.adminUserId);
+  if (!adminAccess || !isPlatformAdminEmail(adminAccess.email)) {
+    throw new Error('Platform admin access required.');
+  }
+
+  const target = await tenantOwnerRowForTenantId(input.tenantId);
+  if (!target) {
+    throw new Error('Unknown tenant owner.');
+  }
+
+  if (target.user_id === input.adminUserId) {
+    throw new Error('You are already in this workspace.');
+  }
+
+  const created = await createStoredSession({
+    userId: target.user_id,
+    impersonatorUserId: input.adminUserId,
+    impersonatorEmail: input.adminEmail,
+  });
+
+  await recordAdminAuditEvent({
+    actorUserId: input.adminUserId,
+    actorEmail: input.adminEmail,
+    targetTenantId: target.tenant_id,
+    targetUserId: target.user_id,
+    targetEmail: target.email,
+    action: 'impersonation_started',
+    details: {
+      tenantSlug: target.tenant_slug,
+      tenantName: target.tenant_name,
+    },
+  });
+
+  return {
+    ...created,
+    target,
+  };
+}
+
+export async function createPasswordResetForEmail(input: {
+  email: string;
+  actorUserId?: string | null;
+  actorEmail?: string | null;
+  createdByAdmin?: boolean;
+}): Promise<{
+  ok: boolean;
+  email: string;
+  displayName: string;
+  tenantId: string;
+  tenantName: string;
+  resetToken: string;
+  expiresAt: string;
+  createdByAdmin: boolean;
+} | null> {
+  const email = normalizeEmail(input.email);
+  if (!email) {
+    return null;
+  }
+
+  const owner = await queryOne<TenantOwnerRow>(`
+    SELECT
+      u.user_id,
+      u.email,
+      u.display_name,
+      t.tenant_id,
+      t.name AS tenant_name,
+      t.slug AS tenant_slug
+    FROM users u
+    JOIN tenants t ON t.tenant_id = u.tenant_id
+    WHERE u.email = $1
+  `, [email]);
+
+  if (!owner) {
+    return null;
+  }
+
+  const resetToken = randomSecret(32);
+  const resetTokenHash = hashOpaqueToken(resetToken);
+  const expiresAt = passwordResetExpiryIso();
+  const timestamp = new Date().toISOString();
+  const createdByAdmin = Boolean(input.createdByAdmin && input.actorEmail);
+
+  await withTransaction(async (client) => {
+    await deletePasswordResetTokensForUser(owner.user_id, client);
+
+    await exec(`
+      INSERT INTO password_reset_tokens (
+        reset_id,
+        user_id,
+        token_hash,
+        created_by_admin,
+        actor_user_id,
+        actor_email,
+        expires_at,
+        consumed_at,
+        created_at,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8, $8)
+    `, [
+      randomId('reset'),
+      owner.user_id,
+      resetTokenHash,
+      createdByAdmin,
+      input.actorUserId ?? null,
+      input.actorEmail ? normalizeEmail(input.actorEmail) : null,
+      expiresAt,
+      timestamp,
+    ], client);
+
+    if (createdByAdmin && input.actorEmail) {
+      await recordAdminAuditEvent({
+        actorUserId: input.actorUserId ?? null,
+        actorEmail: input.actorEmail,
+        targetTenantId: owner.tenant_id,
+        targetUserId: owner.user_id,
+        targetEmail: owner.email,
+        action: 'password_reset_issued',
+        details: {
+          expiresAt,
+          tenantSlug: owner.tenant_slug,
+          tenantName: owner.tenant_name,
+        },
+      }, client);
+    }
+  });
+
+  return {
+    ok: true,
+    email: owner.email,
+    displayName: owner.display_name,
+    tenantId: owner.tenant_id,
+    tenantName: owner.tenant_name,
+    resetToken,
+    expiresAt,
+    createdByAdmin,
+  };
+}
+
+export async function createPasswordResetForTenantOwner(input: {
+  tenantId: string;
+  actorUserId?: string | null;
+  actorEmail?: string | null;
+  createdByAdmin?: boolean;
+}) {
+  const owner = await tenantOwnerRowForTenantId(input.tenantId);
+  if (!owner) {
+    throw new Error('Unknown tenant owner.');
+  }
+
+  return createPasswordResetForEmail({
+    email: owner.email,
+    actorUserId: input.actorUserId,
+    actorEmail: input.actorEmail,
+    createdByAdmin: input.createdByAdmin,
+  });
+}
+
+export async function recordImpersonationEnded(input: {
+  actorUserId: string;
+  actorEmail: string;
+  targetTenantId: string;
+  targetUserId: string;
+  targetEmail: string;
+}): Promise<void> {
+  await recordAdminAuditEvent({
+    actorUserId: input.actorUserId,
+    actorEmail: input.actorEmail,
+    targetTenantId: input.targetTenantId,
+    targetUserId: input.targetUserId,
+    targetEmail: input.targetEmail,
+    action: 'impersonation_ended',
+  });
+}
+
+export async function resetPasswordWithToken(input: {
+  token: string;
+  password: string;
+}): Promise<{ email: string; tenantName: string }> {
+  const token = input.token.trim();
+  if (!token) {
+    throw new Error('Reset token is required.');
+  }
+  if (input.password.length < 8) {
+    throw new Error('Password must be at least 8 characters.');
+  }
+
+  const tokenHash = hashOpaqueToken(token);
+  const row = await queryOne<PasswordResetRow>(`
+    SELECT
+      pr.reset_id,
+      pr.user_id,
+      pr.token_hash,
+      pr.expires_at,
+      pr.created_by_admin,
+      pr.actor_user_id,
+      pr.actor_email,
+      pr.consumed_at,
+      u.email,
+      u.display_name,
+      t.tenant_id,
+      t.name AS tenant_name
+    FROM password_reset_tokens pr
+    JOIN users u ON u.user_id = pr.user_id
+    JOIN tenants t ON t.tenant_id = u.tenant_id
+    WHERE pr.token_hash = $1
+    LIMIT 1
+  `, [tokenHash]);
+
+  if (!row) {
+    throw new Error('That reset link is invalid or has already been used.');
+  }
+
+  if (row.consumed_at) {
+    throw new Error('That reset link has already been used.');
+  }
+
+  const expiry = new Date(row.expires_at);
+  if (Number.isNaN(expiry.getTime()) || expiry.getTime() < Date.now()) {
+    throw new Error('That reset link has expired. Request a new one.');
+  }
+
+  const passwordHash = await hashPassword(input.password);
+  const timestamp = new Date().toISOString();
+
+  await withTransaction(async (client) => {
+    await exec(`
+      UPDATE users
+      SET
+        password_hash = $2,
+        updated_at = $3
+      WHERE user_id = $1
+    `, [row.user_id, passwordHash, timestamp], client);
+
+    await exec(`
+      UPDATE password_reset_tokens
+      SET
+        consumed_at = $2,
+        updated_at = $2
+      WHERE reset_id = $1
+    `, [row.reset_id, timestamp], client);
+
+    await deletePasswordResetTokensForUser(row.user_id, client);
+    await deleteSessionsForUser(row.user_id, client);
+
+    await recordAdminAuditEvent({
+      actorUserId: row.actor_user_id,
+      actorEmail: row.actor_email ?? row.email,
+      targetTenantId: row.tenant_id,
+      targetUserId: row.user_id,
+      targetEmail: row.email,
+      action: row.created_by_admin ? 'password_reset_completed' : 'self_service_password_reset_completed',
+      details: {
+        tenantName: row.tenant_name,
+      },
+    }, client);
+  });
+
+  return {
+    email: row.email,
+    tenantName: row.tenant_name,
   };
 }
 

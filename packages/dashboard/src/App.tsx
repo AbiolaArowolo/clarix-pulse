@@ -4,11 +4,13 @@ import { useAuth } from './features/auth/AuthProvider';
 import { navigate, usePathname } from './hooks/usePathname';
 import { AccountPage } from './pages/AccountPage';
 import { AdminPage } from './pages/AdminPage';
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
 import { MonitoringDashboardPage } from './pages/MonitoringDashboardPage';
 import { OnboardingPage } from './pages/OnboardingPage';
 import { RegisterPage } from './pages/RegisterPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
 
 function protectedPageMeta(pathname: string): { title: string; description: string } {
   if (pathname === '/app/onboarding') {
@@ -67,7 +69,16 @@ export default function App() {
       return;
     }
 
-    if (auth.authenticated && (pathname === '/' || pathname === '/login' || pathname === '/register')) {
+    if (
+      auth.authenticated
+      && (
+        pathname === '/'
+        || pathname === '/login'
+        || pathname === '/register'
+        || pathname === '/forgot-password'
+        || pathname === '/reset-password'
+      )
+    ) {
       navigate('/app', true);
     }
   }, [auth.authenticated, auth.bootstrapped, auth.user?.isPlatformAdmin, pathname]);
@@ -80,6 +91,14 @@ export default function App() {
     auth.clearError();
     navigate(nextPath);
   };
+
+  if (pathname === '/forgot-password') {
+    return <ForgotPasswordPage onNavigate={go} />;
+  }
+
+  if (pathname === '/reset-password') {
+    return <ResetPasswordPage onNavigate={go} />;
+  }
 
   if (!auth.authenticated) {
     if (pathname === '/login') {
@@ -121,6 +140,7 @@ export default function App() {
   const session = {
     user: auth.user!,
     tenant: auth.tenant!,
+    impersonation: auth.impersonation,
   };
   const meta = protectedPageMeta(pathname);
 
@@ -130,7 +150,7 @@ export default function App() {
   } else if (pathname === '/app/account') {
     content = <AccountPage session={session} />;
   } else if (pathname === '/app/admin' && session.user.isPlatformAdmin) {
-    content = <AdminPage />;
+    content = <AdminPage onNavigate={go} onRefreshSession={auth.refreshSession} />;
   } else {
     content = <MonitoringDashboardPage onNavigate={go} />;
   }
@@ -142,6 +162,13 @@ export default function App() {
       title={meta.title}
       description={meta.description}
       onNavigate={go}
+      onStopImpersonation={() => {
+        void auth.stopImpersonation().then((ok) => {
+          if (ok) {
+            navigate('/app/admin', true);
+          }
+        });
+      }}
       onLogout={() => {
         void auth.logout().then(() => navigate('/login', true));
       }}

@@ -12,7 +12,9 @@ Current product shape:
 - registration and login inside the same React app
 - authenticated monitoring app under `/app`
 - admin-controlled tenant activation
+- admin password-reset and workspace-support controls
 - 365-day access keys
+- self-service password reset links
 - browser downloads for signed-in users
 - secure expiring installer/config links for node-side pulls
 - explicit deployed revision metadata through `/api/health` and `/api/version`
@@ -56,6 +58,7 @@ PULSE_COOKIE_SECURE=true
 PULSE_THUMBNAIL_DIR=/var/lib/clarix-pulse/thumbnails
 PULSE_ADMIN_EMAILS=you@example.com
 PULSE_ACCESS_KEY_TTL_DAYS=365
+PULSE_PASSWORD_RESET_TTL_MINUTES=60
 PULSE_DOWNLOAD_BUNDLE_NAME=clarix-pulse-v1.9.zip
 PULSE_DOWNLOAD_SIGNING_SECRET=REPLACE_WITH_LONG_RANDOM_SECRET
 PULSE_DOWNLOAD_LINK_TTL_MINUTES=1440
@@ -74,11 +77,12 @@ Notes:
 - `PULSE_COOKIE_SECURE=true` is recommended behind HTTPS
 - `PULSE_ADMIN_EMAILS` defines who can use the `/app/admin` backend controls
 - `PULSE_ACCESS_KEY_TTL_DAYS` controls new tenant key validity
+- `PULSE_PASSWORD_RESET_TTL_MINUTES` controls how long reset links remain valid
 - `PULSE_DOWNLOAD_SIGNING_SECRET` is required if you want secure installer/config links for node-side pulls
 - `PULSE_DOWNLOAD_LINK_TTL_MINUTES` controls how long signed node-side download links remain valid
 - `PULSE_DOWNLOAD_BUNDLE_PATH` is optional if you want the bundle served from a custom path
-- `SMTP_*` must be configured if you want access keys emailed during registration and renewal
-- if SMTP is not configured, the UI falls back to showing the generated key once during registration or renewal
+- `SMTP_*` must be configured if you want access keys and self-service password reset links emailed
+- if SMTP is not configured, the UI falls back to showing the generated access key once during registration or renewal, and platform admins can copy one-time password reset links from `/app/admin`
 
 ---
 
@@ -164,6 +168,8 @@ This supports:
 - `/`
 - `/login`
 - `/register`
+- `/forgot-password`
+- `/reset-password`
 - `/app`
 - `/app/onboarding`
 - `/app/account`
@@ -179,11 +185,16 @@ Because the app is a single SPA, `try_files {path} /index.html` is required for 
 The current hub is workspace-aware:
 
 - `users`, `sessions`, and `tenants` are stored in PostgreSQL
+- `password_reset_tokens` stores one-time hashed reset links with expiry
+- `admin_audit_events` stores admin support actions for visibility and traceability
 - every browser session is tied to one tenant
 - new tenant registrations are disabled by default
 - a 365-day access key is generated at registration
 - sign-in requires email, password, and access key
 - platform admins can enable or disable tenants and renew keys
+- platform admins can issue password reset links and open a tenant workspace in support mode
+- support mode is implemented as an impersonated customer session plus a saved admin return cookie
+- users can request their own password reset link from `/forgot-password`
 - `/api/status` and dashboard config routes are session-protected
 - browser downloads require a signed-in session
 - node-side direct pulls use secure expiring signed URLs minted by a signed-in user
@@ -250,6 +261,10 @@ pm2 logs clarix-hub --lines 100 --nostream
 5. Confirm login requires email, password, and access key.
 6. Confirm `/app` redirects to login when signed out.
 7. Confirm a new enabled tenant dashboard starts with no nodes.
+8. Confirm `Forgot password` sends a reset email when SMTP is configured.
+9. Confirm `/app/admin` can issue a reset link and open a tenant workspace.
+10. Confirm the support banner appears while impersonating and disappears after returning to admin.
+11. Confirm the action appears in the admin activity feed.
 
 ### Downloads
 

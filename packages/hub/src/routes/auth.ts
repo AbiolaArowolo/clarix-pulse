@@ -1,16 +1,25 @@
 import { Request, Response, Router } from 'express';
 import {
   authenticateUser,
+  createPasswordResetForEmail,
   createSessionForUser,
+  deleteSession,
+  getSessionFromToken,
+  recordImpersonationEnded,
   registerTenantOwner,
+  resetPasswordWithToken,
 } from '../store/auth';
 import {
+  ADMIN_RETURN_COOKIE_NAME,
   clearSessionFromRequest,
   getSessionFromRequest,
+  readCookie,
+  SESSION_COOKIE_NAME,
+  serializeClearedAdminReturnCookie,
   serializeClearedSessionCookie,
   serializeSessionCookie,
 } from '../serverAuth';
-import { sendRegistrationAccessKeyEmail } from '../services/accountEmail';
+import { accountEmailReady, sendPasswordResetEmail, sendRegistrationAccessKeyEmail } from '../services/accountEmail';
 
 function asString(value: unknown, fallback = ''): string {
   if (typeof value === 'string') return value.trim();
@@ -63,6 +72,14 @@ function sessionPayload(req: Request) {
     session: {
       expiresAt: session.expiresAt,
     },
+    impersonation: session.impersonating ? {
+      active: true,
+      impersonatorUserId: session.impersonatorUserId,
+      impersonatorEmail: session.impersonatorEmail,
+      startedAt: session.impersonationStartedAt,
+    } : {
+      active: false,
+    },
   };
 }
 
@@ -98,7 +115,10 @@ export function createAuthRouter(): Router {
         console.error('[auth] Failed to send registration access email', error);
       }
 
-      res.setHeader('Set-Cookie', serializeClearedSessionCookie());
+      res.setHeader('Set-Cookie', [
+        serializeClearedSessionCookie(),
+        serializeClearedAdminReturnCookie(),
+      ]);
       return res.status(201).json({
         authenticated: false,
         registered: true,
@@ -138,7 +158,10 @@ export function createAuthRouter(): Router {
     try {
       const result = await createSessionForUser(auth.userId);
       req.auth = result.session;
-      res.setHeader('Set-Cookie', serializeSessionCookie(result.sessionToken));
+      res.setHeader('Set-Cookie', [
+        serializeSessionCookie(result.sessionToken),
+        serializeClearedAdminReturnCookie(),
+      ]);
       return res.json(sessionPayload(req));
     } catch (error) {
       return res.status(403).json({
@@ -151,6 +174,110 @@ export function createAuthRouter(): Router {
     await clearSessionFromRequest(req, res);
     req.auth = undefined;
     return res.json({ ok: true });
+  });
+
+  router.post('/forgot-password', async (req: Request, res: Response) => {
+    const email = asString(req.body?.email);
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required.' });
+    }
+
+    try {
+      const reset = await createPasswordResetForEmail({
+        email,
+      });
+
+      if (reset) {
+        try {
+          await sendPasswordResetEmail({
+            to: reset.email,
+            companyName: reset.tenantName,
+            displayName: reset.displayName,
+            resetUrl: `${requestBaseUrl(req)}/reset-password?token=${encodeURIComponent(reset.resetToken)}`,
+            expiresAt: reset.expiresAt,
+            appUrl: requestBaseUrl(req),
+          });
+        } catch (error) {
+          console.error('[auth] Failed to send password reset email', error);
+        }
+      }
+
+      return res.json({
+        ok: true,
+        notice: accountEmailReady()
+          ? 'If that email is registered, a password reset link has been sent.'
+          : 'If that email is registered, a reset request has been recorded. Email delivery is currently unavailable, so contact Clarix support for the link.',
+      });
+    } catch (error) {
+      return res.status(400).json({
+        error: error instanceof Error ? error.message : 'Failed to start the password reset.',
+      });
+    }
+  });
+
+  router.post('/reset-password', async (req: Request, res: Response) => {
+    const token = asString(req.body?.token);
+    const password = asString(req.body?.password);
+    if (!token || !password) {
+      return res.status(400).json({ error: 'Reset token and new password are required.' });
+    }
+
+    try {
+      const result = await resetPasswordWithToken({ token, password });
+      res.setHeader('Set-Cookie', [serializeClearedSessionCookie(), serializeClearedAdminReturnCookie()]);
+      return res.json({
+        ok: true,
+        notice: `Password updated for ${result.email}. Sign in with your new password.`,
+      });
+    } catch (error) {
+      return res.status(400).json({
+        error: error instanceof Error ? error.message : 'Failed to reset the password.',
+      });
+    }
+  });
+
+  router.post('/impersonation/stop', async (req: Request, res: Response) => {
+    const session = await getSessionFromRequest(req);
+    if (!session) {
+      return res.status(401).json({ error: 'Sign in required.' });
+    }
+
+    if (!session.impersonating || !session.impersonatorUserId || !session.impersonatorEmail) {
+      return res.status(400).json({ error: 'No impersonation session is active.' });
+    }
+
+    const currentSessionToken = readCookie(req.headers.cookie, SESSION_COOKIE_NAME);
+    const adminReturnToken = readCookie(req.headers.cookie, ADMIN_RETURN_COOKIE_NAME);
+    if (!currentSessionToken || !adminReturnToken) {
+      res.setHeader('Set-Cookie', [serializeClearedSessionCookie(), serializeClearedAdminReturnCookie()]);
+      return res.status(400).json({ error: 'The saved admin session is no longer available. Sign in again.' });
+    }
+
+    const adminSession = await getSessionFromToken(adminReturnToken);
+    if (!adminSession || !adminSession.isPlatformAdmin || adminSession.impersonating) {
+      await clearSessionFromRequest(req, res);
+      req.auth = undefined;
+      return res.status(401).json({ error: 'The saved admin session has expired. Sign in again.' });
+    }
+
+    await recordImpersonationEnded({
+      actorUserId: session.impersonatorUserId,
+      actorEmail: session.impersonatorEmail,
+      targetTenantId: session.tenantId,
+      targetUserId: session.userId,
+      targetEmail: session.email,
+    });
+
+    await deleteSession(currentSessionToken);
+    res.setHeader('Set-Cookie', [
+      serializeSessionCookie(adminReturnToken),
+      serializeClearedAdminReturnCookie(),
+    ]);
+    req.auth = adminSession;
+    return res.json({
+      ok: true,
+      notice: `Returned to the admin workspace for ${adminSession.email}.`,
+    });
   });
 
   return router;

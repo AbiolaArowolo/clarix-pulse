@@ -112,7 +112,7 @@ export function LoginPage({
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/90 px-4 py-3 text-sm uppercase tracking-[0.18em] text-slate-100 outline-none focus:border-cyan-400"
                 />
                 <p className="mt-2 text-xs leading-5 text-slate-500">
-                  Use the access key from your welcome email or the fallback key shown during registration.
+                  Use the access key from your welcome email or the fallback key shown during registration. Platform admin accounts can leave this blank.
                 </p>
               </label>
             </div>
@@ -151,6 +151,14 @@ export function LoginPage({
               className="mt-5 w-full rounded-2xl border border-cyan-400/35 bg-cyan-400/12 px-4 py-3 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? 'Signing in...' : 'Sign in'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onNavigate('/forgot-password')}
+              className="mt-3 w-full rounded-2xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-sm font-medium text-slate-200 transition-colors hover:border-slate-500 hover:text-white"
+            >
+              Forgot password
             </button>
 
             <button
