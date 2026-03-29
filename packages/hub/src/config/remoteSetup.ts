@@ -59,6 +59,11 @@ const SUPPORTED_PLAYOUT_TYPES = new Set([
   'generic_windows',
 ]);
 
+const PLACEHOLDER_HUB_URLS = new Set([
+  'http://monitor.example.com',
+  'https://monitor.example.com',
+]);
+
 function asString(value: unknown, fallback = ''): string {
   if (typeof value === 'string') return value.trim();
   if (typeof value === 'number') return String(value);
@@ -96,6 +101,21 @@ function asList(value: unknown): string[] {
   return value
     .map((entry) => asString(entry))
     .filter(Boolean);
+}
+
+function firstConfiguredString(...values: unknown[]): string {
+  for (const value of values) {
+    const normalized = asString(value);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return '';
+}
+
+function isPlaceholderHubUrl(value: string): boolean {
+  return PLACEHOLDER_HUB_URLS.has(value.trim().replace(/\/+$/, '').toLowerCase());
 }
 
 function normalizePlayoutType(value: unknown): string {
@@ -306,14 +326,41 @@ function parseStructuredText(reportText: string): unknown {
 
 export function normalizeRemoteSetupDraft(rawValue: unknown, fallbackHubUrl: string): RemoteSetupDraft {
   const raw = asMapping(rawValue);
-  const nodeId = asString(
-    raw.nodeId
-    ?? raw.node_id
-    ?? raw.agent_id
-    ?? asMapping(raw.machine).hostname,
+  const machine = asMapping(raw.machine);
+  const discovery = asMapping(raw.discovery);
+  const existingPulseConfig = asMapping(
+    discovery.existing_pulse_config
+    ?? discovery.existingPulseConfig,
   );
-  const nodeName = asString(raw.nodeName ?? raw.node_name, nodeId);
-  const siteId = asString(raw.siteId ?? raw.site_id, nodeId);
+  const nodeId = firstConfiguredString(
+    raw.nodeId,
+    raw.node_id,
+    raw.agent_id,
+    existingPulseConfig.nodeId,
+    existingPulseConfig.node_id,
+    existingPulseConfig.agent_id,
+    machine.hostname,
+  );
+  const nodeName = firstConfiguredString(
+    raw.nodeName,
+    raw.node_name,
+    existingPulseConfig.nodeName,
+    existingPulseConfig.node_name,
+    nodeId,
+  );
+  const siteId = firstConfiguredString(
+    raw.siteId,
+    raw.site_id,
+    existingPulseConfig.siteId,
+    existingPulseConfig.site_id,
+    nodeId,
+  );
+  const importedHubUrl = firstConfiguredString(
+    raw.hubUrl,
+    raw.hub_url,
+    existingPulseConfig.hubUrl,
+    existingPulseConfig.hub_url,
+  );
   const playersRaw = Array.isArray(raw.players)
     ? raw.players
     : Array.isArray(raw.instances)
@@ -334,7 +381,9 @@ export function normalizeRemoteSetupDraft(rawValue: unknown, fallbackHubUrl: str
     nodeId,
     nodeName,
     siteId,
-    hubUrl: asString(raw.hubUrl ?? raw.hub_url, fallbackHubUrl),
+    hubUrl: importedHubUrl && !isPlaceholderHubUrl(importedHubUrl)
+      ? importedHubUrl
+      : asString(fallbackHubUrl),
     pollIntervalSeconds: clampInt(raw.pollIntervalSeconds ?? raw.poll_interval_seconds, 5, 1, 120),
     players,
   };

@@ -124,14 +124,14 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
           </div>
         </section>
 
-        <RemoteSetupPanel />
-
         <AlertContactsEditor />
+
+        <RemoteSetupPanel />
 
         {visibleSites.length === 0 ? (
           <div className="rounded-3xl border border-slate-800 bg-slate-900/55 px-8 py-16 text-center shadow-[0_24px_80px_rgba(2,6,23,0.35)] backdrop-blur">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-800 bg-slate-950/80 text-xl text-slate-500">
-              Signal
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-800 bg-slate-950/80">
+              <img src="/pulse.svg" alt="Clarix Pulse logo" className="pulse-logo h-9 w-9 object-contain" />
             </div>
             <p className="text-lg font-medium text-slate-200">
               {sites.length === 0 ? 'No nodes yet for this account.' : 'Inactive sites are hidden right now.'}

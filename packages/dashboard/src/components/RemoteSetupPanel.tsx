@@ -106,6 +106,84 @@ function prettyJson(value: unknown, fallback: string): string {
   return JSON.stringify(value, null, 2);
 }
 
+function asUdpString(value: unknown, fallback = ''): string {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number') return String(value);
+  return fallback;
+}
+
+function asUdpBool(value: unknown, fallback = false): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return fallback;
+    return ['1', 'true', 'yes', 'on'].includes(normalized);
+  }
+  return fallback;
+}
+
+function clampUdpInterval(value: unknown, fallback = 10): number {
+  const parsed = Number.parseInt(asUdpString(value), 10);
+  const normalized = Number.isFinite(parsed) ? parsed : fallback;
+  return Math.min(300, Math.max(1, normalized));
+}
+
+function defaultUdpInput(playerId: string, index: number): RemoteSetupPlayerPayload['udpInputs'][number] {
+  const safePlayerId = playerId.trim() || 'player';
+  return {
+    udpInputId: `${safePlayerId}-udp-${index + 1}`,
+    enabled: false,
+    streamUrl: '',
+    thumbnailIntervalS: 10,
+  };
+}
+
+function normalizeUdpInput(
+  value: unknown,
+  playerId: string,
+  index: number,
+): RemoteSetupPlayerPayload['udpInputs'][number] {
+  const input = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+
+  return {
+    udpInputId: asUdpString(
+      input.udpInputId
+      ?? input.udp_input_id
+      ?? input.id
+      ?? input.input_id,
+      `${playerId || 'player'}-udp-${index + 1}`,
+    ),
+    enabled: asUdpBool(input.enabled, false),
+    streamUrl: asUdpString(input.streamUrl ?? input.stream_url),
+    thumbnailIntervalS: clampUdpInterval(input.thumbnailIntervalS ?? input.thumbnail_interval_s, 10),
+  };
+}
+
+function serializeUdpInputs(inputs: RemoteSetupPlayerPayload['udpInputs']): string {
+  return JSON.stringify(inputs, null, 2);
+}
+
+function parseUdpInputsText(
+  udpInputsText: string,
+  playerId: string,
+): { inputs: RemoteSetupPlayerPayload['udpInputs']; error: string | null } {
+  try {
+    const parsed = safeJsonArray(udpInputsText, `${playerId || 'Player'} UDP inputs`);
+    return {
+      inputs: parsed.slice(0, 5).map((entry, index) => normalizeUdpInput(entry, playerId, index)),
+      error: null,
+    };
+  } catch (error) {
+    return {
+      inputs: [],
+      error: error instanceof Error ? error.message : 'UDP inputs must be valid JSON.',
+    };
+  }
+}
+
 function blankPlayer(index: number, nodeId: string): PlayerFormState {
   const safeNode = nodeId.trim() || 'node';
   return {
@@ -290,6 +368,61 @@ export function RemoteSetupPanel() {
     }));
   };
 
+  const addUdpInput = (index: number) => {
+    setForm((current) => ({
+      ...current,
+      players: current.players.map((player, playerIndex) => {
+        if (playerIndex !== index) return player;
+
+        const { inputs } = parseUdpInputsText(player.udpInputsText, player.playerId);
+        if (inputs.length >= 5) return player;
+
+        return {
+          ...player,
+          udpInputsText: serializeUdpInputs([...inputs, defaultUdpInput(player.playerId, inputs.length)]),
+        };
+      }),
+    }));
+  };
+
+  const updateUdpInput = (
+    index: number,
+    udpIndex: number,
+    patch: Partial<RemoteSetupPlayerPayload['udpInputs'][number]>,
+  ) => {
+    setForm((current) => ({
+      ...current,
+      players: current.players.map((player, playerIndex) => {
+        if (playerIndex !== index) return player;
+
+        const { inputs } = parseUdpInputsText(player.udpInputsText, player.playerId);
+        return {
+          ...player,
+          udpInputsText: serializeUdpInputs(
+            inputs.map((udpInput, currentIndex) => (
+              currentIndex === udpIndex ? { ...udpInput, ...patch } : udpInput
+            )),
+          ),
+        };
+      }),
+    }));
+  };
+
+  const removeUdpInput = (index: number, udpIndex: number) => {
+    setForm((current) => ({
+      ...current,
+      players: current.players.map((player, playerIndex) => {
+        if (playerIndex !== index) return player;
+
+        const { inputs } = parseUdpInputsText(player.udpInputsText, player.playerId);
+        return {
+          ...player,
+          udpInputsText: serializeUdpInputs(inputs.filter((_, currentIndex) => currentIndex !== udpIndex)),
+        };
+      }),
+    }));
+  };
+
   const addPlayer = () => {
     setForm((current) => ({
       ...current,
@@ -452,7 +585,7 @@ export function RemoteSetupPanel() {
             </div>
             <h2 className="mt-3 text-xl font-semibold text-white sm:text-2xl">Provision nodes from the remote dashboard</h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-              Upload a discovery report, keep advanced fields folded until you need them, and generate a ready-to-download node config with a fresh agent token.
+              Upload a discovery report, keep advanced selector fields folded until you need them, and generate a ready-to-download node config with a fresh agent token.
             </p>
           </div>
 
@@ -577,6 +710,7 @@ export function RemoteSetupPanel() {
               const primaryPathKey = isInsta ? 'shared_log_dir' : isAdmax ? 'admax_root' : 'log_path';
               const secondaryPathKey = isInsta ? 'instance_root' : isAdmax ? 'fnf_log' : 'fnf_log';
               const tertiaryPathKey = isInsta ? 'fnf_log' : 'playlistscan_log';
+              const udpEditor = parseUdpInputsText(player.udpInputsText, player.playerId);
 
               return (
                 <article
@@ -711,6 +845,113 @@ export function RemoteSetupPanel() {
                     </label>
                   </div>
 
+                  <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/55 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">UDP Inputs</p>
+                        <p className="mt-2 text-sm text-slate-300">
+                          Add up to 5 optional stream probes for this player and turn each one on or off here.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => addUdpInput(index)}
+                        disabled={udpEditor.inputs.length >= 5}
+                        className="rounded-2xl border border-emerald-500/35 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-100 transition-colors hover:border-emerald-400 hover:bg-emerald-500/16 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Add stream
+                      </button>
+                    </div>
+
+                    {udpEditor.error ? (
+                      <div className="mt-3 rounded-2xl border border-red-700/40 bg-red-900/20 px-4 py-3 text-sm text-red-200">
+                        {udpEditor.error}
+                      </div>
+                    ) : udpEditor.inputs.length === 0 ? (
+                      <div className="mt-3 rounded-2xl border border-dashed border-slate-700 bg-slate-950/35 px-4 py-5 text-sm text-slate-400">
+                        No UDP streams added for this player yet.
+                      </div>
+                    ) : (
+                      <div className="mt-3 space-y-3">
+                        {udpEditor.inputs.map((udpInput, udpIndex) => (
+                          <div
+                            key={`${udpInput.udpInputId}-${udpIndex}`}
+                            className={`rounded-2xl border p-4 ${udpInput.enabled
+                              ? 'border-emerald-500/25 bg-emerald-500/8'
+                              : 'border-slate-700 bg-slate-900/70'
+                            }`}
+                          >
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div>
+                                <p className="text-sm font-semibold text-slate-100">Stream {udpIndex + 1}</p>
+                                <p className="mt-1 text-xs text-slate-400">
+                                  {udpInput.enabled
+                                    ? 'Monitoring is active for this UDP stream.'
+                                    : 'Saved but disabled until you turn monitoring on.'}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => updateUdpInput(index, udpIndex, { enabled: !udpInput.enabled })}
+                                  className={`rounded-2xl border px-4 py-2 text-sm font-semibold transition-colors ${udpInput.enabled
+                                    ? 'border-emerald-500/35 bg-emerald-500/12 text-emerald-100 hover:border-emerald-400'
+                                    : 'border-slate-700 bg-slate-900/80 text-slate-100 hover:border-slate-500'
+                                  }`}
+                                >
+                                  {udpInput.enabled ? 'Monitoring on' : 'Monitoring off'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => removeUdpInput(index, udpIndex)}
+                                  className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-100 transition-colors hover:border-red-400/45"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+                              <label>
+                                <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Stream ID</span>
+                                <input
+                                  type="text"
+                                  value={udpInput.udpInputId}
+                                  onChange={(event) => updateUdpInput(index, udpIndex, { udpInputId: event.target.value })}
+                                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/85 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400"
+                                />
+                              </label>
+                              <label>
+                                <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Thumbnail Interval (Seconds)</span>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={300}
+                                  value={udpInput.thumbnailIntervalS}
+                                  onChange={(event) => updateUdpInput(index, udpIndex, {
+                                    thumbnailIntervalS: clampUdpInterval(event.target.value, 10),
+                                  })}
+                                  disabled={!udpInput.enabled}
+                                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/85 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
+                                />
+                              </label>
+                            </div>
+
+                            <label className="mt-3 block">
+                              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Stream URL</span>
+                              <input
+                                type="text"
+                                value={udpInput.streamUrl}
+                                onChange={(event) => updateUdpInput(index, udpIndex, { streamUrl: event.target.value })}
+                                className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/85 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400"
+                              />
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   {player.advancedOpen && (
                     <div className="mt-4 grid gap-3 xl:grid-cols-3">
                       <label className="xl:col-span-1">
@@ -742,7 +983,7 @@ export function RemoteSetupPanel() {
                       </label>
 
                       <label className="xl:col-span-3">
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">UDP Inputs JSON</span>
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">UDP Inputs JSON (Advanced)</span>
                         <textarea
                           value={player.udpInputsText}
                           onChange={(event) => updatePlayer(index, { udpInputsText: event.target.value })}
@@ -771,7 +1012,7 @@ export function RemoteSetupPanel() {
             <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-200">How this flow works</h3>
             <div className="mt-3 space-y-3 text-sm leading-6 text-slate-300">
               <p>1. Upload a discovery report from a Windows node, or build the node draft manually.</p>
-              <p>2. Keep advanced selectors hidden unless the player needs custom matching or UDP inputs.</p>
+              <p>2. Keep advanced selectors hidden unless the player needs custom matching. UDP inputs stay visible in each player card.</p>
               <p>3. Provisioning uses your signed-in tenant, mirrors the node config, rotates a fresh agent token, and downloads a ready YAML config for the node.</p>
             </div>
           </div>

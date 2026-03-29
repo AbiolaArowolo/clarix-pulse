@@ -220,7 +220,10 @@ function Find-InstaPlayers {
             (Join-Path $installRoot 'logs')
         )
         $fnfLog = Get-FirstExistingDirectory -Candidates @(
+            (Join-Path $sharedLogDir 'FNF'),
+            (Join-Path $sharedLogDir 'fnf'),
             (Join-Path $installRoot 'logs\FNF'),
+            (Join-Path $installRoot 'logs\fnf'),
             (Join-Path $installRoot 'FNF')
         )
         $playlistScanLog = Get-FirstExistingDirectory -Candidates @(
@@ -275,7 +278,7 @@ function Find-AdmaxPlayers {
     param([string]$NodeId)
 
     $players = New-Object System.Collections.Generic.List[object]
-    $roots = Find-AdmaxRootCandidates
+    $roots = @(Find-AdmaxRootCandidates)
 
     for ($offset = 0; $offset -lt $roots.Count; $offset++) {
         $admaxRoot = $roots[$offset]
@@ -385,6 +388,18 @@ function Get-PlayoutProfileDescriptor {
     $lower = $haystack.ToLowerInvariant()
     $descriptors = @(
         @{
+            id = 'insta'
+            label = 'Indytek Insta'
+            match = 'indytek|(^|[^a-z0-9])insta([^a-z0-9]|$)'
+            log_keywords = @('indytek', 'insta')
+        },
+        @{
+            id = 'admax'
+            label = 'Unimedia Admax'
+            match = 'unimedia|(^|[^a-z0-9])admax([^a-z0-9]|$)'
+            log_keywords = @('unimedia', 'admax')
+        },
+        @{
             id = 'cinegy_air'
             label = 'Cinegy Air'
             match = 'cinegy'
@@ -453,6 +468,22 @@ function Get-PlayoutProfileDescriptorById {
     $normalized = $normalized.Trim().ToLowerInvariant()
 
     switch ($normalized) {
+        'insta' {
+            return @{
+                id = 'insta'
+                label = 'Indytek Insta'
+                match = 'indytek|(^|[^a-z0-9])insta([^a-z0-9]|$)'
+                log_keywords = @('indytek', 'insta')
+            }
+        }
+        'admax' {
+            return @{
+                id = 'admax'
+                label = 'Unimedia Admax'
+                match = 'unimedia|(^|[^a-z0-9])admax([^a-z0-9]|$)'
+                log_keywords = @('unimedia', 'admax')
+            }
+        }
         'cinegy_air' {
             return @{
                 id = 'cinegy_air'
@@ -722,7 +753,15 @@ function Get-PulseConfigHints {
         }
     }
 
-    return [ordered]@{}
+    return [ordered]@{
+        source_path = ''
+        node_id = ''
+        node_name = ''
+        site_id = ''
+        hub_url = ''
+        agent_token = ''
+        enrollment_key = ''
+    }
 }
 
 $hostname = $env:COMPUTERNAME
