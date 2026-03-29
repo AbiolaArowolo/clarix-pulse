@@ -104,7 +104,7 @@ def detect_revision() -> str:
 def detect_dirty_tree() -> bool:
     try:
         result = subprocess.run(
-            ["git", "status", "--porcelain"],
+            ["git", "status", "--porcelain", "--untracked-files=no"],
             check=True,
             capture_output=True,
             text=True,

@@ -112,6 +112,8 @@ Those now report:
 - `archiveSha256`
 - `sourceDirty`
 
+`sourceDirty` is based on tracked git changes only. Generated packaging artifacts like the local `deploy/` folder do not mark a release dirty.
+
 ---
 
 ## Initial Deployment
