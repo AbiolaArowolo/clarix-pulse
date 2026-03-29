@@ -70,6 +70,7 @@ The README is intentionally high-level. Detailed implementation and operational 
 - Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Deployment guide: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
 - VPS operations checklist: [docs/VPS_OPERATIONS_CHECKLIST.md](docs/VPS_OPERATIONS_CHECKLIST.md)
+- User manual: [docs/USER_MANUAL.md](docs/USER_MANUAL.md)
 - Agent install guide: [docs/AGENT_INSTALL.md](docs/AGENT_INSTALL.md)
 - Monitoring rules: [docs/MONITORING_SPEC.md](docs/MONITORING_SPEC.md)
 - Technical decisions: [docs/DECISIONS.md](docs/DECISIONS.md)
