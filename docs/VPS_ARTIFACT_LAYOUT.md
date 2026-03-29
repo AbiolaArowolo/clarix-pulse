@@ -1,149 +1,98 @@
-# Clarix Pulse - VPS Artifact Layout
+# Clarix Pulse - Authenticated Artifact Layout
 
 **Document Date**: `2026-03-29 -04:00`
 
 ## Purpose
 
-This guide defines the stable download layout for:
+This guide defines the current protected download shape for:
 
-1. the Clarix Pulse bundle zip
-2. tenant-provisioned node `config.yaml` files
+1. the Clarix Pulse Windows bundle zip
+2. reprovisioned node `config.yaml` downloads
 
-These are different files and serve different parts of setup.
+The current approach is intentionally not a public static `/downloads/...` tree. Downloads are served through the hub so only enabled users can initiate them.
 
 ---
 
-## Recommended URL Model
+## Current Download Endpoints
+
+Browser download routes:
 
 ```text
-https://pulse.clarixtech.com/downloads/clarix-pulse/latest/clarix-pulse-v1.9.zip
-https://pulse.clarixtech.com/downloads/nodes/<node-id>/config.yaml
+https://pulse.clarixtech.com/api/downloads/bundle/windows/latest
+https://pulse.clarixtech.com/api/downloads/nodes/<node-id>/config.yaml
 ```
 
-Meaning:
-
-- the first URL is the stable installer link for operators
-- the second URL is the stable config link for one specific node
-
----
-
-## Recommended Filesystem Layout
+Signed-link generator routes:
 
 ```text
-/var/www/clarix-pulse/packages/dashboard/dist
-/var/www/clarix-pulse-downloads/clarix-pulse/v1.9/clarix-pulse-v1.9.zip
-/var/www/clarix-pulse-downloads/clarix-pulse/latest/clarix-pulse-v1.9.zip
-/var/www/clarix-pulse-downloads/nodes/<node-id>/config.yaml
+https://pulse.clarixtech.com/api/downloads/bundle/windows/link
+https://pulse.clarixtech.com/api/downloads/nodes/<node-id>/config-link
 ```
+
+Important:
+
+- the `.../latest` and `.../config.yaml` routes work directly in the signed-in browser
+- the `.../link` routes mint short-lived secure URLs for nodes, scripts, and local-UI pulls
+- unsigned users cannot fetch the installer
+- accounts must be enabled before they can sign in and mint new download links
 
 ---
 
-## How Setup Uses These Files
+## Server-Side Artifact Source
 
-### Bundle zip
-
-Used to get the software onto a Windows node.
-
-Example:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install-from-url.ps1 -BundleUrl "https://pulse.clarixtech.com/downloads/clarix-pulse/latest/clarix-pulse-v1.9.zip"
-```
-
-### Discovery report
-
-Created locally on the node:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\discover-node.ps1
-```
-
-This writes:
+By default the hub serves the bundle from:
 
 ```text
-.\pulse-node-discovery-report.json
+packages/agent/release/clarix-pulse-v1.9.zip
 ```
 
-That file is uploaded into the dashboard or local UI to auto-fill detected paths, players, and log locations.
+Optional override:
 
-### Provisioned `config.yaml`
-
-Created by the signed-in dashboard for one specific tenant/node.
-
-That file is then:
-
-- downloaded directly after provisioning
-- or hosted at `/downloads/nodes/<node-id>/config.yaml`
-
-The local UI can import it or pull it by URL.
-
----
-
-## Recommended Operator Flow
-
-1. Sign in to the correct tenant dashboard.
-2. Pull the bundle zip from the stable Clarix Pulse URL.
-3. Run discovery on the Windows node while the player is active.
-4. Upload the discovery report in `Remote Setup`.
-5. Provision the node and download the final `config.yaml`.
-6. Optionally publish that same `config.yaml` to `/downloads/nodes/<node-id>/config.yaml`.
-7. Import that config into the local UI.
-8. Save local settings and install the service.
-
----
-
-## Caddy Example
-
-```caddy
-pulse.clarixtech.com {
-    root * /var/www/clarix-pulse/packages/dashboard/dist
-    try_files {path} /index.html
-    file_server
-
-    handle_path /downloads/* {
-        root * /var/www/clarix-pulse-downloads
-        file_server
-    }
-
-    reverse_proxy /api/* localhost:3001
-    reverse_proxy /socket.io/* localhost:3001 {
-        header_up Connection {http.upgrade}
-        header_up Upgrade {http.upgrade}
-    }
-}
+```env
+PULSE_DOWNLOAD_BUNDLE_PATH=/custom/path/clarix-pulse-v1.9.zip
+PULSE_DOWNLOAD_BUNDLE_NAME=clarix-pulse-v1.9.zip
+PULSE_DOWNLOAD_SIGNING_SECRET=REPLACE_WITH_LONG_RANDOM_SECRET
+PULSE_DOWNLOAD_LINK_TTL_MINUTES=1440
 ```
 
 ---
 
-## Protection Model
+## Operator Flow
 
-Current node download behavior is simple:
+### Installer
 
-- `install-from-url.ps1` uses a direct `http(s)` GET
-- local UI `Pull from link` also uses a direct `http(s)` GET
+1. Register a Clarix Pulse account.
+2. Receive the 365-day access key by email, or copy the fallback key shown once if SMTP is unavailable.
+3. Wait for a platform admin to enable the account.
+4. Sign in with email, password, and access key.
+5. Download the Windows installer from the onboarding or account page, or create a secure installer link for node-side scripted pulls.
 
-So the URL must resolve directly to the file.
+### Node Config
 
-Works well:
-
-- direct HTTPS URLs
-- presigned URLs
-- signed query-string URLs
-
-Not supported well today:
-
-- login pages
-- custom-header-only downloads
-- interactive browser-gated flows
+1. Upload a discovery report.
+2. Provision the node from `Remote Setup`.
+3. Download `config.yaml` immediately from the provisioning flow.
+4. If you want the node to pull it directly, copy the secure config link generated by `Remote Setup`.
+5. If you need another secure config link later, reprovision the node or call the signed config-link API for that node from an authenticated operator workflow.
 
 ---
 
-## Publishing Rule
+## Why This Replaced Public `/downloads/...`
 
-When a node is provisioned or reprovisioned, update:
+The older public-static layout was simple, but it could not satisfy the requirement that only registered and enabled users should be able to fetch the installer.
 
-```text
-/var/www/clarix-pulse-downloads/nodes/<node-id>/config.yaml
-```
+The current model gives:
 
-That keeps the node's setup URL stable even when the token changes.
+- workspace-aware access control
+- no public anonymous bundle URL
+- direct signed-in downloads for human operators
+- secure expiring links for nodes and scripts that need a plain HTTPS GET
+- no dependence on external cloud login pages
+
+---
+
+## Related Docs
+
+- deployment: [DEPLOYMENT.md](/D:/monitoring/docs/DEPLOYMENT.md)
+- onboarding: [ONBOARDING.md](/D:/monitoring/docs/ONBOARDING.md)
+- install guide: [AGENT_INSTALL.md](/D:/monitoring/docs/AGENT_INSTALL.md)

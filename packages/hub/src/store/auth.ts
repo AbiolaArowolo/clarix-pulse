@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { QueryResultRow } from 'pg';
-import { exec, queryOne, withTransaction } from './db';
+import { exec, query, queryOne, withTransaction } from './db';
 
 export interface AuthenticatedSession {
   sessionId: string;
@@ -13,6 +13,52 @@ export interface AuthenticatedSession {
   email: string;
   displayName: string;
   expiresAt: string;
+  isPlatformAdmin: boolean;
+  tenantEnabled: boolean;
+  disabledReason: string | null;
+  accessKeyHint: string | null;
+  accessKeyExpiresAt: string | null;
+}
+
+export interface RegistrationResult {
+  tenantId: string;
+  tenantName: string;
+  tenantSlug: string;
+  ownerEmail: string;
+  ownerDisplayName: string;
+  enrollmentKey: string;
+  defaultAlertEmail: string;
+  accessKey: string;
+  accessKeyHint: string;
+  accessKeyExpiresAt: string;
+}
+
+export interface TenantAccessSummary {
+  tenantId: string;
+  tenantName: string;
+  tenantSlug: string;
+  ownerEmail: string | null;
+  ownerDisplayName: string | null;
+  defaultAlertEmail: string | null;
+  enabled: boolean;
+  disabledReason: string | null;
+  accessKeyHint: string | null;
+  accessKeyGeneratedAt: string | null;
+  accessKeyExpiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TenantAccessKeyRotation {
+  summary: TenantAccessSummary;
+  accessKey: string;
+}
+
+export interface AuthenticationResult {
+  ok: boolean;
+  statusCode: number;
+  error?: string;
+  userId?: string;
 }
 
 interface SessionRow extends QueryResultRow {
@@ -26,6 +72,10 @@ interface SessionRow extends QueryResultRow {
   email: string;
   display_name: string;
   expires_at: Date | string;
+  enabled: boolean;
+  disabled_reason: string | null;
+  access_key_hint: string | null;
+  access_key_expires_at: Date | string | null;
 }
 
 interface UserRow extends QueryResultRow {
@@ -36,7 +86,51 @@ interface TenantRow extends QueryResultRow {
   tenant_id: string;
 }
 
+interface UserAuthRow extends QueryResultRow {
+  user_id: string;
+  password_hash: string;
+  email: string;
+  tenant_id: string;
+  enabled: boolean;
+  disabled_reason: string | null;
+  access_key_hash: string;
+  access_key_expires_at: Date | string | null;
+}
+
+interface UserAccessRow extends QueryResultRow {
+  user_id: string;
+  email: string;
+  enabled: boolean;
+  disabled_reason: string | null;
+  access_key_expires_at: Date | string | null;
+}
+
+interface TenantSummaryRow extends QueryResultRow {
+  tenant_id: string;
+  tenant_name: string;
+  tenant_slug: string;
+  owner_email: string | null;
+  owner_display_name: string | null;
+  default_alert_email: string | null;
+  enabled: boolean;
+  disabled_reason: string | null;
+  access_key_hint: string | null;
+  access_key_generated_at: Date | string | null;
+  access_key_expires_at: Date | string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+
+function accessKeyValidityDays(): number {
+  const parsed = Number.parseInt(process.env.PULSE_ACCESS_KEY_TTL_DAYS ?? '365', 10);
+  if (!Number.isFinite(parsed)) {
+    return 365;
+  }
+
+  return Math.min(3650, Math.max(1, parsed));
+}
 
 function toIso(value: Date | string | null | undefined): string {
   if (!value) return new Date().toISOString();
@@ -44,6 +138,11 @@ function toIso(value: Date | string | null | undefined): string {
 
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toISOString();
+}
+
+function toOptionalIso(value: Date | string | null | undefined): string | null {
+  if (!value) return null;
+  return toIso(value);
 }
 
 function normalizeEmail(value: string): string {
@@ -82,6 +181,45 @@ function hashSessionToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
+function normalizeAccessKey(value: string): string {
+  return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function formatAccessKey(value: string): string {
+  return normalizeAccessKey(value).match(/.{1,4}/g)?.join('-') ?? normalizeAccessKey(value);
+}
+
+function accessKeyHint(value: string): string {
+  const normalized = normalizeAccessKey(value);
+  const tail = normalized.slice(-6) || normalized;
+  return `...${tail}`;
+}
+
+function createAccessKey(): string {
+  return formatAccessKey(crypto.randomBytes(12).toString('hex').toUpperCase());
+}
+
+function accessKeyExpiryIso(validityDays = accessKeyValidityDays()): string {
+  return new Date(Date.now() + validityDays * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function platformAdminEmails(): Set<string> {
+  const raw = [
+    process.env.PULSE_PLATFORM_ADMIN_EMAILS ?? '',
+    process.env.PULSE_ADMIN_EMAILS ?? '',
+  ]
+    .join(',')
+    .split(/[,\n;]+/)
+    .map((entry) => normalizeEmail(entry))
+    .filter(Boolean);
+
+  return new Set(raw);
+}
+
+export function isPlatformAdminEmail(email: string): boolean {
+  return platformAdminEmails().has(normalizeEmail(email));
+}
+
 async function scryptHash(secret: string, salt: string): Promise<string> {
   const derived = await new Promise<Buffer>((resolve, reject) => {
     crypto.scrypt(secret, salt, 64, (error, key) => {
@@ -97,19 +235,19 @@ async function scryptHash(secret: string, salt: string): Promise<string> {
   return derived.toString('hex');
 }
 
-async function hashPassword(password: string): Promise<string> {
+async function hashSecret(secret: string): Promise<string> {
   const salt = randomSecret(16);
-  const digest = await scryptHash(password, salt);
+  const digest = await scryptHash(secret, salt);
   return `scrypt:${salt}:${digest}`;
 }
 
-async function verifyPassword(password: string, stored: string): Promise<boolean> {
+async function verifySecret(secret: string, stored: string): Promise<boolean> {
   const [algorithm, salt, digest] = stored.split(':');
   if (algorithm !== 'scrypt' || !salt || !digest) {
     return false;
   }
 
-  const candidate = await scryptHash(password, salt);
+  const candidate = await scryptHash(secret, salt);
   const expected = Buffer.from(digest, 'hex');
   const actual = Buffer.from(candidate, 'hex');
   if (expected.length !== actual.length) {
@@ -119,7 +257,47 @@ async function verifyPassword(password: string, stored: string): Promise<boolean
   return crypto.timingSafeEqual(expected, actual);
 }
 
-function rowToSession(row: SessionRow): AuthenticatedSession {
+async function hashPassword(password: string): Promise<string> {
+  return hashSecret(password);
+}
+
+async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  return verifySecret(password, stored);
+}
+
+async function hashAccessKey(accessKey: string): Promise<string> {
+  return hashSecret(normalizeAccessKey(accessKey));
+}
+
+async function verifyAccessKey(accessKey: string, stored: string): Promise<boolean> {
+  return verifySecret(normalizeAccessKey(accessKey), stored);
+}
+
+function tenantAccessError(input: {
+  enabled: boolean;
+  disabledReason: string | null;
+  accessKeyExpiresAt: Date | string | null;
+  isPlatformAdmin: boolean;
+}): string | null {
+  if (input.isPlatformAdmin) {
+    return null;
+  }
+
+  if (!input.enabled) {
+    return input.disabledReason?.trim() || 'Account pending activation. Clarix must enable this account before you can sign in.';
+  }
+
+  if (input.accessKeyExpiresAt) {
+    const expiry = new Date(input.accessKeyExpiresAt);
+    if (!Number.isNaN(expiry.getTime()) && expiry.getTime() < Date.now()) {
+      return 'Your access key has expired. Contact Clarix to renew it.';
+    }
+  }
+
+  return null;
+}
+
+function rowToSession(row: SessionRow, isPlatformAdmin: boolean): AuthenticatedSession {
   return {
     sessionId: row.session_id,
     userId: row.user_id,
@@ -131,6 +309,29 @@ function rowToSession(row: SessionRow): AuthenticatedSession {
     email: row.email,
     displayName: row.display_name,
     expiresAt: toIso(row.expires_at),
+    isPlatformAdmin,
+    tenantEnabled: !!row.enabled,
+    disabledReason: row.disabled_reason,
+    accessKeyHint: row.access_key_hint,
+    accessKeyExpiresAt: toOptionalIso(row.access_key_expires_at),
+  };
+}
+
+function rowToTenantSummary(row: TenantSummaryRow): TenantAccessSummary {
+  return {
+    tenantId: row.tenant_id,
+    tenantName: row.tenant_name,
+    tenantSlug: row.tenant_slug,
+    ownerEmail: row.owner_email,
+    ownerDisplayName: row.owner_display_name,
+    defaultAlertEmail: row.default_alert_email,
+    enabled: !!row.enabled,
+    disabledReason: row.disabled_reason,
+    accessKeyHint: row.access_key_hint,
+    accessKeyGeneratedAt: toOptionalIso(row.access_key_generated_at),
+    accessKeyExpiresAt: toOptionalIso(row.access_key_expires_at),
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
   };
 }
 
@@ -144,6 +345,10 @@ async function sessionForHash(sessionTokenHash: string): Promise<AuthenticatedSe
       t.slug AS tenant_slug,
       t.enrollment_key,
       t.default_alert_email,
+      t.enabled,
+      t.disabled_reason,
+      t.access_key_hint,
+      t.access_key_expires_at,
       u.email,
       u.display_name,
       s.expires_at
@@ -154,7 +359,23 @@ async function sessionForHash(sessionTokenHash: string): Promise<AuthenticatedSe
       AND s.expires_at > NOW()
   `, [sessionTokenHash]);
 
-  return row ? rowToSession(row) : null;
+  if (!row) {
+    return null;
+  }
+
+  const isPlatformAdmin = isPlatformAdminEmail(row.email);
+  const accessError = tenantAccessError({
+    enabled: !!row.enabled,
+    disabledReason: row.disabled_reason,
+    accessKeyExpiresAt: row.access_key_expires_at,
+    isPlatformAdmin,
+  });
+
+  if (accessError) {
+    return null;
+  }
+
+  return rowToSession(row, isPlatformAdmin);
 }
 
 async function resolveUniqueTenantSlug(baseSlug: string, client?: Parameters<typeof exec>[2]): Promise<string> {
@@ -190,12 +411,35 @@ async function ensureUniqueUserEmail(email: string, client?: Parameters<typeof e
   }
 }
 
+async function deleteSessionsForTenant(tenantId: string, client?: Parameters<typeof exec>[2]): Promise<void> {
+  await exec(`
+    DELETE FROM sessions s
+    USING users u
+    WHERE s.user_id = u.user_id
+      AND u.tenant_id = $1
+  `, [tenantId], client);
+}
+
+async function userAccessRowForUserId(userId: string): Promise<UserAccessRow | null> {
+  return queryOne<UserAccessRow>(`
+    SELECT
+      u.user_id,
+      u.email,
+      t.enabled,
+      t.disabled_reason,
+      t.access_key_expires_at
+    FROM users u
+    JOIN tenants t ON t.tenant_id = u.tenant_id
+    WHERE u.user_id = $1
+  `, [userId]);
+}
+
 export async function registerTenantOwner(input: {
   companyName: string;
   displayName: string;
   email: string;
   password: string;
-}): Promise<{ sessionToken: string; session: AuthenticatedSession }> {
+}): Promise<RegistrationResult> {
   const email = normalizeEmail(input.email);
   const companyName = normalizeTenantName(input.companyName, email);
   const displayName = normalizeDisplayName(input.displayName, companyName);
@@ -212,14 +456,18 @@ export async function registerTenantOwner(input: {
   }
 
   const passwordHash = await hashPassword(password);
+  const accessKey = createAccessKey();
+  const accessKeyHash = await hashAccessKey(accessKey);
   const tenantId = randomId('tenant');
   const userId = randomId('user');
   const timestamp = new Date().toISOString();
   const enrollmentKey = randomSecret(24);
+  const accessKeyExpiresAt = accessKeyExpiryIso();
+  let tenantSlug = '';
 
   await withTransaction(async (client) => {
     await ensureUniqueUserEmail(email, client);
-    const tenantSlug = await resolveUniqueTenantSlug(companyName, client);
+    tenantSlug = await resolveUniqueTenantSlug(companyName, client);
 
     await exec(`
       INSERT INTO tenants (
@@ -228,11 +476,28 @@ export async function registerTenantOwner(input: {
         slug,
         enrollment_key,
         default_alert_email,
+        enabled,
+        disabled_reason,
+        access_key_hash,
+        access_key_hint,
+        access_key_generated_at,
+        access_key_expires_at,
         created_at,
         updated_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $6)
-    `, [tenantId, companyName, tenantSlug, enrollmentKey, email, timestamp], client);
+      VALUES ($1, $2, $3, $4, $5, FALSE, $6, $7, $8, $9, $10, $9, $9)
+    `, [
+      tenantId,
+      companyName,
+      tenantSlug,
+      enrollmentKey,
+      email,
+      'Pending activation by Clarix.',
+      accessKeyHash,
+      accessKeyHint(accessKey),
+      timestamp,
+      accessKeyExpiresAt,
+    ], client);
 
     await exec(`
       INSERT INTO users (
@@ -263,35 +528,116 @@ export async function registerTenantOwner(input: {
     `, [tenantId, JSON.stringify([email]), timestamp], client);
   });
 
-  return createSessionForUser(userId);
+  return {
+    tenantId,
+    tenantName: companyName,
+    tenantSlug,
+    ownerEmail: email,
+    ownerDisplayName: displayName,
+    enrollmentKey,
+    defaultAlertEmail: email,
+    accessKey,
+    accessKeyHint: accessKeyHint(accessKey),
+    accessKeyExpiresAt,
+  };
 }
 
-export async function authenticateUser(emailInput: string, password: string): Promise<{ userId: string } | null> {
+export async function authenticateUser(
+  emailInput: string,
+  password: string,
+  accessKeyInput: string,
+): Promise<AuthenticationResult> {
   const email = normalizeEmail(emailInput);
-  const row = await queryOne<{
-    user_id: string;
-    password_hash: string;
-  }>(`
-    SELECT user_id, password_hash
-    FROM users
-    WHERE email = $1
+  const row = await queryOne<UserAuthRow>(`
+    SELECT
+      u.user_id,
+      u.password_hash,
+      u.email,
+      t.tenant_id,
+      t.enabled,
+      t.disabled_reason,
+      t.access_key_hash,
+      t.access_key_expires_at
+    FROM users u
+    JOIN tenants t ON t.tenant_id = u.tenant_id
+    WHERE u.email = $1
   `, [email]);
 
   if (!row) {
-    return null;
+    return {
+      ok: false,
+      statusCode: 401,
+      error: 'Invalid email or password.',
+    };
   }
 
-  const valid = await verifyPassword(password, row.password_hash);
-  if (!valid) {
-    return null;
+  const validPassword = await verifyPassword(password, row.password_hash);
+  if (!validPassword) {
+    return {
+      ok: false,
+      statusCode: 401,
+      error: 'Invalid email or password.',
+    };
+  }
+
+  const isPlatformAdmin = isPlatformAdminEmail(row.email);
+  const accessError = tenantAccessError({
+    enabled: !!row.enabled,
+    disabledReason: row.disabled_reason,
+    accessKeyExpiresAt: row.access_key_expires_at,
+    isPlatformAdmin,
+  });
+  if (accessError) {
+    return {
+      ok: false,
+      statusCode: 403,
+      error: accessError,
+    };
+  }
+
+  if (!isPlatformAdmin) {
+    if (!normalizeAccessKey(accessKeyInput)) {
+      return {
+        ok: false,
+        statusCode: 400,
+        error: 'Access key is required.',
+      };
+    }
+
+    const validAccessKey = await verifyAccessKey(accessKeyInput, row.access_key_hash);
+    if (!validAccessKey) {
+      return {
+        ok: false,
+        statusCode: 401,
+        error: 'Invalid access key.',
+      };
+    }
   }
 
   return {
+    ok: true,
+    statusCode: 200,
     userId: row.user_id,
   };
 }
 
 export async function createSessionForUser(userId: string): Promise<{ sessionToken: string; session: AuthenticatedSession }> {
+  const access = await userAccessRowForUserId(userId);
+  if (!access) {
+    throw new Error('Unknown user.');
+  }
+
+  const isPlatformAdmin = isPlatformAdminEmail(access.email);
+  const accessError = tenantAccessError({
+    enabled: !!access.enabled,
+    disabledReason: access.disabled_reason,
+    accessKeyExpiresAt: access.access_key_expires_at,
+    isPlatformAdmin,
+  });
+  if (accessError) {
+    throw new Error(accessError);
+  }
+
   const sessionId = randomId('session');
   const sessionToken = randomSecret(32);
   const sessionTokenHash = hashSessionToken(sessionToken);
@@ -349,8 +695,11 @@ export async function findTenantByEnrollmentKey(enrollmentKey: string): Promise<
   const row = await queryOne<{
     tenant_id: string;
     name: string;
+    enabled: boolean;
+    disabled_reason: string | null;
+    access_key_expires_at: Date | string | null;
   }>(`
-    SELECT tenant_id, name
+    SELECT tenant_id, name, enabled, disabled_reason, access_key_expires_at
     FROM tenants
     WHERE enrollment_key = $1
   `, [enrollmentKey.trim()]);
@@ -359,8 +708,157 @@ export async function findTenantByEnrollmentKey(enrollmentKey: string): Promise<
     return null;
   }
 
+  const accessError = tenantAccessError({
+    enabled: !!row.enabled,
+    disabledReason: row.disabled_reason,
+    accessKeyExpiresAt: row.access_key_expires_at,
+    isPlatformAdmin: false,
+  });
+  if (accessError) {
+    return null;
+  }
+
   return {
     tenantId: row.tenant_id,
     tenantName: row.name,
+  };
+}
+
+export async function listTenantsForAdmin(): Promise<TenantAccessSummary[]> {
+  const rows = await query<TenantSummaryRow>(`
+    SELECT
+      t.tenant_id,
+      t.name AS tenant_name,
+      t.slug AS tenant_slug,
+      owner.email AS owner_email,
+      owner.display_name AS owner_display_name,
+      t.default_alert_email,
+      t.enabled,
+      t.disabled_reason,
+      t.access_key_hint,
+      t.access_key_generated_at,
+      t.access_key_expires_at,
+      t.created_at,
+      t.updated_at
+    FROM tenants t
+    LEFT JOIN LATERAL (
+      SELECT u.email, u.display_name
+      FROM users u
+      WHERE u.tenant_id = t.tenant_id
+      ORDER BY u.created_at ASC
+      LIMIT 1
+    ) owner ON TRUE
+    ORDER BY t.created_at DESC, t.name ASC
+  `);
+
+  return rows.map(rowToTenantSummary);
+}
+
+export async function getTenantAccessSummary(tenantId: string): Promise<TenantAccessSummary | null> {
+  const row = await queryOne<TenantSummaryRow>(`
+    SELECT
+      t.tenant_id,
+      t.name AS tenant_name,
+      t.slug AS tenant_slug,
+      owner.email AS owner_email,
+      owner.display_name AS owner_display_name,
+      t.default_alert_email,
+      t.enabled,
+      t.disabled_reason,
+      t.access_key_hint,
+      t.access_key_generated_at,
+      t.access_key_expires_at,
+      t.created_at,
+      t.updated_at
+    FROM tenants t
+    LEFT JOIN LATERAL (
+      SELECT u.email, u.display_name
+      FROM users u
+      WHERE u.tenant_id = t.tenant_id
+      ORDER BY u.created_at ASC
+      LIMIT 1
+    ) owner ON TRUE
+    WHERE t.tenant_id = $1
+  `, [tenantId]);
+
+  return row ? rowToTenantSummary(row) : null;
+}
+
+export async function updateTenantEnabledState(input: {
+  tenantId: string;
+  enabled: boolean;
+  disabledReason?: string | null;
+}): Promise<TenantAccessSummary> {
+  const timestamp = new Date().toISOString();
+  const reason = (input.disabledReason ?? '').trim();
+
+  await withTransaction(async (client) => {
+    await exec(`
+      UPDATE tenants
+      SET
+        enabled = $2,
+        disabled_reason = CASE WHEN $2 THEN NULL ELSE $3 END,
+        enabled_at = CASE WHEN $2 THEN $4 ELSE enabled_at END,
+        disabled_at = CASE WHEN $2 THEN NULL ELSE $4 END,
+        updated_at = $4
+      WHERE tenant_id = $1
+    `, [
+      input.tenantId,
+      input.enabled,
+      reason || 'Disabled by administrator.',
+      timestamp,
+    ], client);
+
+    if (!input.enabled) {
+      await deleteSessionsForTenant(input.tenantId, client);
+    }
+  });
+
+  const summary = await getTenantAccessSummary(input.tenantId);
+  if (!summary) {
+    throw new Error('Unknown tenant.');
+  }
+
+  return summary;
+}
+
+export async function rotateTenantAccessKey(input: {
+  tenantId: string;
+  validityDays?: number;
+}): Promise<TenantAccessKeyRotation> {
+  const accessKey = createAccessKey();
+  const accessKeyHash = await hashAccessKey(accessKey);
+  const timestamp = new Date().toISOString();
+  const accessKeyExpiresAt = accessKeyExpiryIso(input.validityDays ?? accessKeyValidityDays());
+
+  await withTransaction(async (client) => {
+    await exec(`
+      UPDATE tenants
+      SET
+        access_key_hash = $2,
+        access_key_hint = $3,
+        access_key_generated_at = $4,
+        access_key_expires_at = $5,
+        updated_at = $4
+      WHERE tenant_id = $1
+    `, [
+      input.tenantId,
+      accessKeyHash,
+      accessKeyHint(accessKey),
+      timestamp,
+      accessKeyExpiresAt,
+    ], client);
+
+    await deleteSessionsForTenant(input.tenantId, client);
+  });
+
+  const summary = await getTenantAccessSummary(input.tenantId);
+  if (!summary) {
+    throw new Error('Unknown tenant.');
+  }
+
+  return {
+    summary,
+    accessKey,
   };
 }

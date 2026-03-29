@@ -5,6 +5,7 @@ interface AuthUser {
   userId: string;
   email: string;
   displayName: string;
+  isPlatformAdmin?: boolean;
 }
 
 interface AuthTenant {
@@ -13,6 +14,10 @@ interface AuthTenant {
   slug: string;
   enrollmentKey: string;
   defaultAlertEmail: string | null;
+  enabled?: boolean;
+  disabledReason?: string | null;
+  accessKeyHint?: string | null;
+  accessKeyExpiresAt?: string | null;
 }
 
 interface AuthSessionState {
@@ -23,10 +28,21 @@ interface AuthSessionState {
 }
 
 interface AuthContextValue extends AuthSessionState {
+  bootstrapped: boolean;
   loading: boolean;
   error: string | null;
+  notice: string | null;
+  registration: {
+    companyName?: string;
+    email?: string;
+    accessKey?: string | null;
+    accessKeyHint?: string | null;
+    accessKeyExpiresAt?: string | null;
+    pendingActivation?: boolean;
+    emailSent?: boolean;
+  } | null;
   refreshSession: () => Promise<void>;
-  login: (input: { email: string; password: string }) => Promise<boolean>;
+  login: (input: { email: string; password: string; accessKey: string }) => Promise<boolean>;
   register: (input: {
     companyName: string;
     displayName: string;
@@ -41,9 +57,20 @@ interface SessionPayload {
   authenticated?: boolean;
   user?: AuthUser;
   tenant?: AuthTenant;
+  registration?: {
+    companyName?: string;
+    email?: string;
+    accessKey?: string | null;
+    accessKeyHint?: string | null;
+    accessKeyExpiresAt?: string | null;
+    pendingActivation?: boolean;
+    emailSent?: boolean;
+  };
   session?: {
     expiresAt?: string;
   };
+  notice?: string;
+  registered?: boolean;
   error?: string;
 }
 
@@ -75,8 +102,11 @@ function sessionFromPayload(payload: SessionPayload): AuthSessionState {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [loading, setLoading] = useState(true);
+  const [bootstrapped, setBootstrapped] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [registration, setRegistration] = useState<AuthContextValue['registration']>(null);
   const [session, setSession] = useState<AuthSessionState>(EMPTY_STATE);
 
   const refreshSession = async () => {
@@ -85,10 +115,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const payload = await readJsonResponse<SessionPayload>(response);
       setSession(sessionFromPayload(payload));
       setError(null);
+      setNotice(payload.notice ?? null);
+      setRegistration(null);
     } catch (err) {
       setSession(EMPTY_STATE);
       setError(err instanceof Error ? err.message : 'Failed to load session.');
+      setNotice(null);
+      setRegistration(null);
     } finally {
+      setBootstrapped(true);
       setLoading(false);
     }
   };
@@ -100,6 +135,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const submit = async (url: string, body: Record<string, unknown>) => {
     setLoading(true);
     setError(null);
+    setNotice(null);
 
     try {
       const response = await fetch(url, {
@@ -115,10 +151,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       setSession(sessionFromPayload(payload));
+      setNotice(payload.notice ?? null);
+      setRegistration(payload.registration ?? null);
       return true;
     } catch (err) {
       setSession(EMPTY_STATE);
       setError(err instanceof Error ? err.message : 'Request failed.');
+      setNotice(null);
+      if (url !== '/api/auth/login') {
+        setRegistration(null);
+      }
       return false;
     } finally {
       setLoading(false);
@@ -127,10 +169,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<AuthContextValue>(() => ({
     ...session,
+    bootstrapped,
     loading,
     error,
+    notice,
+    registration,
     refreshSession,
-    login: async ({ email, password }) => submit('/api/auth/login', { email, password }),
+    login: async ({ email, password, accessKey }) => {
+      const ok = await submit('/api/auth/login', { email, password, accessKey });
+      if (ok) {
+        setRegistration(null);
+      }
+      return ok;
+    },
     register: async ({ companyName, displayName, email, password }) => (
       submit('/api/auth/register', { companyName, displayName, email, password })
     ),
@@ -143,11 +194,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } finally {
         disconnectHubSocket();
         setSession(EMPTY_STATE);
+        setNotice(null);
+        setRegistration(null);
         setLoading(false);
       }
     },
     clearError: () => setError(null),
-  }), [error, loading, session]);
+  }), [bootstrapped, error, loading, notice, registration, session]);
 
   return (
     <AuthContext.Provider value={value}>

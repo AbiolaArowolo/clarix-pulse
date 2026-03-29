@@ -1,4 +1,5 @@
 import React, { ChangeEvent, useMemo, useState } from 'react';
+import { copyTextToClipboard } from '../lib/clipboard';
 
 interface RemoteSetupPlayerPayload {
   playerId: string;
@@ -38,6 +39,8 @@ interface RemoteProvisionResponse {
   agentToken?: string;
   configYaml?: string;
   downloadFileName?: string;
+  configPullUrl?: string | null;
+  configPullExpiresAt?: string | null;
   updatedAt?: string;
   error?: string;
 }
@@ -213,6 +216,7 @@ export function RemoteSetupPanel() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [lastProvision, setLastProvision] = useState<RemoteProvisionResponse | null>(null);
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
 
   const stats = useMemo(() => ({
     players: form.players.length,
@@ -348,6 +352,7 @@ export function RemoteSetupPanel() {
     setProvisioning(true);
     setError(null);
     setNotice(null);
+    setCopyNotice(null);
 
     try {
       const draft = buildProvisionPayload();
@@ -369,6 +374,16 @@ export function RemoteSetupPanel() {
       setError(err instanceof Error ? err.message : 'Failed to provision remote node setup.');
     } finally {
       setProvisioning(false);
+    }
+  };
+
+  const copyConfigPullLink = async () => {
+    if (!lastProvision?.configPullUrl) return;
+    try {
+      await copyTextToClipboard(lastProvision.configPullUrl);
+      setCopyNotice('Secure config link copied.');
+    } catch {
+      setCopyNotice('Copy failed. Select the link and copy it manually.');
     }
   };
 
@@ -715,12 +730,41 @@ export function RemoteSetupPanel() {
                 <p>Updated: {lastProvision.updatedAt ?? 'just now'}</p>
                 <p>Agent token issued and bundled into the downloaded config.</p>
               </div>
+              {lastProvision.configPullUrl && (
+                <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-slate-950/60 p-4">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-100/80">Secure config link</p>
+                  <p className="mt-2 text-sm leading-6 text-emerald-50">
+                    Paste this into the node&apos;s local UI to pull the provisioned <code>config.yaml</code> directly.
+                  </p>
+                  <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 font-mono text-xs text-cyan-100">
+                    {lastProvision.configPullUrl}
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => void copyConfigPullLink()}
+                      className="rounded-full border border-emerald-400/35 bg-emerald-400/12 px-4 py-2 text-sm font-semibold text-emerald-50 transition-colors hover:border-emerald-300"
+                    >
+                      Copy secure config link
+                    </button>
+                    <span className="text-xs text-emerald-100/70">
+                      Expires: {lastProvision.configPullExpiresAt ?? 'shortly'}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
           {notice && (
             <div className="rounded-3xl border border-cyan-500/25 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-50">
               {notice}
+            </div>
+          )}
+
+          {copyNotice && (
+            <div className="rounded-3xl border border-emerald-700/40 bg-emerald-900/20 px-4 py-3 text-sm text-emerald-100">
+              {copyNotice}
             </div>
           )}
 

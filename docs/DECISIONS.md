@@ -29,7 +29,7 @@
 
 ## ADR-006 - Registration email seeds the tenant's default alert email
 
-**Decision**: use the registration email as the default off-air alert recipient for a new tenant.  
+**Decision**: use the registration email as the default alert recipient for a new tenant.  
 **Why**: it creates a usable first-run alert target without extra setup, while still allowing later edits.
 
 ## ADR-007 - Browser writes are now session-authenticated, not gated by a shared write key
@@ -51,3 +51,13 @@
 
 **Decision**: do not change off-air trigger behavior as part of the auth and dashboard overhaul.  
 **Why**: platform and product-shape changes were already large enough without changing alert semantics too.
+
+## ADR-011 - New customer accounts start disabled and use renewable access keys
+
+**Decision**: registration creates a disabled tenant, generates a 365-day access key, and requires platform-admin enablement before sign-in.  
+**Why**: it keeps customer activation under platform control without returning to a shared browser write-key model.
+
+## ADR-012 - Installer downloads are authenticated and deploy metadata is explicit
+
+**Decision**: serve browser downloads from authenticated hub routes, mint secure expiring links for node-side pulls, and expose deployed revision metadata through the API instead of trusting a live git checkout.  
+**Why**: public static bundle URLs do not meet the signed-in-only requirement, node-side pulls still need plain HTTPS URLs, and archive deploys should not pretend the VPS is a clean repo checkout.

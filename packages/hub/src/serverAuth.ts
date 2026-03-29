@@ -87,6 +87,21 @@ export async function requireSession(req: Request, res: Response, next: NextFunc
   next();
 }
 
+export async function requirePlatformAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const session = await getSessionFromRequest(req);
+  if (!session) {
+    res.status(401).json({ error: 'Sign in required.' });
+    return;
+  }
+
+  if (!session.isPlatformAdmin) {
+    res.status(403).json({ error: 'Platform admin access required.' });
+    return;
+  }
+
+  next();
+}
+
 export async function clearSessionFromRequest(req: Request, res: Response): Promise<void> {
   const sessionToken = readCookie(req.headers.cookie, SESSION_COOKIE_NAME);
   if (sessionToken) {

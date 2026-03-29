@@ -10,6 +10,7 @@ export interface MirroredUdpInputConfig {
 
 export interface MirroredPlayerConfig {
   playerId: string;
+  label: string;
   playoutType: string;
   paths: Record<string, unknown>;
   processSelectors: Record<string, unknown>;
@@ -123,6 +124,7 @@ function normalizePlayer(raw: unknown): MirroredPlayerConfig | null {
 
   return {
     playerId,
+    label: asString(player.label),
     playoutType: asString(player.playoutType ?? player.playout_type, 'insta') || 'insta',
     paths: asMapping(player.paths),
     processSelectors: normalizeSelectorMap(player.processSelectors ?? player.process_selectors),
@@ -187,7 +189,7 @@ export async function updateMirroredNodeConfig(
     players: stored.players.map((player) => ({
       playerId: player.playerId,
       playoutType: player.playoutType,
-      label: `${stored.nodeName} - ${player.playerId}`,
+      label: player.label || `${stored.nodeName} - ${player.playerId}`,
     })),
   });
 

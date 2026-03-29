@@ -4,12 +4,15 @@ import express from 'express';
 import { createServer } from 'http';
 import path from 'path';
 import { Server as SocketServer } from 'socket.io';
+import { readBuildInfo } from './buildInfo';
+import { createAdminRouter } from './routes/admin';
 import { createAuthRouter } from './routes/auth';
 import { createConfigRouter } from './routes/config';
+import { createDownloadsRouter } from './routes/downloads';
 import { createHeartbeatRouter } from './routes/heartbeat';
 import { buildStatusPayload, createStatusRouter } from './routes/status';
 import { createThumbnailRouter } from './routes/thumbnail';
-import { SESSION_COOKIE_NAME, readCookie, requireSession } from './serverAuth';
+import { SESSION_COOKIE_NAME, readCookie, requirePlatformAdmin, requireSession } from './serverAuth';
 import { sendNetworkIssueAlert } from './services/alerting';
 import { getSessionFromToken } from './store/auth';
 import { DATABASE_URL_DISPLAY, initDb } from './store/db';
@@ -44,10 +47,17 @@ const io = new SocketServer(httpServer, {
 app.use('/api/auth', createAuthRouter());
 app.use('/api/heartbeat', createHeartbeatRouter(io));
 app.use('/api/config', createConfigRouter());
+app.use('/api/downloads', createDownloadsRouter());
 app.use('/api/thumbnail', createThumbnailRouter(io));
 app.use('/api/status', requireSession, createStatusRouter());
+app.use('/api/admin', requirePlatformAdmin, createAdminRouter());
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
+app.get('/api/health', (_req, res) => res.json({
+  ok: true,
+  ts: new Date().toISOString(),
+  build: readBuildInfo(),
+}));
+app.get('/api/version', (_req, res) => res.json(readBuildInfo()));
 
 io.use(async (socket, next) => {
   const sessionToken = readCookie(socket.handshake.headers.cookie, SESSION_COOKIE_NAME);

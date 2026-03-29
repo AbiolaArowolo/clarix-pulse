@@ -3,6 +3,7 @@ import { AppFrame } from './components/AppFrame';
 import { useAuth } from './features/auth/AuthProvider';
 import { navigate, usePathname } from './hooks/usePathname';
 import { AccountPage } from './pages/AccountPage';
+import { AdminPage } from './pages/AdminPage';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
 import { MonitoringDashboardPage } from './pages/MonitoringDashboardPage';
@@ -12,21 +13,28 @@ import { RegisterPage } from './pages/RegisterPage';
 function protectedPageMeta(pathname: string): { title: string; description: string } {
   if (pathname === '/app/onboarding') {
     return {
-      title: 'Onboard a New Node',
-      description: 'Bring a new Windows playout node online using discovery, provisioning, and local install in that order.',
+      title: 'Onboard a New Source',
+      description: 'Bring a new Windows node online using discovery, provisioning, and local installation in that order.',
     };
   }
 
   if (pathname === '/app/account') {
     return {
-      title: 'Account and Access',
-      description: 'Review the current tenant, the registration email that seeded default alerts, and the fallback enrollment key.',
+      title: 'Account and Downloads',
+      description: 'Review access status, secure installer links, the default alert email, and fallback access details.',
+    };
+  }
+
+  if (pathname === '/app/admin') {
+    return {
+      title: 'Customer Access Control',
+      description: 'Enable or disable customer accounts, renew access keys, and keep activation under platform control.',
     };
   }
 
   return {
-    title: 'Monitoring Dashboard',
-    description: 'Track off-air risk, review node health, and provision new nodes into this tenant without exposing other customers.',
+    title: 'Operations Overview',
+    description: 'Watch live risk, review source health, and provision new monitored nodes from one control surface.',
   };
 }
 
@@ -45,7 +53,7 @@ export default function App() {
   const auth = useAuth();
 
   useEffect(() => {
-    if (auth.loading) {
+    if (!auth.bootstrapped) {
       return;
     }
 
@@ -54,12 +62,17 @@ export default function App() {
       return;
     }
 
+    if (auth.authenticated && pathname === '/app/admin' && !auth.user?.isPlatformAdmin) {
+      navigate('/app', true);
+      return;
+    }
+
     if (auth.authenticated && (pathname === '/' || pathname === '/login' || pathname === '/register')) {
       navigate('/app', true);
     }
-  }, [auth.authenticated, auth.loading, pathname]);
+  }, [auth.authenticated, auth.bootstrapped, auth.user?.isPlatformAdmin, pathname]);
 
-  if (auth.loading) {
+  if (!auth.bootstrapped && pathname.startsWith('/app')) {
     return <LoadingScreen />;
   }
 
@@ -74,6 +87,8 @@ export default function App() {
         <LoginPage
           loading={auth.loading}
           error={auth.error}
+          notice={auth.notice}
+          registration={auth.registration}
           onNavigate={go}
           onLogin={async (input) => {
             const ok = await auth.login(input);
@@ -90,12 +105,11 @@ export default function App() {
         <RegisterPage
           loading={auth.loading}
           error={auth.error}
+          notice={auth.notice}
+          registration={auth.registration}
           onNavigate={go}
           onRegister={async (input) => {
-            const ok = await auth.register(input);
-            if (ok) {
-              navigate('/app', true);
-            }
+            await auth.register(input);
           }}
         />
       );
@@ -115,6 +129,8 @@ export default function App() {
     content = <OnboardingPage session={session} onNavigate={go} />;
   } else if (pathname === '/app/account') {
     content = <AccountPage session={session} />;
+  } else if (pathname === '/app/admin' && session.user.isPlatformAdmin) {
+    content = <AdminPage />;
   } else {
     content = <MonitoringDashboardPage onNavigate={go} />;
   }

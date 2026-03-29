@@ -7,6 +7,7 @@ import {
   serializeAgentConfigYaml,
 } from '../config/remoteSetup';
 import { requireSession } from '../serverAuth';
+import { createNodeConfigDownloadLink } from '../services/downloadTokens';
 import { findTenantByEnrollmentKey } from '../store/auth';
 import { getAlertSettings, updateAlertSettings } from '../store/alertSettings';
 import { getInstanceControls, updateInstanceControls } from '../store/instanceControls';
@@ -394,7 +395,7 @@ export function createConfigRouter(): Router {
         tenantId: req.auth!.tenantId,
         ...buildEnrollmentInput(draft),
       });
-      await updateMirroredNodeConfig(req.auth!.tenantId, draft.nodeId, buildMirrorPayload(draft));
+      const mirrored = await updateMirroredNodeConfig(req.auth!.tenantId, draft.nodeId, buildMirrorPayload(draft));
 
       for (const player of draft.players) {
         await updateInstanceControls(player.playerId, {
@@ -403,6 +404,25 @@ export function createConfigRouter(): Router {
       }
 
       const configYaml = serializeAgentConfigYaml(draft, enrollment.agentToken);
+      let configPullUrl: string | null = null;
+      let configPullExpiresAt: string | null = null;
+      if (mirrored) {
+        try {
+          const signedLink = createNodeConfigDownloadLink({
+            baseUrl: requestBaseUrl(req),
+            tenantId: req.auth!.tenantId,
+            nodeId: draft.nodeId,
+            fileName: `${draft.nodeId}-pulse-config.yaml`,
+            agentToken: enrollment.agentToken,
+            mirrorUpdatedAt: mirrored.updatedAt,
+          });
+          configPullUrl = signedLink.url;
+          configPullExpiresAt = signedLink.expiresAt;
+        } catch {
+          configPullUrl = null;
+          configPullExpiresAt = null;
+        }
+      }
 
       return res.json({
         ok: true,
@@ -412,6 +432,8 @@ export function createConfigRouter(): Router {
         localUiUrl: 'http://127.0.0.1:3210/',
         configYaml,
         downloadFileName: `${draft.nodeId}-pulse-config.yaml`,
+        configPullUrl,
+        configPullExpiresAt,
         players: draft.players.map((player) => ({
           playerId: player.playerId,
           monitoringEnabled: player.monitoringEnabled,

@@ -53,6 +53,7 @@ Current node-side import helpers:
 The hub owns:
 
 - tenant, user, and session records
+- tenant access status and access-key expiry
 - nodes, players, and agent tokens
 - monitoring enabled / disabled
 - maintenance mode
@@ -84,6 +85,7 @@ The hub now stores:
 - `tenants`
 - `users`
 - `sessions`
+- tenant access state and 365-day access keys
 - tenant-scoped alert settings
 
 Realtime state is tenant-scoped:
@@ -96,8 +98,11 @@ Realtime state is tenant-scoped:
 
 Important product rule:
 
-- the registration email seeds the default off-air alert email for that tenant
+- the registration email seeds the default alert email for that tenant
 - that alert email can later be changed from the dashboard
+- new accounts stay disabled until a platform admin enables them
+- signed-in browser downloads use `/api/downloads`
+- node-side direct pulls use secure expiring links minted from the signed-in dashboard
 
 ---
 
@@ -141,6 +146,8 @@ Main tables:
 
 Thumbnail bytes remain file-cached outside the main state table in [thumbnails.ts](/D:/monitoring/packages/hub/src/store/thumbnails.ts).
 
+Deployed revision metadata is exposed from [buildInfo.ts](/D:/monitoring/packages/hub/src/buildInfo.ts) through `/api/health` and `/api/version`.
+
 ---
 
 ## Bundle Model
@@ -168,6 +175,8 @@ That means rollout now assumes:
 - status route: [status.ts](/D:/monitoring/packages/hub/src/routes/status.ts)
 - heartbeat route: [heartbeat.ts](/D:/monitoring/packages/hub/src/routes/heartbeat.ts)
 - auth route: [auth.ts](/D:/monitoring/packages/hub/src/routes/auth.ts)
+- admin route: [admin.ts](/D:/monitoring/packages/hub/src/routes/admin.ts)
+- downloads route: [downloads.ts](/D:/monitoring/packages/hub/src/routes/downloads.ts)
 - dashboard shell: [App.tsx](/D:/monitoring/packages/dashboard/src/App.tsx)
 - dashboard auth provider: [AuthProvider.tsx](/D:/monitoring/packages/dashboard/src/features/auth/AuthProvider.tsx)
 - agent runtime and local UI: [agent.py](/D:/monitoring/packages/agent/agent.py)

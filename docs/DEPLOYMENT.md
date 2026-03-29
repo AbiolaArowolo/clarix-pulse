@@ -4,15 +4,19 @@
 
 ## Purpose
 
-This guide describes the current production deployment shape for Clarix Pulse after the tenant-auth dashboard rollout.
+This guide describes the current production deployment shape for Clarix Pulse after the account-access, admin-control, signed-download, and deploy-trust updates.
 
 Current product shape:
 
 - public landing page at `/`
 - registration and login inside the same React app
 - authenticated monitoring app under `/app`
-- tenant-scoped API and Socket.IO data
-- direct-download node artifacts under `/downloads`
+- admin-controlled tenant activation
+- 365-day access keys
+- browser downloads for signed-in users
+- secure expiring installer/config links for node-side pulls
+- explicit deployed revision metadata through `/api/health` and `/api/version`
+- artifact deployment where the live server is not treated as a trusted git checkout
 
 ---
 
@@ -50,57 +54,89 @@ HUB_PORT=3001
 PULSE_DATABASE_URL=postgres://pulse_user:REPLACE_ME@127.0.0.1:5432/clarix_pulse
 PULSE_COOKIE_SECURE=true
 PULSE_THUMBNAIL_DIR=/var/lib/clarix-pulse/thumbnails
+PULSE_ADMIN_EMAILS=you@example.com
+PULSE_ACCESS_KEY_TTL_DAYS=365
+PULSE_DOWNLOAD_BUNDLE_NAME=clarix-pulse-v1.9.zip
+PULSE_DOWNLOAD_SIGNING_SECRET=REPLACE_WITH_LONG_RANDOM_SECRET
+PULSE_DOWNLOAD_LINK_TTL_MINUTES=1440
 SMTP_HOST=
 SMTP_PORT=587
 SMTP_USER=
 SMTP_PASS=
 SMTP_FROM=alerts@example.com
-SMTP_TO=ops@example.com
 TELEGRAM_BOT_TOKEN=
 AGENT_TOKENS=
-# Optional only if you want legacy bootstrap data carried into a legacy tenant:
-# PULSE_ENABLE_LEGACY_BOOTSTRAP=true
 ```
 
 Notes:
 
 - `PULSE_DATABASE_URL` is required
 - `PULSE_COOKIE_SECURE=true` is recommended behind HTTPS
-- `SMTP_TO` seeds the legacy tenant only; new tenant defaults now come from registration email
-- `AGENT_TOKENS` is still useful for migration or seeding known legacy nodes
+- `PULSE_ADMIN_EMAILS` defines who can use the `/app/admin` backend controls
+- `PULSE_ACCESS_KEY_TTL_DAYS` controls new tenant key validity
+- `PULSE_DOWNLOAD_SIGNING_SECRET` is required if you want secure installer/config links for node-side pulls
+- `PULSE_DOWNLOAD_LINK_TTL_MINUTES` controls how long signed node-side download links remain valid
+- `PULSE_DOWNLOAD_BUNDLE_PATH` is optional if you want the bundle served from a custom path
+- `SMTP_*` must be configured if you want access keys emailed during registration and renewal
+- if SMTP is not configured, the UI falls back to showing the generated key once during registration or renewal
 
 ---
 
 ## Recommended Linux Layout
 
 ```text
-/var/www/clarix-pulse                  # repo checkout
+/var/www/clarix-pulse                  # live deployed application files
 /var/lib/clarix-pulse/thumbnails       # thumbnail cache
-/var/www/clarix-pulse-downloads        # hosted node bundle/config files
 /etc/clarix-pulse/.env.local           # env file or symlink target
 ```
+
+The live application directory is artifact-deployed and is not the trusted source of revision truth.
+
+The trusted runtime source is:
+
+- `DEPLOYED_REVISION.json` in the live app directory
+- `/api/version`
+- `/api/health`
+
+Those now report:
+
+- `revision`
+- `builtAt`
+- `archiveName`
+- `archiveSha256`
+- `sourceDirty`
 
 ---
 
 ## Initial Deployment
 
-```bash
-cd /var/www
-git clone <repo-url> clarix-pulse
-cd clarix-pulse
+### 1. Build and deploy from the repo
 
-cp .env.example .env.local
-nano .env.local
+Use the deployment helper from the workspace:
 
-npm install
-npm run build
+```powershell
+python scripts\vps_clean_redeploy.py --archive D:\monitoring\deploy\clarix-pulse-<sha>.tar.gz
 ```
 
-Start the hub:
+That process now:
+
+1. uploads the release archive and deployment metadata
+2. verifies the remote archive SHA-256 before extraction
+3. restores remote `.env` and `.env.local` into a staging directory
+4. runs `npm ci` in staging
+5. builds hub and dashboard in staging
+6. cuts over only after the staged build is ready
+7. verifies `/api/version` reports the expected deployed metadata
+8. rolls back to the previous release if cutover verification fails
+
+### 2. Start or restart the hub
+
+The deploy script already does this, but the manual equivalent is:
 
 ```bash
 pm2 start packages/hub/dist/index.js --name clarix-hub --update-env
 pm2 save
+systemctl reload caddy
 ```
 
 ---
@@ -115,11 +151,6 @@ pulse.clarixtech.com {
     try_files {path} /index.html
     file_server
 
-    handle_path /downloads/* {
-        root * /var/www/clarix-pulse-downloads
-        file_server
-    }
-
     reverse_proxy /api/* localhost:3001
     reverse_proxy /socket.io/* localhost:3001 {
         header_up Connection {http.upgrade}
@@ -130,29 +161,35 @@ pulse.clarixtech.com {
 
 This supports:
 
-- `/` landing page
+- `/`
 - `/login`
 - `/register`
 - `/app`
 - `/app/onboarding`
 - `/app/account`
-- `/downloads/...`
+- `/app/admin`
+- `/api/downloads/...`
 
 Because the app is a single SPA, `try_files {path} /index.html` is required for deep links and refreshes.
 
 ---
 
-## Authentication And Tenancy
+## Authentication And Access
 
-The current hub is tenant-aware:
+The current hub is workspace-aware:
 
 - `users`, `sessions`, and `tenants` are stored in PostgreSQL
 - every browser session is tied to one tenant
-- `/api/status` is session-protected
-- dashboard config routes are session-protected
+- new tenant registrations are disabled by default
+- a 365-day access key is generated at registration
+- sign-in requires email, password, and access key
+- platform admins can enable or disable tenants and renew keys
+- `/api/status` and dashboard config routes are session-protected
+- browser downloads require a signed-in session
+- node-side direct pulls use secure expiring signed URLs minted by a signed-in user
 - Socket.IO joins a tenant room and only emits that tenant's state
 - alert settings are tenant-scoped
-- the registration email seeds that tenant's default off-air alert email
+- the registration email seeds that tenant's default alert email
 
 Agent traffic remains bearer-token based:
 
@@ -164,39 +201,32 @@ Local self-enrollment fallback remains available through:
 
 - `POST /api/config/enroll`
 
-That endpoint now resolves the tenant by the submitted enrollment key instead of using one global shared hub key.
+That endpoint resolves the tenant by the submitted enrollment key and only works for enabled tenants.
 
 ---
 
-## Hosted Node Artifacts
+## Installer And Config Downloads
 
-Recommended direct URLs:
+Browser download routes:
 
 ```text
-https://pulse.clarixtech.com/downloads/clarix-pulse/latest/clarix-pulse-v1.9.zip
-https://pulse.clarixtech.com/downloads/nodes/<node-id>/config.yaml
+/api/downloads/bundle/windows/latest
+/api/downloads/nodes/<node-id>/config.yaml
 ```
 
-Use direct URLs only:
+Signed-link generator routes:
 
-- `install-from-url.ps1` uses a direct `http(s)` GET
-- the local UI `Pull from link` feature also uses a direct `http(s)` GET
+```text
+/api/downloads/bundle/windows/link
+/api/downloads/nodes/<node-id>/config-link
+```
 
-So do not use:
+Download behavior:
 
-- login pages
-- custom-header-only download flows
-- interactive browser gates
-
-Use:
-
-- direct HTTPS files
-- signed query-string URLs
-- presigned URLs from S3/R2
-
-Exact layout guide:
-
-- [VPS_ARTIFACT_LAYOUT.md](/D:/monitoring/docs/VPS_ARTIFACT_LAYOUT.md)
+- browser users download through the session-authenticated routes
+- node scripts and the local UI use the secure expiring URLs generated by the signed-link endpoints
+- unsigned users cannot fetch the installer
+- disabled tenants cannot sign in and should not be able to mint new links
 
 ---
 
@@ -206,6 +236,7 @@ Exact layout guide:
 
 ```bash
 curl -s http://localhost:3001/api/health
+curl -s http://localhost:3001/api/version
 pm2 status --no-color
 pm2 logs clarix-hub --lines 100 --nostream
 ```
@@ -214,9 +245,17 @@ pm2 logs clarix-hub --lines 100 --nostream
 
 1. Open the public landing page.
 2. Register a new test tenant.
-3. Confirm the registration email appears as the default alert email in the account/onboarding flow.
-4. Confirm `/app` redirects to login when signed out.
-5. Confirm a new tenant dashboard starts with no nodes.
+3. Confirm the access key is emailed, or confirm the fallback key is shown if SMTP is intentionally disabled.
+4. Confirm the new account is blocked until enabled by a platform admin.
+5. Confirm login requires email, password, and access key.
+6. Confirm `/app` redirects to login when signed out.
+7. Confirm a new enabled tenant dashboard starts with no nodes.
+
+### Downloads
+
+1. Confirm the signed-in browser can download the installer.
+2. Generate a secure installer link and confirm it works from a plain browser session or scripted GET.
+3. Provision a node and confirm the secure config link works in the local UI `Pull from link` flow.
 
 ### Tenant isolation
 
@@ -227,30 +266,11 @@ pm2 logs clarix-hub --lines 100 --nostream
 
 ### Node flow
 
-1. Upload a discovery report in the dashboard.
-2. Provision a node.
-3. Import the generated `config.yaml` into the local UI.
-4. Confirm heartbeats appear only in the correct tenant.
-
----
-
-## Standard Update Flow
-
-```bash
-cd /var/www/clarix-pulse
-git pull
-npm install
-npm run build
-pm2 restart clarix-hub --update-env
-systemctl reload caddy
-```
-
-If you refresh bundle artifacts for rollout:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\rebuild-node-bundles.ps1 -PruneReleaseRoot
-powershell -ExecutionPolicy Bypass -File scripts\verify-bundle-parity.ps1
-```
+1. Download the installer from the signed-in app or create a secure installer link.
+2. Upload a discovery report in the dashboard.
+3. Provision a node.
+4. Import the generated `config.yaml` into the local UI or paste the secure config link.
+5. Confirm heartbeats appear only in the correct tenant.
 
 ---
 
@@ -258,5 +278,5 @@ powershell -ExecutionPolicy Bypass -File scripts\verify-bundle-parity.ps1
 
 - architecture: [ARCHITECTURE.md](/D:/monitoring/docs/ARCHITECTURE.md)
 - onboarding: [ONBOARDING.md](/D:/monitoring/docs/ONBOARDING.md)
-- agent install: [AGENT_INSTALL.md](/D:/monitoring/docs/AGENT_INSTALL.md)
-- VPS downloads: [VPS_ARTIFACT_LAYOUT.md](/D:/monitoring/docs/VPS_ARTIFACT_LAYOUT.md)
+- install guide: [AGENT_INSTALL.md](/D:/monitoring/docs/AGENT_INSTALL.md)
+- artifact layout: [VPS_ARTIFACT_LAYOUT.md](/D:/monitoring/docs/VPS_ARTIFACT_LAYOUT.md)

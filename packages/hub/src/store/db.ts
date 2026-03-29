@@ -160,9 +160,57 @@ export async function initDb(): Promise<void> {
         slug                 TEXT NOT NULL,
         enrollment_key       TEXT NOT NULL,
         default_alert_email  TEXT,
+        enabled              BOOLEAN NOT NULL DEFAULT FALSE,
+        disabled_reason      TEXT,
+        enabled_at           TIMESTAMPTZ,
+        disabled_at          TIMESTAMPTZ,
+        access_key_hash      TEXT NOT NULL DEFAULT '',
+        access_key_hint      TEXT,
+        access_key_generated_at TIMESTAMPTZ,
+        access_key_expires_at   TIMESTAMPTZ,
         created_at           TIMESTAMPTZ NOT NULL,
         updated_at           TIMESTAMPTZ NOT NULL
       );
+    `, [], client);
+
+    await exec(`
+      ALTER TABLE tenants
+      ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT FALSE;
+    `, [], client);
+
+    await exec(`
+      ALTER TABLE tenants
+      ADD COLUMN IF NOT EXISTS disabled_reason TEXT;
+    `, [], client);
+
+    await exec(`
+      ALTER TABLE tenants
+      ADD COLUMN IF NOT EXISTS enabled_at TIMESTAMPTZ;
+    `, [], client);
+
+    await exec(`
+      ALTER TABLE tenants
+      ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ;
+    `, [], client);
+
+    await exec(`
+      ALTER TABLE tenants
+      ADD COLUMN IF NOT EXISTS access_key_hash TEXT NOT NULL DEFAULT '';
+    `, [], client);
+
+    await exec(`
+      ALTER TABLE tenants
+      ADD COLUMN IF NOT EXISTS access_key_hint TEXT;
+    `, [], client);
+
+    await exec(`
+      ALTER TABLE tenants
+      ADD COLUMN IF NOT EXISTS access_key_generated_at TIMESTAMPTZ;
+    `, [], client);
+
+    await exec(`
+      ALTER TABLE tenants
+      ADD COLUMN IF NOT EXISTS access_key_expires_at TIMESTAMPTZ;
     `, [], client);
 
     await exec(`
@@ -220,13 +268,28 @@ export async function initDb(): Promise<void> {
         slug,
         enrollment_key,
         default_alert_email,
+        enabled,
+        disabled_reason,
+        enabled_at,
+        disabled_at,
+        access_key_hash,
+        access_key_hint,
+        access_key_generated_at,
+        access_key_expires_at,
         created_at,
         updated_at
       )
-      VALUES ($1, 'Legacy Hub', 'legacy-hub', $2, $3, $4, $4)
+      VALUES (
+        $1, 'Legacy Hub', 'legacy-hub', $2, $3,
+        TRUE, NULL, $4, NULL, 'legacy-access-key-disabled', NULL, $4, NULL,
+        $4, $4
+      )
       ON CONFLICT (tenant_id) DO UPDATE SET
         enrollment_key = EXCLUDED.enrollment_key,
         default_alert_email = COALESCE(tenants.default_alert_email, EXCLUDED.default_alert_email),
+        enabled = TRUE,
+        disabled_reason = NULL,
+        enabled_at = COALESCE(tenants.enabled_at, EXCLUDED.enabled_at),
         updated_at = EXCLUDED.updated_at;
     `, [legacyTenantId, legacyEnrollmentKey, seedEmailRecipients[0] ?? null, timestamp], client);
 

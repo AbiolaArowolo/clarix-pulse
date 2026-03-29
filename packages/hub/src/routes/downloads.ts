@@ -1,0 +1,339 @@
+import fs from 'fs';
+import path from 'path';
+import { Request, Response, Router } from 'express';
+import { serializeAgentConfigYaml } from '../config/remoteSetup';
+import { getSessionFromRequest, requireSession } from '../serverAuth';
+import {
+  createBundleDownloadLink,
+  createNodeConfigDownloadLink,
+  verifyDownloadToken,
+} from '../services/downloadTokens';
+import { getTenantAccessSummary } from '../store/auth';
+import { getMirroredNodeConfig } from '../store/nodeConfigMirror';
+import { getActiveAgentToken, getNode } from '../store/registry';
+
+const repoRoot = path.resolve(__dirname, '../../../..');
+
+function resolveBundlePath(): { path: string; fileName: string } {
+  const configuredPath = (process.env.PULSE_DOWNLOAD_BUNDLE_PATH ?? '').trim();
+  const configuredName = (process.env.PULSE_DOWNLOAD_BUNDLE_NAME ?? '').trim();
+  const bundlePath = configuredPath || path.join(repoRoot, 'packages/agent/release/clarix-pulse-v1.9.zip');
+  const fileName = configuredName || path.basename(bundlePath);
+
+  return { path: bundlePath, fileName };
+}
+
+function asString(value: unknown, fallback = ''): string {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number') return String(value);
+  return fallback;
+}
+
+function requestBaseUrl(req: Request): string {
+  const forwardedProto = asString(req.headers['x-forwarded-proto']);
+  const forwardedHost = asString(req.headers['x-forwarded-host']);
+  if (forwardedProto && forwardedHost) {
+    return `${forwardedProto}://${forwardedHost}`;
+  }
+
+  const host = req.get('host');
+  if (!host) {
+    return 'https://pulse.clarixtech.com';
+  }
+
+  return `${req.protocol}://${host}`;
+}
+
+function tenantAccessError(input: {
+  enabled: boolean;
+  disabledReason: string | null;
+  accessKeyExpiresAt: string | null;
+}): string | null {
+  if (!input.enabled) {
+    return input.disabledReason?.trim() || 'Account is disabled.';
+  }
+
+  if (input.accessKeyExpiresAt) {
+    const expiry = new Date(input.accessKeyExpiresAt);
+    if (!Number.isNaN(expiry.getTime()) && expiry.getTime() < Date.now()) {
+      return 'Account access key has expired.';
+    }
+  }
+
+  return null;
+}
+
+async function authorizeBundleDownload(req: Request): Promise<
+  { ok: true; tenantId: string }
+  | { ok: false; status: number; error: string }
+> {
+  const token = asString(req.query.token);
+  const claims = token ? verifyDownloadToken(token) : null;
+  if (token) {
+    if (!claims || claims.kind !== 'bundle') {
+      return {
+        ok: false,
+        status: 401,
+        error: 'A valid signed download link is required.',
+      };
+    }
+  } else {
+    const session = await getSessionFromRequest(req);
+    if (session) {
+      return {
+        ok: true,
+        tenantId: session.tenantId,
+      };
+    }
+  }
+
+  if (!claims || claims.kind !== 'bundle') {
+    return {
+      ok: false,
+      status: 401,
+      error: 'A valid signed download link is required.',
+    };
+  }
+
+  const tenant = await getTenantAccessSummary(claims.tenantId);
+  if (!tenant) {
+    return {
+      ok: false,
+      status: 404,
+      error: 'Unknown tenant.',
+    };
+  }
+
+  const accessError = tenantAccessError({
+    enabled: tenant.enabled,
+    disabledReason: tenant.disabledReason,
+    accessKeyExpiresAt: tenant.accessKeyExpiresAt,
+  });
+  if (accessError) {
+    return {
+      ok: false,
+      status: 403,
+      error: accessError,
+    };
+  }
+
+  return {
+    ok: true,
+    tenantId: tenant.tenantId,
+  };
+}
+
+async function authorizeNodeConfigDownload(
+  req: Request,
+  nodeId: string,
+): Promise<
+  { ok: true; tenantId: string; signedClaims: null | { agentToken: string; mirrorUpdatedAt: string } }
+  | { ok: false; status: number; error: string }
+> {
+  const token = asString(req.query.token);
+  const claims = token ? verifyDownloadToken(token) : null;
+  if (token) {
+    if (!claims || claims.kind !== 'node-config' || claims.nodeId !== nodeId) {
+      return {
+        ok: false,
+        status: 401,
+        error: 'A valid signed config link is required.',
+      };
+    }
+  } else {
+    const session = await getSessionFromRequest(req);
+    if (session) {
+      return {
+        ok: true,
+        tenantId: session.tenantId,
+        signedClaims: null,
+      };
+    }
+  }
+
+  if (!claims || claims.kind !== 'node-config' || claims.nodeId !== nodeId) {
+    return {
+      ok: false,
+      status: 401,
+      error: 'A valid signed config link is required.',
+    };
+  }
+
+  const tenant = await getTenantAccessSummary(claims.tenantId);
+  if (!tenant) {
+    return {
+      ok: false,
+      status: 404,
+      error: 'Unknown tenant.',
+    };
+  }
+
+  const accessError = tenantAccessError({
+    enabled: tenant.enabled,
+    disabledReason: tenant.disabledReason,
+    accessKeyExpiresAt: tenant.accessKeyExpiresAt,
+  });
+  if (accessError) {
+    return {
+      ok: false,
+      status: 403,
+      error: accessError,
+    };
+  }
+
+  return {
+    ok: true,
+    tenantId: tenant.tenantId,
+    signedClaims: {
+      agentToken: claims.agentToken,
+      mirrorUpdatedAt: claims.mirrorUpdatedAt,
+    },
+  };
+}
+
+export function createDownloadsRouter(): Router {
+  const router = Router();
+
+  router.get('/bundle/windows/link', requireSession, async (req: Request, res: Response) => {
+    try {
+      const bundle = resolveBundlePath();
+      const link = createBundleDownloadLink({
+        baseUrl: requestBaseUrl(req),
+        tenantId: req.auth!.tenantId,
+        fileName: bundle.fileName,
+      });
+
+      return res.json({
+        ok: true,
+        fileName: bundle.fileName,
+        url: link.url,
+        expiresAt: link.expiresAt,
+      });
+    } catch (error) {
+      return res.status(503).json({
+        error: error instanceof Error ? error.message : 'Signed download links are not configured on this server.',
+      });
+    }
+  });
+
+  router.get('/nodes/:nodeId/config-link', requireSession, async (req: Request, res: Response) => {
+    const nodeId = req.params.nodeId.trim();
+    const node = await getNode(req.auth!.tenantId, nodeId);
+    if (!node) {
+      return res.status(404).json({ error: 'Unknown node.' });
+    }
+
+    try {
+      const mirror = await getMirroredNodeConfig(node.nodeId, req.auth!.tenantId);
+      if (!mirror) {
+        return res.status(404).json({ error: 'No mirrored config is available for this node yet.' });
+      }
+
+      const agentToken = await getActiveAgentToken(node.nodeId, req.auth!.tenantId);
+      if (!agentToken) {
+        return res.status(409).json({ error: 'No active agent token is available for this node.' });
+      }
+
+      const fileName = `${node.nodeId}-pulse-config.yaml`;
+      const link = createNodeConfigDownloadLink({
+        baseUrl: requestBaseUrl(req),
+        tenantId: req.auth!.tenantId,
+        nodeId: node.nodeId,
+        fileName,
+        agentToken,
+        mirrorUpdatedAt: mirror.updatedAt,
+      });
+
+      return res.json({
+        ok: true,
+        fileName,
+        url: link.url,
+        expiresAt: link.expiresAt,
+      });
+    } catch (error) {
+      return res.status(503).json({
+        error: error instanceof Error ? error.message : 'Signed config links are not configured on this server.',
+      });
+    }
+  });
+
+  router.get('/bundle/windows/latest', async (req: Request, res: Response) => {
+    const auth = await authorizeBundleDownload(req);
+    if (!auth.ok) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+
+    const bundle = resolveBundlePath();
+    if (!fs.existsSync(bundle.path)) {
+      return res.status(404).json({ error: 'Installer bundle is not available on this server.' });
+    }
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${bundle.fileName}"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+
+    const stream = fs.createReadStream(bundle.path);
+    stream.on('error', (error) => {
+      console.error('[downloads] Failed to stream bundle', error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to stream installer bundle.' });
+      } else {
+        res.end();
+      }
+    });
+
+    stream.pipe(res);
+  });
+
+  router.get('/nodes/:nodeId/config.yaml', async (req: Request, res: Response) => {
+    const nodeId = req.params.nodeId.trim();
+    const auth = await authorizeNodeConfigDownload(req, nodeId);
+    if (!auth.ok) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+
+    const node = await getNode(auth.tenantId, nodeId);
+    if (!node) {
+      return res.status(404).json({ error: 'Unknown node.' });
+    }
+
+    const mirror = await getMirroredNodeConfig(nodeId, auth.tenantId);
+    if (!mirror) {
+      return res.status(404).json({ error: 'No mirrored config is available for this node yet.' });
+    }
+
+    if (auth.signedClaims && auth.signedClaims.mirrorUpdatedAt !== mirror.updatedAt) {
+      return res.status(409).json({ error: 'This config link is stale. Generate a fresh one from the dashboard.' });
+    }
+
+    const agentToken = auth.signedClaims?.agentToken ?? await getActiveAgentToken(nodeId, auth.tenantId);
+    if (!agentToken) {
+      return res.status(409).json({ error: 'No active agent token is available for this node.' });
+    }
+
+    const configYaml = serializeAgentConfigYaml({
+      nodeId: mirror.nodeId,
+      nodeName: mirror.nodeName,
+      siteId: mirror.siteId,
+      hubUrl: mirror.hubUrl,
+      pollIntervalSeconds: mirror.pollIntervalSeconds,
+      players: mirror.players.map((player) => ({
+        playerId: player.playerId,
+        label: player.label,
+        playoutType: player.playoutType,
+        monitoringEnabled: true,
+        paths: player.paths,
+        processSelectors: player.processSelectors,
+        logSelectors: player.logSelectors,
+        udpInputs: player.udpInputs,
+      })),
+    }, agentToken);
+
+    res.setHeader('Content-Type', 'application/x-yaml; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${node.nodeId}-pulse-config.yaml"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.send(configYaml);
+  });
+
+  return router;
+}

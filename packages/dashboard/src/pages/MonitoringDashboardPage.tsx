@@ -164,8 +164,8 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
         )}
 
         <footer className="mt-8 flex flex-col items-start gap-2 border-t border-slate-800/80 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <span className="text-xs text-slate-500">Clarix Pulse | Broadcast Monitoring Platform</span>
-          <span className="text-xs text-slate-500">{new Date().getFullYear()} Tenant-isolated monitoring</span>
+          <span className="text-xs text-slate-500">Clarix Pulse | Operational Monitoring Platform</span>
+          <span className="text-xs text-slate-500">{new Date().getFullYear()} Live workflow visibility</span>
         </footer>
       </div>
 

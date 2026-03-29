@@ -4,11 +4,14 @@ interface SessionShape {
   user: {
     email: string;
     displayName: string;
+    isPlatformAdmin?: boolean;
   };
   tenant: {
     name: string;
     slug: string;
     defaultAlertEmail: string | null;
+    enabled?: boolean;
+    accessKeyExpiresAt?: string | null;
   };
 }
 
@@ -21,12 +24,6 @@ interface Props {
   onLogout: () => void;
   children: React.ReactNode;
 }
-
-const NAV_ITEMS = [
-  { id: '/app', label: 'Dashboard' },
-  { id: '/app/onboarding', label: 'Onboarding' },
-  { id: '/app/account', label: 'Account' },
-];
 
 function isActivePath(currentPath: string, navPath: string): boolean {
   return currentPath === navPath || (navPath !== '/app' && currentPath.startsWith(`${navPath}/`));
@@ -41,6 +38,14 @@ export function AppFrame({
   onLogout,
   children,
 }: Props) {
+  const navItems = [
+    { id: '/app', label: 'Dashboard' },
+    { id: '/app/onboarding', label: 'Onboarding' },
+    { id: '/app/account', label: 'Account' },
+    ...(session.user.isPlatformAdmin ? [{ id: '/app/admin', label: 'Admin' }] : []),
+  ];
+  const accessState = session.tenant.enabled ? 'Access active' : 'Access pending';
+
   return (
     <div className="relative min-h-dvh overflow-hidden bg-slate-950 text-white">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(20,184,166,0.12),transparent_26%),radial-gradient(circle_at_top_right,rgba(14,165,233,0.1),transparent_22%),linear-gradient(180deg,#020617_0%,#0f172a_58%,#111827_100%)]" />
@@ -66,7 +71,7 @@ export function AppFrame({
 
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
               <nav className="flex flex-wrap gap-2">
-                {NAV_ITEMS.map((item) => {
+                {navItems.map((item) => {
                   const active = isActivePath(currentPath, item.id);
                   return (
                     <button
@@ -103,7 +108,7 @@ export function AppFrame({
             </div>
 
             <div className="rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-sm text-slate-300 shadow-[0_18px_45px_rgba(2,6,23,0.32)]">
-              Off-air alerts default to <span className="font-semibold text-white">{session.tenant.defaultAlertEmail ?? session.user.email}</span> until you change them.
+              <span className="font-semibold text-white">{accessState}</span> | Alerts default to <span className="font-semibold text-white">{session.tenant.defaultAlertEmail ?? session.user.email}</span> until you change them.
             </div>
           </div>
         </div>

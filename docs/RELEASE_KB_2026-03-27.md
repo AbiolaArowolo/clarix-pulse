@@ -7,7 +7,11 @@
 This KB now reflects the current product state after:
 
 - tenant-aware auth and dashboard gating
+- admin-controlled tenant activation
+- emailed 365-day access keys
+- registration fallback key reveal when SMTP is unavailable
 - registration/login/account experience
+- authenticated installer downloads plus secure expiring node-side links
 - tenant-scoped status, sockets, and alert settings
 - discovery-first onboarding
 - removal of prepared site-specific release bundles
@@ -19,8 +23,11 @@ This KB now reflects the current product state after:
 
 - the public site opens to a landing page, not the monitoring board
 - users register with email and password
-- the registration email becomes the default off-air alert email for that tenant
+- every new account gets a generated access key and starts disabled by default
+- the registration email becomes the default alert email for that tenant
 - `/app` requires an authenticated session
+- browser downloads use `/api/downloads/...`
+- node-side direct pulls use secure expiring links minted from the dashboard
 - new tenants start with no nodes
 - nodes appear only after their local setup mirrors into that tenant
 - one default installer bundle is supported: `clarix-pulse-v1.9`
@@ -61,10 +68,13 @@ Manifest:
 - DB bootstrap: [db.ts](/D:/monitoring/packages/hub/src/store/db.ts)
 - tenant-aware registry: [registry.ts](/D:/monitoring/packages/hub/src/store/registry.ts)
 - auth routes: [auth.ts](/D:/monitoring/packages/hub/src/routes/auth.ts)
+- admin routes: [admin.ts](/D:/monitoring/packages/hub/src/routes/admin.ts)
+- downloads routes: [downloads.ts](/D:/monitoring/packages/hub/src/routes/downloads.ts)
 - config routes: [config.ts](/D:/monitoring/packages/hub/src/routes/config.ts)
 - status route: [status.ts](/D:/monitoring/packages/hub/src/routes/status.ts)
 - heartbeat route: [heartbeat.ts](/D:/monitoring/packages/hub/src/routes/heartbeat.ts)
 - thumbnail route: [thumbnail.ts](/D:/monitoring/packages/hub/src/routes/thumbnail.ts)
+- build metadata: [buildInfo.ts](/D:/monitoring/packages/hub/src/buildInfo.ts)
 
 ### Dashboard
 
@@ -74,6 +84,7 @@ Manifest:
 - login page: [LoginPage.tsx](/D:/monitoring/packages/dashboard/src/pages/LoginPage.tsx)
 - register page: [RegisterPage.tsx](/D:/monitoring/packages/dashboard/src/pages/RegisterPage.tsx)
 - monitoring page: [MonitoringDashboardPage.tsx](/D:/monitoring/packages/dashboard/src/pages/MonitoringDashboardPage.tsx)
+- admin page: [AdminPage.tsx](/D:/monitoring/packages/dashboard/src/pages/AdminPage.tsx)
 
 ### Agent
 

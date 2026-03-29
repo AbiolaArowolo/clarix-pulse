@@ -450,6 +450,22 @@ export async function resolveNodeAuthForToken(token: string): Promise<{ nodeId: 
   };
 }
 
+export async function getActiveAgentToken(nodeId: string, tenantId: string): Promise<string | null> {
+  const row = await queryOne<{ token: string }>(`
+    SELECT a.token
+    FROM agent_tokens a
+    JOIN nodes n ON n.node_id = a.node_id
+    JOIN sites s ON s.site_id = n.site_id
+    WHERE a.node_id = $1
+      AND s.tenant_id = $2
+      AND a.active = TRUE
+    ORDER BY a.updated_at DESC
+    LIMIT 1
+  `, [nodeId, tenantId]);
+
+  return row?.token ?? null;
+}
+
 export async function upsertSite(input: { tenantId: string; siteId: string; siteName?: string }): Promise<SiteRecord> {
   const timestamp = new Date().toISOString();
   const siteName = normalizeSiteName(input.siteId, input.siteName);
