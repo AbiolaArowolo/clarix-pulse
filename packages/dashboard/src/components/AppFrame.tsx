@@ -46,8 +46,8 @@ export function AppFrame({
   children,
 }: Props) {
   const navItems = [
-    { id: '/app', label: 'Dashboard' },
     { id: '/app/onboarding', label: 'Onboarding' },
+    { id: '/app', label: 'Dashboard' },
     { id: '/app/account', label: 'Account' },
     ...(session.user.isPlatformAdmin ? [{ id: '/app/admin', label: 'Admin' }] : []),
   ];

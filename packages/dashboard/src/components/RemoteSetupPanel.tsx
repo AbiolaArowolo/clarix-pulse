@@ -1,5 +1,6 @@
 import React, { ChangeEvent, useMemo, useState } from 'react';
 import { copyTextToClipboard } from '../lib/clipboard';
+import { CollapsibleSection } from './CollapsibleSection';
 
 interface RemoteSetupPlayerPayload {
   playerId: string;
@@ -576,7 +577,14 @@ export function RemoteSetupPanel() {
   };
 
   return (
-    <section className="overflow-hidden rounded-[32px] border border-cyan-500/20 bg-[linear-gradient(135deg,rgba(3,15,29,0.96),rgba(8,24,44,0.94)_45%,rgba(21,39,63,0.92))] shadow-[0_28px_90px_rgba(2,12,27,0.42)] backdrop-blur">
+    <CollapsibleSection
+      id="remote-setup"
+      label="Remote Setup"
+      badge="SETUP"
+      summary={`Provision nodes from the remote dashboard · ${stats.players} player${stats.players === 1 ? '' : 's'}`}
+      defaultOpen={false}
+    >
+      <div className="overflow-hidden rounded-2xl border border-cyan-500/20 bg-[linear-gradient(135deg,rgba(3,15,29,0.96),rgba(8,24,44,0.94)_45%,rgba(21,39,63,0.92))] shadow-[0_12px_40px_rgba(2,12,27,0.32)]">
       <div className="border-b border-cyan-500/15 px-4 py-5 sm:px-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="max-w-3xl">
@@ -751,9 +759,23 @@ export function RemoteSetupPanel() {
                       <button
                         type="button"
                         onClick={() => updatePlayer(index, { advancedOpen: !player.advancedOpen })}
-                        className="rounded-2xl border border-cyan-500/25 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-100 transition-colors hover:border-cyan-400/45"
+                        aria-expanded={player.advancedOpen}
+                        className="inline-flex items-center gap-1.5 rounded-2xl border border-cyan-500/25 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-100 transition-colors hover:border-cyan-400/45"
                       >
-                        {player.advancedOpen ? 'Hide advanced' : 'Advanced'}
+                        <svg
+                          aria-hidden="true"
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          className={`h-4 w-4 shrink-0 transition-transform duration-200 ${player.advancedOpen ? 'rotate-90' : 'rotate-0'}`}
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                        <span className="text-xs font-mono uppercase tracking-wider">Advanced</span>
                       </button>
                       <button
                         type="button"
@@ -952,6 +974,8 @@ export function RemoteSetupPanel() {
                     )}
                   </div>
 
+                  <div className={`grid transition-all duration-200 ease-in-out ${player.advancedOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+                  <div className="overflow-hidden">
                   {player.advancedOpen && (
                     <div className="mt-4 grid gap-3 xl:grid-cols-3">
                       <label className="xl:col-span-1">
@@ -992,6 +1016,8 @@ export function RemoteSetupPanel() {
                       </label>
                     </div>
                   )}
+                  </div>
+                  </div>
                 </article>
               );
             })}
@@ -1107,6 +1133,7 @@ export function RemoteSetupPanel() {
           )}
         </aside>
       </div>
-    </section>
+      </div>
+    </CollapsibleSection>
   );
 }

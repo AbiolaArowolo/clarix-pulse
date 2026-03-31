@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { CollapsibleSection } from './CollapsibleSection';
 
 interface AlertSettingsPayload {
   settings: {
@@ -96,7 +97,6 @@ async function readJsonResponse<T>(response: Response, fallbackMessage: string):
 }
 
 export function AlertContactsEditor() {
-  const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<ContactDraft>({
     emailRecipients: [...EMPTY_CONTACTS],
     telegramChatIds: [...EMPTY_CONTACTS],
@@ -203,9 +203,9 @@ export function AlertContactsEditor() {
   };
 
   useEffect(() => {
-    if (!open || loading || loadedOnce) return;
+    if (loading || loadedOnce) return;
     void loadSettings();
-  }, [loadedOnce, loading, open]);
+  }, [loadedOnce, loading]);
 
   const saveSettings = async () => {
     setSaving(true);
@@ -274,17 +274,24 @@ export function AlertContactsEditor() {
     });
   };
 
-  return (
-    <section className="rounded-3xl border border-slate-800 bg-slate-900/58 p-4 shadow-[0_20px_60px_rgba(2,6,23,0.28)] backdrop-blur">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-100">Alert Contacts</h2>
-          <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">
-            Last saved {formatUpdatedAt(updatedAt)}
-          </p>
-        </div>
+  const sectionSummary = `${summary.emails} email · ${summary.telegram} telegram · ${summary.phones} phone · last saved ${formatUpdatedAt(updatedAt)}`;
 
-        <div className="flex items-center gap-2">
+  return (
+    <CollapsibleSection
+      id="alert-contacts"
+      label="Alert Contacts"
+      badge="CONFIG"
+      summary={sectionSummary}
+      defaultOpen={false}
+      onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          setError(null);
+          setNotice(null);
+        }
+      }}
+    >
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full border border-slate-700 bg-slate-950/70 px-3 py-1 text-[11px] font-medium text-slate-300">
             {summary.emails} email
           </span>
@@ -294,27 +301,14 @@ export function AlertContactsEditor() {
           <span className="rounded-full border border-slate-700 bg-slate-950/70 px-3 py-1 text-[11px] font-medium text-slate-300">
             {summary.phones} phone
           </span>
-          <button
-            type="button"
-            onClick={() => {
-              setOpen((value) => !value);
-              setError(null);
-              setNotice(null);
-            }}
-            className="rounded-full border border-slate-700 px-3 py-1 text-xs font-medium text-slate-300 transition-colors hover:border-slate-500 hover:text-white"
-          >
-            {open ? 'Hide settings' : 'Alert settings'}
-          </button>
+          <span className="text-[11px] text-slate-500">Last saved {formatUpdatedAt(updatedAt)}</span>
         </div>
-      </div>
 
-      {open && (
-        <div className="mt-4 space-y-4">
-          {loading ? (
-            <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-4 text-sm text-slate-400">
-              Loading alert contacts...
-            </div>
-          ) : (
+        {loading ? (
+          <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-4 text-sm text-slate-400">
+            Loading alert contacts...
+          </div>
+        ) : (
             <>
               <div className="grid gap-4 lg:grid-cols-3">
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/45 p-3">
@@ -463,8 +457,7 @@ export function AlertContactsEditor() {
               {error}
             </div>
           )}
-        </div>
-      )}
-    </section>
+      </div>
+    </CollapsibleSection>
   );
 }
