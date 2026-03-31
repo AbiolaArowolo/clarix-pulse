@@ -36,17 +36,19 @@ export function createHeartbeatRouter(io: SocketServer): Router {
       }
       const { nodeId, tenantId } = nodeAuth;
 
-      const { instanceId, playerId, agentId, nodeId: reportedNodeId, observations, nodeConfigMirror } = req.body as {
+      const { instanceId, playerId, player_id, agentId, nodeId: reportedNodeId, node_id, observations, nodeConfigMirror } = req.body as {
         instanceId?: string;
         playerId?: string;
+        player_id?: string;
         agentId?: string;
         nodeId?: string;
+        node_id?: string;
         observations?: Observations;
         nodeConfigMirror?: unknown;
       };
 
-      const resolvedPlayerId = playerId ?? instanceId;
-      const claimedNodeId = reportedNodeId ?? agentId ?? nodeId;
+      const resolvedPlayerId = playerId ?? player_id ?? instanceId;
+      const claimedNodeId = reportedNodeId ?? node_id ?? agentId ?? nodeId;
       if (!resolvedPlayerId || !observations) {
         return res.status(400).json({ error: 'Missing playerId/instanceId or observations' });
       }
