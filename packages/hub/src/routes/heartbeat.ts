@@ -4,7 +4,7 @@ import { computeHealth, Observations } from '../services/stateEngine';
 import { evaluateAlert } from '../services/alerting';
 import { getInstanceControls } from '../store/instanceControls';
 import { updateMirroredNodeConfig, MirroredNodeConfig } from '../store/nodeConfigMirror';
-import { getPlayer, markPlayerSeen, resolveNodeAuthForToken, syncRegistryFromNodeMirror } from '../store/registry';
+import { getPlayer, listPlayersForNode, markPlayerSeen, removePlayer, resolveNodeAuthForToken, syncRegistryFromNodeMirror } from '../store/registry';
 import { getState, updateState } from '../store/state';
 
 function bearerToken(req: Request): string | null {
@@ -36,7 +36,7 @@ export function createHeartbeatRouter(io: SocketServer): Router {
       }
       const { nodeId, tenantId } = nodeAuth;
 
-      const { instanceId, playerId, player_id, agentId, nodeId: reportedNodeId, node_id, observations, nodeConfigMirror } = req.body as {
+      const { instanceId, playerId, player_id, agentId, nodeId: reportedNodeId, node_id, observations, nodeConfigMirror, playerManifest, playerEvents } = req.body as {
         instanceId?: string;
         playerId?: string;
         player_id?: string;
@@ -45,6 +45,8 @@ export function createHeartbeatRouter(io: SocketServer): Router {
         node_id?: string;
         observations?: Observations;
         nodeConfigMirror?: unknown;
+        playerManifest?: string[];
+        playerEvents?: Array<{ type: 'player_removed'; playerId: string }>;
       };
 
       const resolvedPlayerId = playerId ?? player_id ?? instanceId;
@@ -78,6 +80,28 @@ export function createHeartbeatRouter(io: SocketServer): Router {
           })),
         });
         playerRecord = await getPlayer(resolvedPlayerId, tenantId);
+      }
+
+      // Handle explicit player_removed events
+      if (playerEvents && playerEvents.length > 0) {
+        for (const event of playerEvents) {
+          if (event.type === 'player_removed' && event.playerId) {
+            await removePlayer(event.playerId, nodeId, tenantId);
+            io.to(`tenant:${tenantId}`).emit('player_removed', { playerId: event.playerId, nodeId });
+          }
+        }
+      }
+
+      // Handle manifest diff: remove players that are no longer in the agent's manifest
+      if (Array.isArray(playerManifest)) {
+        const manifestSet = new Set(playerManifest);
+        const dbPlayers = await listPlayersForNode(nodeId, tenantId);
+        for (const dbPlayer of dbPlayers) {
+          if (!manifestSet.has(dbPlayer.playerId)) {
+            await removePlayer(dbPlayer.playerId, nodeId, tenantId);
+            io.to(`tenant:${tenantId}`).emit('player_removed', { playerId: dbPlayer.playerId, nodeId });
+          }
+        }
       }
 
       if (!playerRecord) {

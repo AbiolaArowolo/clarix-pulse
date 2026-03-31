@@ -5,6 +5,8 @@ import { clearInstanceControlsCacheForInstances } from './instanceControls';
 import { clearStateCacheForInstances } from './state';
 import { deleteThumbnailsForPlayers } from './thumbnails';
 
+export type UserRole = 'super_admin' | 'admin' | 'support' | 'user';
+
 export interface AuthenticatedSession {
   sessionId: string;
   userId: string;
@@ -16,6 +18,7 @@ export interface AuthenticatedSession {
   email: string;
   displayName: string;
   expiresAt: string;
+  role: UserRole;
   isPlatformAdmin: boolean;
   tenantEnabled: boolean;
   disabledReason: string | null;
@@ -123,6 +126,7 @@ interface SessionRow extends QueryResultRow {
   default_alert_email: string | null;
   email: string;
   display_name: string;
+  role: string;
   expires_at: Date | string;
   enabled: boolean;
   disabled_reason: string | null;
@@ -409,8 +413,22 @@ function tenantAccessError(input: {
   return null;
 }
 
+const VALID_ROLES: ReadonlySet<string> = new Set(['super_admin', 'admin', 'support', 'user']);
+
+function resolveRole(row: SessionRow, isPlatformAdmin: boolean): UserRole {
+  // Email-based super_admin takes precedence over the DB role.
+  if (isPlatformAdmin) {
+    return 'super_admin';
+  }
+
+  const dbRole = row.role ?? 'user';
+  return VALID_ROLES.has(dbRole) ? (dbRole as UserRole) : 'user';
+}
+
 function rowToSession(row: SessionRow, isPlatformAdmin: boolean): AuthenticatedSession {
   const impersonating = Boolean(row.impersonator_user_id);
+  const effectivePlatformAdmin = impersonating ? false : isPlatformAdmin;
+  const role = impersonating ? 'user' : resolveRole(row, isPlatformAdmin);
   return {
     sessionId: row.session_id,
     userId: row.user_id,
@@ -422,7 +440,8 @@ function rowToSession(row: SessionRow, isPlatformAdmin: boolean): AuthenticatedS
     email: row.email,
     displayName: row.display_name,
     expiresAt: toIso(row.expires_at),
-    isPlatformAdmin: impersonating ? false : isPlatformAdmin,
+    role,
+    isPlatformAdmin: effectivePlatformAdmin || role === 'super_admin',
     tenantEnabled: !!row.enabled,
     disabledReason: row.disabled_reason,
     accessKeyHint: row.access_key_hint,
@@ -482,6 +501,7 @@ async function sessionForHash(sessionTokenHash: string): Promise<AuthenticatedSe
       t.access_key_expires_at,
       u.email,
       u.display_name,
+      u.role,
       s.expires_at,
       s.impersonator_user_id,
       s.impersonator_email,

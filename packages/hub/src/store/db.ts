@@ -580,6 +580,11 @@ export async function initDb(): Promise<void> {
     `, [], client);
 
     await exec(`
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';
+    `, [], client);
+
+    await exec(`
       INSERT INTO alert_settings
         (id, email_recipients, telegram_chat_ids, phone_numbers, email_enabled, telegram_enabled, phone_enabled, updated_at)
       VALUES

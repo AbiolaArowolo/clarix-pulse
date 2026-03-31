@@ -204,6 +204,68 @@ export async function updateMirroredNodeConfig(
   return stored;
 }
 
+export async function updateMirroredPlayerStreamUrl(
+  playerId: string,
+  tenantId: string,
+  udpInputId: string,
+  streamUrl: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const row = await queryOne<Record<string, unknown>>(
+    `
+      SELECT m.node_id, m.payload, m.updated_at
+      FROM node_config_mirror m
+      JOIN nodes n ON n.node_id = m.node_id
+      JOIN players p ON p.node_id = n.node_id
+      JOIN sites s ON s.site_id = n.site_id
+      WHERE p.player_id = $1 AND s.tenant_id = $2
+    `,
+    [playerId, tenantId],
+  );
+
+  if (!row) {
+    return { ok: false, error: 'No mirrored config found for this player.' };
+  }
+
+  const nodeId = asString(row.node_id);
+  const config = normalizeNodeConfig(row.payload, nodeId);
+  if (!config) {
+    return { ok: false, error: 'Mirrored config is malformed.' };
+  }
+
+  const playerIndex = config.players.findIndex((p) => p.playerId === playerId);
+  if (playerIndex === -1) {
+    return { ok: false, error: 'Player not found in mirrored config.' };
+  }
+
+  const inputIndex = config.players[playerIndex].udpInputs.findIndex((u) => u.udpInputId === udpInputId);
+  if (inputIndex === -1) {
+    return { ok: false, error: 'UDP input not found.' };
+  }
+
+  const updatedAt = new Date().toISOString();
+  const updatedPlayers = config.players.map((player, pi) => {
+    if (pi !== playerIndex) return player;
+    return {
+      ...player,
+      udpInputs: player.udpInputs.map((u, ui) => {
+        if (ui !== inputIndex) return u;
+        return { ...u, streamUrl };
+      }),
+    };
+  });
+
+  const stored: MirroredNodeConfig = { ...config, players: updatedPlayers, updatedAt };
+
+  await exec(`
+    UPDATE node_config_mirror SET
+      payload = $1::jsonb,
+      updated_at = $2
+    WHERE node_id = $3
+  `, [serializePayload(stored), updatedAt, nodeId]);
+
+  return { ok: true };
+}
+
 export async function getMirroredNodeConfig(nodeId: string, tenantId: string): Promise<MirroredNodeConfig | null> {
   const row = await queryOne<Record<string, unknown>>(`
     SELECT m.payload, m.updated_at

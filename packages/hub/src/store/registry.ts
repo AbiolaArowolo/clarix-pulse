@@ -640,6 +640,13 @@ export async function upsertPlayer(input: {
   return rowToPlayer(row);
 }
 
+export async function removePlayer(playerId: string, nodeId: string, tenantId: string): Promise<void> {
+  await exec(
+    'DELETE FROM players WHERE player_id = $1 AND node_id = $2 AND site_id IN (SELECT site_id FROM sites WHERE tenant_id = $3)',
+    [playerId, nodeId, tenantId],
+  );
+}
+
 export async function markPlayerSeen(playerId: string, observedAt = new Date().toISOString()): Promise<void> {
   await exec(`
     UPDATE players

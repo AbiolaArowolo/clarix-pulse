@@ -112,6 +112,21 @@ export function useMonitoring() {
       );
     });
 
+    // Player lifecycle is controlled by the agent's local config.
+    // When a player is removed from local config the hub emits player_removed
+    // and the UI removes it from the live view immediately.
+    socket.on('player_removed', (event: { playerId: string; nodeId: string }) => {
+      markConnected();
+      if (!event.playerId) return;
+      thumbnailsRef.current.delete(event.playerId);
+      setSites((prev) =>
+        prev.map((site) => ({
+          ...site,
+          instances: site.instances.filter((inst) => inst.id !== event.playerId),
+        }))
+      );
+    });
+
     return () => {
       window.clearInterval(fallbackRefresh);
       socket.off('connect', markConnected);
@@ -120,6 +135,7 @@ export function useMonitoring() {
       socket.off('full_state');
       socket.off('state_update');
       socket.off('thumbnail_update');
+      socket.off('player_removed');
     };
   }, []);
 

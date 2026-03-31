@@ -112,6 +112,38 @@ export async function requirePlatformAdmin(req: Request, res: Response, next: Ne
   next();
 }
 
+export function requireRole(roles: string[]): (req: Request, res: Response, next: NextFunction) => Promise<void> {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const session = await getSessionFromRequest(req);
+    if (!session) {
+      res.status(401).json({ error: 'Sign in required.' });
+      return;
+    }
+
+    if (!roles.includes(session.role)) {
+      res.status(403).json({ error: 'Forbidden.' });
+      return;
+    }
+
+    next();
+  };
+}
+
+export async function blockSupportDeletes(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (req.method !== 'DELETE') {
+    next();
+    return;
+  }
+
+  const session = await getSessionFromRequest(req);
+  if (session && session.role === 'support') {
+    res.status(403).json({ error: 'Support accounts cannot perform delete operations.' });
+    return;
+  }
+
+  next();
+}
+
 export async function clearSessionFromRequest(req: Request, res: Response): Promise<void> {
   const sessionToken = readCookie(req.headers.cookie, SESSION_COOKIE_NAME);
   const adminReturnToken = readCookie(req.headers.cookie, ADMIN_RETURN_COOKIE_NAME);

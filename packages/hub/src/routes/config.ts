@@ -11,7 +11,7 @@ import { createBundleDownloadLink, createInstallHandoffLink, createNodeConfigDow
 import { appendAdminAuditEvent, findTenantByEnrollmentKey, getTenantAccessSummary } from '../store/auth';
 import { getAlertSettings, updateAlertSettings } from '../store/alertSettings';
 import { getInstanceControls, updateInstanceControls } from '../store/instanceControls';
-import { getMirroredNodeConfig, getMirroredPlayerConfig, updateMirroredNodeConfig } from '../store/nodeConfigMirror';
+import { getMirroredNodeConfig, getMirroredPlayerConfig, updateMirroredNodeConfig, updateMirroredPlayerStreamUrl } from '../store/nodeConfigMirror';
 import { enrollNode, getActiveAgentToken, getNode, getPlayer, resolveNodeAuthForToken } from '../store/registry';
 
 function bearerToken(req: Request): string | null {
@@ -144,6 +144,25 @@ function tenantAccessError(input: {
   }
 
   return null;
+}
+
+function isLocalStreamUrl(url: string): boolean {
+  try {
+    const { hostname, protocol } = new URL(url);
+    if (protocol === 'udp:') return true;
+    const privateRanges = [
+      /^127\./,
+      /^localhost$/i,
+      /^192\.168\./,
+      /^10\./,
+      /^172\.(1[6-9]|2[0-9]|3[01])\./,
+      /^22[4-9]\./,
+      /^23[0-9]\./,
+    ];
+    return privateRanges.some((r) => r.test(hostname));
+  } catch {
+    return false;
+  }
 }
 
 export function createConfigRouter(): Router {
@@ -415,6 +434,38 @@ export function createConfigRouter(): Router {
     return res.status(409).json({
       error: 'This player is configured locally on the node. Open Pulse on the node to edit settings there.',
     });
+  });
+
+  router.patch('/player/:playerId', async (req: Request, res: Response) => {
+    const tenantId = req.auth!.tenantId;
+    const { playerId } = req.params;
+
+    const udpInputId = asString(req.body?.udpInputId);
+    const streamUrl = asString(req.body?.stream_url);
+
+    if (!udpInputId) {
+      return res.status(400).json({ error: 'udpInputId is required.' });
+    }
+    if (!streamUrl) {
+      return res.status(400).json({ error: 'stream_url is required.' });
+    }
+    if (!isLocalStreamUrl(streamUrl)) {
+      return res.status(422).json({
+        error: 'Stream URL must be on the node\'s local network (private IP, localhost, UDP multicast, or HTTP stream from local address).',
+      });
+    }
+
+    const player = await getPlayer(playerId, tenantId);
+    if (!player) {
+      return res.status(404).json({ error: 'Unknown player.' });
+    }
+
+    const result = await updateMirroredPlayerStreamUrl(playerId, tenantId, udpInputId, streamUrl);
+    if (!result.ok) {
+      return res.status(404).json({ error: result.error ?? 'Failed to update stream URL.' });
+    }
+
+    return res.json({ ok: true, playerId, udpInputId, stream_url: streamUrl });
   });
 
   router.get('/instance/:playerId/controls', async (req: Request, res: Response) => {
