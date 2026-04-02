@@ -10,6 +10,7 @@ import { createAuthRouter } from './routes/auth';
 import { createConfigRouter } from './routes/config';
 import { createDownloadsRouter } from './routes/downloads';
 import { createHeartbeatRouter } from './routes/heartbeat';
+import { createPushRouter } from './routes/push';
 import { buildStatusPayload, createStatusRouter } from './routes/status';
 import { createThumbnailRouter } from './routes/thumbnail';
 import { SESSION_COOKIE_NAME, readCookie, requirePlatformAdmin, requireSession } from './serverAuth';
@@ -52,6 +53,7 @@ app.use('/api/downloads', createDownloadsRouter());
 app.use('/api/thumbnail', createThumbnailRouter(io));
 app.use('/api/status', requireSession, createStatusRouter());
 app.use('/api/admin', requirePlatformAdmin, createAdminRouter());
+app.use('/api/push', createPushRouter());
 
 const processStartedAt = Date.now();
 

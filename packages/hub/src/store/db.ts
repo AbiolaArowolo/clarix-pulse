@@ -585,6 +585,22 @@ export async function initDb(): Promise<void> {
     `, [], client);
 
     await exec(`
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id          TEXT NOT NULL DEFAULT gen_random_uuid()::text,
+        tenant_id   TEXT NOT NULL REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+        endpoint    TEXT NOT NULL,
+        subscription JSONB NOT NULL,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (id)
+      );
+    `, [], client);
+
+    await exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint
+      ON push_subscriptions(endpoint);
+    `, [], client);
+
+    await exec(`
       INSERT INTO alert_settings
         (id, email_recipients, telegram_chat_ids, phone_numbers, email_enabled, telegram_enabled, phone_enabled, updated_at)
       VALUES

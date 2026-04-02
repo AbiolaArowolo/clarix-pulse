@@ -4,6 +4,7 @@ import { getAlertSettings } from '../store/alertSettings';
 import { isAlertingSuppressed } from '../store/instanceControls';
 import { getPlayer } from '../store/registry';
 import { logEvent, wasAlertSentForCurrentIncident } from '../store/state';
+import { sendPushToTenant } from '../routes/push';
 
 interface AlertContext {
   instanceId: string;
@@ -399,6 +400,7 @@ export async function evaluateAlert(ctx: AlertContext): Promise<void> {
     if (tenantId) {
       await sendTenantTelegram(tenantId, alert.body);
       await sendTenantEmail(tenantId, alert.subject, alert.body);
+      sendPushToTenant(tenantId, alert.subject, alert.body, `recovered-${instanceId}`).catch(console.error);
     }
     await logEvent(
       instanceId,
@@ -420,6 +422,7 @@ export async function evaluateAlert(ctx: AlertContext): Promise<void> {
     if (tenantId) {
       await sendTenantTelegram(tenantId, alert.body);
       await sendTenantEmail(tenantId, alert.subject, alert.body);
+      sendPushToTenant(tenantId, alert.subject, alert.body, `alert-${instanceId}`).catch(console.error);
     }
     await logEvent(
       instanceId,

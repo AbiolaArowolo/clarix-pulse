@@ -6,6 +6,9 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       registerType: 'autoUpdate',
       injectRegister: 'script',
       includeAssets: ['pulse.svg', 'pulse-icon-192.png', 'pulse-icon-512.png', 'apple-touch-icon.png'],
@@ -50,11 +53,7 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
-        navigateFallback: '/',
-        cleanupOutdatedCaches: true,
-        clientsClaim: true,
-        skipWaiting: true,
+      injectManifest: {
         globPatterns: ['**/*.{js,css,html,svg,ico,png,webp,woff2}'],
       },
     }),

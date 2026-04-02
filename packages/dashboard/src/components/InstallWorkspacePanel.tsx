@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
+import { PushNotificationToggle } from './PushNotificationToggle';
 
 interface BeforeInstallPromptEvent extends Event {
   readonly platforms: string[];
@@ -239,6 +240,8 @@ export function InstallWorkspacePanel() {
           </div>
         </div>
       </div>
+
+      <PushNotificationToggle />
     </section>
   );
 }
