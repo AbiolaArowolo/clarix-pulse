@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Theme definitions ─────────────────────────────────────────────────────── */
+/* -- Theme definitions ------------------------------------------------------- */
 
 /* Midnight (default dark) */
 [data-theme="midnight"],
@@ -100,7 +100,7 @@
   color-scheme: light;
 }
 
-/* ── Base layer ─────────────────────────────────────────────────────────────── */
+/* -- Base layer --------------------------------------------------------------- */
 
 @layer base {
   html {
@@ -127,7 +127,7 @@
   }
 }
 
-/* ── Utilities ──────────────────────────────────────────────────────────────── */
+/* -- Utilities ---------------------------------------------------------------- */
 
 @layer utilities {
   .status-green  { @apply bg-emerald-500/20 border-emerald-500 text-emerald-300; }
@@ -142,7 +142,7 @@
     transform-origin: center;
   }
 
-  /* Semantic surface classes — use these in components for instant theme support */
+  /* Semantic surface classes -- use these in components for instant theme support */
   .theme-card    { background-color: var(--card-bg); border-color: var(--border-default); }
   .theme-input   { background-color: var(--input-bg); border-color: var(--border-default); color: var(--text-primary); }
   .theme-border  { border-color: var(--border-default); }
@@ -150,7 +150,7 @@
   .theme-muted   { color: var(--text-muted); }
 }
 
-/* ── Light theme overrides — remaps hardcoded Tailwind dark classes ─────────── */
+/* -- Light theme overrides -- remaps hardcoded Tailwind dark classes ----------- */
 /*    Specificity 0-2-0 beats Tailwind's 0-1-0, no !important needed.           */
 
 /* Text */
@@ -168,13 +168,13 @@
 [data-theme="light"] .text-cyan-300  { color: #0f766e; }
 [data-theme="light"] .text-cyan-400  { color: #0d9488; }
 
-/* Backgrounds — opaque */
+/* Backgrounds -- opaque */
 [data-theme="light"] .bg-slate-950 { background-color: var(--card-bg); }
 [data-theme="light"] .bg-slate-900 { background-color: var(--card-alt-bg); }
 [data-theme="light"] .bg-slate-800 { background-color: #f1f5f9; }
 [data-theme="light"] .bg-slate-700 { background-color: #e2e8f0; }
 
-/* Backgrounds — opacity variants */
+/* Backgrounds -- opacity variants */
 [data-theme="light"] .bg-slate-950\/82,
 [data-theme="light"] .bg-slate-950\/85 { background-color: var(--header-bg); }
 [data-theme="light"] .bg-slate-900\/70,
@@ -183,13 +183,13 @@
 [data-theme="light"] .bg-slate-800\/60,
 [data-theme="light"] .bg-slate-800\/50 { background-color: rgba(241, 245, 249, 0.9); }
 
-/* Borders — opaque */
+/* Borders -- opaque */
 [data-theme="light"] .border-slate-900 { border-color: #f1f5f9; }
 [data-theme="light"] .border-slate-800 { border-color: var(--border-default); }
 [data-theme="light"] .border-slate-700 { border-color: #cbd5e1; }
 [data-theme="light"] .border-slate-600 { border-color: #94a3b8; }
 
-/* Borders — opacity variants */
+/* Borders -- opacity variants */
 [data-theme="light"] .border-slate-800\/80,
 [data-theme="light"] .border-slate-800\/60 { border-color: rgba(226, 232, 240, 0.9); }
 [data-theme="light"] .border-slate-700\/50,
@@ -213,7 +213,7 @@
 [data-theme="light"] .placeholder-slate-500::placeholder { color: #94a3b8; }
 [data-theme="light"] .placeholder-slate-600::placeholder { color: #64748b; }
 
-/* ── Animations ─────────────────────────────────────────────────────────────── */
+/* -- Animations --------------------------------------------------------------- */
 
 @keyframes pulse-logo-breathe {
   0%, 100% {

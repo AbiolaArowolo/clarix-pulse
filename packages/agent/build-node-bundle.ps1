@@ -186,7 +186,7 @@ try {
         Copy-Item -Path (Join-Path $PSScriptRoot 'config.example.yaml') -Destination $targetConfigPath -Force
     }
 
-    # README.txt is already copied from $requiredRepoFiles — nothing more to generate here
+    # README.txt is already copied from $requiredRepoFiles - nothing more to generate here
 
     if ($Zip) {
         $zipPath = Join-Path $OutputRoot ($effectiveBundleName + '.zip')

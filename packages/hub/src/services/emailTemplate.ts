@@ -62,7 +62,7 @@ export function wrapEmailHtml(content: string, accentColor = BRAND_TEAL): string
 </html>`;
 }
 
-/** Renders a key–value detail row for use inside the body table. */
+/** Renders a key-value detail row for use inside the body table. */
 export function detailRow(label: string, value: string): string {
   return `<tr>
     <td style="padding:6px 0;color:#64748b;font-size:13px;white-space:nowrap;

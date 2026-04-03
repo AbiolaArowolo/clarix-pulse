@@ -855,7 +855,7 @@ export async function authenticateUser(
       };
     }
   } else if (!isPlatformAdmin && normalizeAccessKey(accessKeyInput)) {
-    // Account is enabled and user supplied a key — validate it as an optional check.
+    // Account is enabled and user supplied a key -- validate it as an optional check.
     const validAccessKey = await verifyAccessKey(accessKeyInput, row.access_key_hash);
     if (!validAccessKey) {
       return {

@@ -5,10 +5,10 @@ param(
     [switch]$StdOut
 )
 
-# ── PS version check ────────────────────────────────────────────────────────
+# -- PS version check --------------------------------------------------------
 $_psVersion = $PSVersionTable.PSVersion.Major
 
-# ── Fix execution policy silently if blocked ────────────────────────────────
+# -- Fix execution policy silently if blocked --------------------------------
 try {
     $policy = Get-ExecutionPolicy -Scope CurrentUser -ErrorAction SilentlyContinue
     if ($policy -eq 'Restricted' -or $policy -eq 'Undefined') {
@@ -16,7 +16,7 @@ try {
     }
 } catch { }
 
-# ── Self-elevate to Administrator if not already ────────────────────────────
+# -- Self-elevate to Administrator if not already ----------------------------
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     $scriptPath = $MyInvocation.MyCommand.Definition
     $psExe = if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell.exe' }
@@ -28,7 +28,7 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
     }
 }
 
-# ── Resolve script directory (safe for all run modes incl. iex/stdin pipe) ──
+# -- Resolve script directory (safe for all run modes incl. iex/stdin pipe) --
 # $PSScriptRoot is "" when piped via iex; fall back to $MyInvocation then CWD
 $_scriptDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
     $PSScriptRoot
@@ -39,18 +39,18 @@ $_scriptDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
     (Get-Location).Path
 }
 
-# ── Default output path: same folder as this script ─────────────────────────
+# -- Default output path: same folder as this script -------------------------
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $OutputPath = Join-Path $_scriptDir 'pulse-node-discovery-report.json'
 }
 
 $ErrorActionPreference = 'Stop'
-# PS 5.1 strict mode causes crashes on empty array returns — use explicit @() wrapping instead
+# PS 5.1 strict mode causes crashes on empty array returns - use explicit @() wrapping instead
 if ($_psVersion -ge 7) { Set-StrictMode -Version Latest } else { Set-StrictMode -Off }
 
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 # UTILITY FUNCTIONS
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
 function Get-EnvPathOrFallback {
     param([string]$Name, [string]$Fallback)
@@ -165,9 +165,9 @@ function New-PlayerReport {
     }
 }
 
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 # PROCESS DETECTION
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
 # Returns names of any running processes whose exe lives inside a given directory
 function Get-ProcessNamesInDirectory {
@@ -202,9 +202,9 @@ function Get-RunningProcessHints {
     return @($rows | Select-Object -First 25)
 }
 
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 # INSTA PLAYER DISCOVERY
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
 function Find-InstaPlayers {
     param([string]$NodeId)
@@ -220,7 +220,7 @@ function Find-InstaPlayers {
         }
     }
 
-    # FIX: wrap in @() — PS 5.1 returns $null for empty array from function, causing .Count crash in strict mode
+    # FIX: wrap in @() - PS 5.1 returns $null for empty array from function, causing .Count crash in strict mode
     $instaRoots = @(Get-UniqueStrings -Values @($roots))
     for ($index = 0; $index -lt $instaRoots.Count; $index++) {
         $installRoot = $instaRoots[$index]
@@ -264,9 +264,9 @@ function Find-InstaPlayers {
     return @($players | ForEach-Object { $_ })
 }
 
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 # ADMAX PLAYER DISCOVERY
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
 function Find-AdmaxRootCandidates {
     $programFiles    = Get-EnvPathOrFallback -Name 'ProgramFiles'    -Fallback 'C:\Program Files'
@@ -348,9 +348,9 @@ function Find-AdmaxPlayers {
     return @($players | ForEach-Object { $_ })
 }
 
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 # GENERIC PLAYER DISCOVERY
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
 function Get-GenericLogHints {
     $programFiles    = Get-EnvPathOrFallback -Name 'ProgramFiles'    -Fallback 'C:\Program Files'
@@ -510,9 +510,9 @@ function Find-GenericProfilePlayers {
     return @($players | ForEach-Object { $_ })
 }
 
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 # CONFIG / KEY DISCOVERY
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
 function Read-TopLevelYamlScalar {
     param([string[]]$Lines, [string]$Key, [switch]$IncludeCommented)
@@ -529,7 +529,7 @@ function Read-TopLevelYamlScalar {
         }
     }
 
-    # Commented line — e.g.  # enrollment_key: ABC123KEY
+    # Commented line - e.g.  # enrollment_key: ABC123KEY
     if ($IncludeCommented) {
         foreach ($line in $Lines) {
             if ($line -match "^\s*#\s*$Key\s*:\s*(.+?)\s*$") {
@@ -552,7 +552,7 @@ function Find-PulseConfigPaths {
     $programFilesX86 = Get-EnvPathOrFallback -Name 'ProgramFiles(x86)' -Fallback 'C:\Program Files (x86)'
 
     $fixed = @(
-        # Installed / live agent config — highest priority (has active agent_token)
+        # Installed / live agent config - highest priority (has active agent_token)
         (Join-Path $programData     'ClarixPulse\Agent\config.yaml'),
         (Join-Path $programFiles    'ClarixPulse\Agent\config.yaml'),
         (Join-Path $programFilesX86 'ClarixPulse\Agent\config.yaml'),
@@ -571,7 +571,7 @@ function Find-PulseConfigPaths {
         'C:\pulse-node-bundle\config.yaml'
     )
 
-    # Dynamic search — any config.yaml found recursively near the script or bundle roots
+    # Dynamic search - any config.yaml found recursively near the script or bundle roots
     $searchRoots = @(
         'C:\pulse-node-bundle',
         $_scriptDir,
@@ -638,9 +638,9 @@ function Get-PulseConfigHints {
     return $merged
 }
 
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 # MAIN
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
 $hostname            = $env:COMPUTERNAME
 $existingPulseConfig = Get-PulseConfigHints

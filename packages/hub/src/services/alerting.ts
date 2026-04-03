@@ -168,7 +168,7 @@ export async function sendTenantTelegram(tenantId: string, message: string): Pro
 
     if (!isNumeric && resolvedFromUsername === undefined) {
       console.warn(
-        `[alerting] Telegram: cannot resolve @${normalizedUsername} — user must send a message to the bot first, or use a numeric chat_id`,
+        `[alerting] Telegram: cannot resolve @${normalizedUsername} -- user must send a message to the bot first, or use a numeric chat_id`,
       );
       attempted -= 1;
       continue;

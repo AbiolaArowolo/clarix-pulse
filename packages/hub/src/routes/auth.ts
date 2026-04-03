@@ -124,7 +124,7 @@ export function createAuthRouter(): Router {
         authenticated: false,
         registered: true,
         notice: emailSent
-          ? 'Account created and active. Your access key was emailed — sign in with your email and password.'
+          ? 'Account created and active. Your access key was emailed -- sign in with your email and password.'
           : 'Account created and active. The access key email could not be delivered, so the key is shown below once. Keep it safe.',
         registration: {
           companyName: result.tenantName,

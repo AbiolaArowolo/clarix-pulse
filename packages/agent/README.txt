@@ -1,4 +1,4 @@
-CLARIX PULSE — NODE INSTALLATION GUIDE
+CLARIX PULSE - NODE INSTALLATION GUIDE
 ========================================
 
 WHAT IS THIS?
@@ -9,17 +9,17 @@ WHAT IS THIS?
 BEFORE YOU START
   1. Create an account at  https://pulse.clarixtech.com
   2. Sign in and go to the Onboarding section
-  3. Copy your enrollment key — you will need it during setup
+  3. Copy your enrollment key - you will need it during setup
 
 
 STEP-BY-STEP INSTALLATION (most users)
   1. Copy this entire folder to the target Windows machine
   2. Double-click  setup.bat
   3. Choose  [1] Install Pulse as a Windows service
-  4. Windows may ask for Administrator approval — click Yes
+  4. Windows may ask for Administrator approval - click Yes
   5. The Clarix Pulse setup UI opens in your browser automatically
   6. Enter your enrollment key and follow the on-screen steps
-  7. Pulse discovers your players and registers this node — done
+  7. Pulse discovers your players and registers this node - done
 
 
 OPTION: SCAN FIRST, CONFIGURE FROM DASHBOARD
@@ -31,7 +31,7 @@ OPTION: SCAN FIRST, CONFIGURE FROM DASHBOARD
   4. Log in to  https://pulse.clarixtech.com
   5. Go to Onboarding > Remote Setup and upload the report
   6. Review the detected players on the dashboard and adjust settings
-  7. Click Provision — the dashboard generates a ready-to-use config.yaml
+  7. Click Provision - the dashboard generates a ready-to-use config.yaml
   8. Download that config.yaml and place it in this folder (replacing the existing one)
   9. Run  setup.bat  again and choose  [1] Install
 

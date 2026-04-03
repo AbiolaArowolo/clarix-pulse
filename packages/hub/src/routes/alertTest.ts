@@ -32,7 +32,7 @@ export function createAlertTestRouter(): Router {
     }
 
     const tenantId = session.tenantId;
-    const subject = 'TEST ALERT — Clarix Pulse';
+    const subject = 'TEST ALERT -- Clarix Pulse';
     const body = `This is a test alert from Clarix Pulse. Your ${channel} alerting is working correctly. Time: ${new Date().toISOString()}`;
 
     try {

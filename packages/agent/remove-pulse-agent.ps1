@@ -21,7 +21,7 @@ param(
 
 $ErrorActionPreference = 'Continue'
 
-# ── Resolve script directory (safe for all run modes incl. iex/stdin pipe) ──
+# -- Resolve script directory (safe for all run modes incl. iex/stdin pipe) --
 $_scriptDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
     $PSScriptRoot
 } elseif (-not [string]::IsNullOrWhiteSpace($MyInvocation.MyCommand.Definition) -and
@@ -31,7 +31,7 @@ $_scriptDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
     (Get-Location).Path
 }
 
-# ── Self-elevate to Administrator if not already ────────────────────────────
+# -- Self-elevate to Administrator if not already ----------------------------
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     $scriptPath = $MyInvocation.MyCommand.Definition
     $psExe = if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell.exe' }
@@ -40,13 +40,13 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
         Start-Process $psExe -ArgumentList "-ExecutionPolicy Bypass -NoProfile -File `"$scriptPath`"$whatIfArg" -Verb RunAs -ErrorAction Stop
         exit
     } catch {
-        Write-Warning "Could not elevate to Administrator. Continuing without elevation — some steps may fail."
+        Write-Warning "Could not elevate to Administrator. Continuing without elevation - some steps may fail."
     }
 }
 
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 # HELPERS
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
 $script:removedItems  = [System.Collections.Generic.List[string]]::new()
 $script:skippedItems  = [System.Collections.Generic.List[string]]::new()
@@ -78,30 +78,30 @@ function Invoke-Step {
             $script:removedItems.Add($Label) | Out-Null
         }
     } catch {
-        Write-Fail "$Label — $_"
+        Write-Fail "$Label - $_"
         $script:failedItems.Add("$Label ($_)") | Out-Null
     }
 }
 
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 # BANNER
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
 Write-Host ""
-Write-Host "═══════════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "===========================================================" -ForegroundColor Cyan
 if ($WhatIf) {
-    Write-Host "  Clarix Pulse Agent — Cleanup Script  [WHATIF MODE]" -ForegroundColor Cyan
+    Write-Host "  Clarix Pulse Agent - Cleanup Script  [WHATIF MODE]" -ForegroundColor Cyan
 } else {
-    Write-Host "  Clarix Pulse Agent — Cleanup Script" -ForegroundColor Cyan
+    Write-Host "  Clarix Pulse Agent - Cleanup Script" -ForegroundColor Cyan
 }
-Write-Host "═══════════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "===========================================================" -ForegroundColor Cyan
 Write-Host ""
 
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 # 1. STOP AND REMOVE THE WINDOWS SERVICE
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
-Write-Host "── 1. Windows Service ──────────────────────────────────────" -ForegroundColor White
+Write-Host "-- 1. Windows Service --------------------------------------" -ForegroundColor White
 
 $serviceNames = @('ClarixPulseAgent', 'clarix-pulse-agent')
 
@@ -109,7 +109,7 @@ foreach ($svcName in $serviceNames) {
     Invoke-Step "Stop service '$svcName'" {
         $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
         if (-not $svc) {
-            Write-Skip "Service '$svcName' not found — skipping stop"
+            Write-Skip "Service '$svcName' not found - skipping stop"
             return $false
         }
         if ($svc.Status -ne 'Stopped') {
@@ -133,7 +133,7 @@ foreach ($svcName in $serviceNames) {
     Invoke-Step "Delete service '$svcName'" {
         $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
         if (-not $svc) {
-            Write-Skip "Service '$svcName' not found — skipping delete"
+            Write-Skip "Service '$svcName' not found - skipping delete"
             return $false
         }
         if ($WhatIf) {
@@ -144,18 +144,18 @@ foreach ($svcName in $serviceNames) {
         if ($LASTEXITCODE -eq 0) {
             Write-Ok "Deleted service '$svcName'"
         } else {
-            Write-Fail "sc.exe delete '$svcName' returned $LASTEXITCODE — $out"
+            Write-Fail "sc.exe delete '$svcName' returned $LASTEXITCODE - $out"
             $script:failedItems.Add("sc.exe delete $svcName") | Out-Null
         }
         return $true
     }
 }
 
-# ── NSSM removal (if nssm.exe is present beside this script) ────────────────
+# -- NSSM removal (if nssm.exe is present beside this script) ----------------
 Invoke-Step "NSSM service removal" {
     $nssmPath = Join-Path $_scriptDir 'nssm.exe'
     if (-not (Test-Path $nssmPath)) {
-        Write-Skip "nssm.exe not found beside script — skipping NSSM removal"
+        Write-Skip "nssm.exe not found beside script - skipping NSSM removal"
         return $false
     }
     $removedViaNssm = $false
@@ -181,12 +181,12 @@ Invoke-Step "NSSM service removal" {
     return $true
 }
 
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 # 2. KILL RUNNING AGENT PROCESSES
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
 Write-Host ""
-Write-Host "── 2. Running Processes ────────────────────────────────────" -ForegroundColor White
+Write-Host "-- 2. Running Processes ------------------------------------" -ForegroundColor White
 
 Invoke-Step "Kill clarix-agent process(es)" {
     $procs = Get-Process -Name 'clarix-agent' -ErrorAction SilentlyContinue
@@ -203,12 +203,12 @@ Invoke-Step "Kill clarix-agent process(es)" {
     return $true
 }
 
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 # 3. REMOVE DIRECTORIES
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
 Write-Host ""
-Write-Host "── 3. Directories ──────────────────────────────────────────" -ForegroundColor White
+Write-Host "-- 3. Directories ------------------------------------------" -ForegroundColor White
 
 $dirsToRemove = @(
     'C:\ProgramData\ClarixPulse',
@@ -233,7 +233,7 @@ foreach ($dir in $dirsToRemove) {
     }
 }
 
-# ── Relative directories beside this script ──────────────────────────────────
+# -- Relative directories beside this script ----------------------------------
 $relativeDirs = @(
     'pulse-node-bundle',
     'clarix-pulse-v1.9'
@@ -256,12 +256,12 @@ foreach ($rel in $relativeDirs) {
     }
 }
 
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 # 4. REMOVE SCHEDULED TASKS
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
 Write-Host ""
-Write-Host "── 4. Scheduled Tasks ──────────────────────────────────────" -ForegroundColor White
+Write-Host "-- 4. Scheduled Tasks --------------------------------------" -ForegroundColor White
 
 Invoke-Step "Remove ClarixPulse / clarix scheduled tasks" {
     $tasks = Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
@@ -287,12 +287,12 @@ Invoke-Step "Remove ClarixPulse / clarix scheduled tasks" {
     return $true
 }
 
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 # 5. REMOVE REGISTRY KEYS
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
 Write-Host ""
-Write-Host "── 5. Registry Keys ────────────────────────────────────────" -ForegroundColor White
+Write-Host "-- 5. Registry Keys ----------------------------------------" -ForegroundColor White
 
 $regKeys = @(
     'HKLM:\SOFTWARE\ClarixPulse',
@@ -315,14 +315,14 @@ foreach ($key in $regKeys) {
     }
 }
 
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 # SUMMARY
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
 Write-Host ""
-Write-Host "═══════════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "===========================================================" -ForegroundColor Cyan
 Write-Host "  Cleanup Summary" -ForegroundColor Cyan
-Write-Host "═══════════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "===========================================================" -ForegroundColor Cyan
 
 if ($script:removedItems.Count -gt 0) {
     Write-Host ""

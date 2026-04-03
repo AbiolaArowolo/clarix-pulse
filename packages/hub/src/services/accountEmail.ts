@@ -63,7 +63,7 @@ export async function sendRegistrationAccessKeyEmail(input: AccountEmailInput): 
     `Access key: ${input.accessKey}`,
     `Key expires: ${input.accessKeyExpiresAt}`,
     '',
-    'Your account is active. Sign in with your email and password. Keep this access key safe — you can use it as a recovery credential or request a new one from your account settings.',
+    'Your account is active. Sign in with your email and password. Keep this access key safe -- you can use it as a recovery credential or request a new one from your account settings.',
     '',
     `Sign in: ${input.appUrl}/login`,
     '',
@@ -85,7 +85,7 @@ export async function sendRegistrationAccessKeyEmail(input: AccountEmailInput): 
       <p style="margin:6px 0 0;font-size:12px;color:#94a3b8;">Expires: ${input.accessKeyExpiresAt}</p>
     </div>
     <p style="margin:0 0 20px;font-size:13px;color:#475569;">
-      Keep this key safe — use it as a recovery credential if you ever need to reset access,
+      Keep this key safe -- use it as a recovery credential if you ever need to reset access,
       or request a new one from your account settings at any time.
     </p>
     ${ctaButton('Sign In to Pulse', `${input.appUrl}/login`)}
@@ -116,7 +116,7 @@ export async function sendAccessKeyResendEmail(input: AccessKeyResendInput): Pro
     return false;
   }
 
-  const subject = `Your Clarix Pulse access key — ${input.companyName}`;
+  const subject = `Your Clarix Pulse access key -- ${input.companyName}`;
 
   const text = [
     `Hello ${input.displayName || input.companyName},`,
