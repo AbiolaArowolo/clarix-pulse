@@ -116,3 +116,93 @@
 | `/var/www/clarix-pulse/.env.local` (VPS) | SMTP2GO env vars updated |
 
 ---
+
+## Session 004
+**Agent:** Claude Sonnet 4.6
+**Date:** 2026-04-02
+**Time:** ~10:00 – 12:00 UTC
+**Worked on:** Uninstall script, Telegram fix, alert test endpoint, email FROM fix, access key UX overhaul, auto-enable on registration, VPS verified deploy
+**Status at end of session:** All complete. Hub live on VPS, GitHub current.
+
+### Tasks Completed
+- **remove-pulse-agent.ps1** — Full Windows cleanup script: stops service (NSSM + sc.exe), kills process, removes all dirs, scheduled tasks, registry keys. `-WhatIf` mode. Self-elevates. PS 5.1 + 7 compatible.
+- **uninstall.bat** — Updated to call `remove-pulse-agent.ps1` after `clarix-agent.exe --uninstall-service`
+- **Telegram fix** — `getUpdates` now uses `?limit=100` and `slice(0,100)`; unresolvable @username logs a clear warning instead of silently sending bad chat_id
+- **`POST /api/alerts/test`** — New endpoint (`routes/alertTest.ts`); accepts `{ channel: 'email'|'telegram'|'push' }`, requires session, returns delivery health. Mounted at `/api/alerts`
+- **`sendTenantEmail` + `sendTenantTelegram` exported** — Required for test route
+- **Email FROM fixed** — `SMTP_FROM=pulse@clarixtech.com`, `SMTP_FROM_NAME=Clarix Pulse Alerts` in both local `.env.local` and VPS. Gmail accepts the custom FROM address.
+- **VPS SMTP fixed** — Old smtp2go credentials replaced with Gmail app password. Test email confirmed delivered.
+- **Access key optional after activation** — `authenticateUser` only requires access key when `tenant.enabled = false`. Activated accounts sign in with email + password only.
+- **Access key recovery** — `POST /api/auth/resend-access-key` rotates key in DB and emails it. `rotateAccessKeyForTenant()` in auth store. `sendAccessKeyResendEmail()` in accountEmail service.
+- **AccountPage** — "Access key recovery" card added: "Email me a new access key" button.
+- **LoginPage** — Access key field labelled as pending-activation-only; hint updated.
+- **Auto-enable on registration** — `registerTenantOwner` inserts tenant with `enabled=TRUE`, `disabled_reason=NULL`. No admin activation step required. Registration notice updated accordingly.
+- **VPS deploy verified** — Hub dist → `/var/www/clarix-pulse/packages/hub/dist/`, dashboard → `/var/www/clarix-pulse/public/`. PM2 online, `curl /api/auth/session` responds `{"authenticated":false}`.
+- **`deploy/deploy.py`** — Reusable paramiko deploy script committed.
+
+### Decisions Made
+- Access key becomes a *recovery credential* only — not a login gate for active accounts
+- Accounts enabled immediately on registration — no manual admin activation needed
+- `pulse@clarixtech.com` as email FROM works with Gmail SMTP (Gmail allows envelope FROM override when authenticated)
+
+### Blockers / Issues Found
+- **Telegram chat IDs** — Bot `@ClarixPulse_bot` has no messages yet; `getUpdates` returns empty. To enable Telegram: someone must message the bot, then run `getUpdates` to get the chat ID and add it to alert contacts.
+- **`release/` dir gitignored** — `uninstall.bat` changes in `packages/agent/release/` are not tracked by git. Add gitignore exception if needed.
+
+### Files Changed
+| File | Change summary |
+|---|---|
+| `packages/hub/src/store/auth.ts` | Access key optional for active tenants; `rotateAccessKeyForTenant()`; tenant enabled=TRUE on register |
+| `packages/hub/src/routes/auth.ts` | `POST /resend-access-key`; import rotateAccessKeyForTenant; registration notice updated |
+| `packages/hub/src/services/accountEmail.ts` | `sendAccessKeyResendEmail()`; email body updated (active, not pending) |
+| `packages/hub/src/services/alerting.ts` | Telegram limit=100, unresolved username warning, exports |
+| `packages/hub/src/routes/alertTest.ts` | New — POST /api/alerts/test |
+| `packages/hub/src/index.ts` | Mounted /api/alerts alertTest router |
+| `packages/dashboard/src/pages/LoginPage.tsx` | Access key field hint updated |
+| `packages/dashboard/src/pages/AccountPage.tsx` | Access key recovery card |
+| `packages/agent/remove-pulse-agent.ps1` | New — full Windows agent cleanup script |
+| `packages/agent/release/clarix-pulse-v1.9/uninstall.bat` | Calls remove-pulse-agent.ps1 post-uninstall |
+| `.env.local` | SMTP_FROM=pulse@clarixtech.com |
+| `deploy/deploy.py` | New — reusable paramiko VPS deploy helper |
+
+---
+
+## Session 003
+**Agent:** Claude Sonnet 4.6
+**Date:** 2026-04-02
+**Time:** ~08:30 – 10:00 UTC
+**Worked on:** Cloudflare DNS, dev server detection, VPS data reset, local mirror simplification, Web Push notifications
+**Status at end of session:** All tasks complete. Hub live on VPS, database clean, push notifications wired.
+
+### Tasks Completed
+- **Cloudflare DNS** — Added `agent.clarixtech.com` A record → `192.3.76.144`, proxy OFF. Used JS evaluate to click button after Playwright ref resolution failed.
+- **Dev servers** — Saved 3 configs to `.claude/launch.json`; Hub (3001) and Dashboard (5173) started.
+- **VPS data reset** — Cleared all setup tables: 7 sites, 7 nodes, 15 players, 4 mirrors, 11 tokens, 219,549 events. 3 users + alert settings preserved.
+- **UdpConfigEditor simplified** — Node mirror shows stream URLs only (read-only). All other fields removed.
+- **RemoteSetupPanel** — Confirmed already wrapped in `CollapsibleSection` from Session 002.
+- **Web Push** — VAPID keys generated + stored; `push_subscriptions` table; `/api/push/*` routes; `web-push` package; SW (`src/sw.ts`) with push + notificationclick; `PushNotificationToggle` UI in `InstallWorkspacePanel`; alerting fires push on all alert types.
+- **Alert emails** — Confirmed already include exact runtime/log/UDP error context + RECOVERED notifications. Gmail SMTP with app password working.
+- **discover-node.ps1** — Confirmed hardened `$_scriptDir` fix still in VPS zip.
+- **Deployed** — Hub + dashboard built, uploaded, pm2 restarted with `--update-env`. Commit `d60e844`.
+
+### Blockers / Issues Found
+- **Chrome extension** — Not connected; requires manual reconnect (click extension icon in Chrome toolbar)
+- **SMTP2GO** — Not used; Gmail app password in `.env.local` works instead
+
+### Files Changed
+| File | Change summary |
+|---|---|
+| `packages/dashboard/src/components/UdpConfigEditor.tsx` | Stream URL only, read-only |
+| `packages/dashboard/src/components/PushNotificationToggle.tsx` | New — per-device push toggle |
+| `packages/dashboard/src/components/InstallWorkspacePanel.tsx` | Added PushNotificationToggle |
+| `packages/dashboard/src/sw.ts` | New — push + notificationclick handlers |
+| `packages/dashboard/vite.config.ts` | injectManifest SW strategy |
+| `packages/dashboard/package.json` | workbox-precaching, workbox-core |
+| `packages/hub/src/routes/push.ts` | New — /api/push routes |
+| `packages/hub/src/index.ts` | Mounted /api/push |
+| `packages/hub/src/store/db.ts` | push_subscriptions table |
+| `packages/hub/src/services/alerting.ts` | sendPushToTenant on all alert types |
+| `packages/hub/package.json` | web-push + @types/web-push |
+| `.env.local` | VAPID keys |
+
+---
