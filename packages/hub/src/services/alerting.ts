@@ -5,6 +5,7 @@ import { isAlertingSuppressed } from '../store/instanceControls';
 import { getPlayer } from '../store/registry';
 import { logEvent, wasAlertSentForCurrentIncident } from '../store/state';
 import { sendPushToTenant } from '../routes/push';
+import { wrapEmailHtml, detailRow } from './emailTemplate';
 
 interface AlertContext {
   instanceId: string;
@@ -25,6 +26,7 @@ interface TelegramResolvedTarget {
 interface AlertMessage {
   subject: string;
   body: string;
+  html: string;
 }
 
 interface AlertChannelDeliveryHealth {
@@ -316,6 +318,13 @@ function deriveLikelyCauses(ctx: AlertContext): string[] {
   return Array.from(new Set(reasons));
 }
 
+const ALERT_ACCENT: Record<string, string> = {
+  'RECOVERED': '#16a34a',
+  'OFF AIR': '#dc2626',
+  'OFF AIR LIKELY': '#ea580c',
+  'NETWORK ISSUE': '#d97706',
+};
+
 function buildAlertMessage(
   prefix: 'RECOVERED' | 'NETWORK ISSUE' | 'OFF AIR' | 'OFF AIR LIKELY',
   ctx: AlertContext,
@@ -324,9 +333,12 @@ function buildAlertMessage(
   const nodeId = ctx.nodeId ?? 'unknown-node';
   const playerId = ctx.instanceId;
   const causes = deriveLikelyCauses(ctx);
+  const timestamp = new Date().toISOString();
+
+  // Plain text
   const bodyLines = [
     `Pulse Alert: ${prefix}`,
-    `Time: ${new Date().toISOString()}`,
+    `Time: ${timestamp}`,
     `Site: ${siteName}`,
     `Node: ${nodeId}`,
     `Player: ${playerId}`,
@@ -334,23 +346,57 @@ function buildAlertMessage(
     `Broadcast health: ${ctx.broadcastHealth}`,
     `Runtime health: ${ctx.runtimeHealth}`,
   ];
-
   if (causes.length > 0) {
     bodyLines.push('', 'Likely cause(s):');
-    for (const cause of causes) {
-      bodyLines.push(`- ${cause}`);
-    }
+    for (const cause of causes) bodyLines.push(`- ${cause}`);
   } else {
     bodyLines.push('', 'Likely cause(s):', '- No specific node-side cause was available in the latest heartbeat.');
   }
 
+  // HTML
+  const accentColor = ALERT_ACCENT[prefix] ?? '#14b8a6';
+  const badgeBg = accentColor;
+  const causeItems = causes.length > 0
+    ? causes.map((c) => `<li style="margin-bottom:4px;">${c}</li>`).join('')
+    : '<li>No specific node-side cause was available in the latest heartbeat.</li>';
+
+  const html = wrapEmailHtml(`
+    <p style="margin:0 0 20px;">
+      <span style="display:inline-block;background:${badgeBg};color:#fff;font-size:13px;
+                   font-weight:700;padding:4px 12px;border-radius:4px;letter-spacing:0.5px;">
+        ${prefix}
+      </span>
+    </p>
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%"
+           style="border-collapse:collapse;margin-bottom:20px;">
+      ${detailRow('Time', timestamp)}
+      ${detailRow('Site', siteName)}
+      ${detailRow('Node', nodeId)}
+      ${detailRow('Player', playerId)}
+      ${detailRow('Label', ctx.instanceLabel)}
+      ${detailRow('Broadcast', ctx.broadcastHealth)}
+      ${detailRow('Runtime', ctx.runtimeHealth)}
+    </table>
+    <p style="margin:0 0 8px;font-size:13px;font-weight:700;color:#475569;
+              text-transform:uppercase;letter-spacing:0.5px;">Likely cause(s)</p>
+    <ul style="margin:0;padding-left:18px;color:#1e293b;font-size:14px;line-height:1.7;">
+      ${causeItems}
+    </ul>
+  `, accentColor);
+
   return {
     subject: `${prefix}: ${ctx.instanceLabel} [${nodeId}]`,
     body: bodyLines.join('\n'),
+    html,
   };
 }
 
-export async function sendTenantEmail(tenantId: string, subject: string, body: string): Promise<void> {
+export async function sendTenantEmail(
+  tenantId: string,
+  subject: string,
+  body: string,
+  html?: string,
+): Promise<void> {
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER) return;
 
   const settings = await getAlertSettings(tenantId);
@@ -366,6 +412,7 @@ export async function sendTenantEmail(tenantId: string, subject: string, body: s
       to: settings.emailRecipients.join(', '),
       subject,
       text: body,
+      ...(html ? { html } : {}),
     });
     noteAlertDeliverySuccess('email');
   } catch (err) {
@@ -409,7 +456,7 @@ export async function evaluateAlert(ctx: AlertContext): Promise<void> {
     console.log(`[alert] RECOVERY ${instanceId}`);
     if (tenantId) {
       await sendTenantTelegram(tenantId, alert.body);
-      await sendTenantEmail(tenantId, alert.subject, alert.body);
+      await sendTenantEmail(tenantId, alert.subject, alert.body, alert.html);
       sendPushToTenant(tenantId, alert.subject, alert.body, `recovered-${instanceId}`).catch(console.error);
     }
     await logEvent(
@@ -431,7 +478,7 @@ export async function evaluateAlert(ctx: AlertContext): Promise<void> {
     console.log(`[alert] CRITICAL ${instanceId} - ${broadcastHealth}`);
     if (tenantId) {
       await sendTenantTelegram(tenantId, alert.body);
-      await sendTenantEmail(tenantId, alert.subject, alert.body);
+      await sendTenantEmail(tenantId, alert.subject, alert.body, alert.html);
       sendPushToTenant(tenantId, alert.subject, alert.body, `alert-${instanceId}`).catch(console.error);
     }
     await logEvent(
@@ -473,6 +520,11 @@ export async function sendNetworkIssueAlert(instanceId: string, instanceLabel: s
   console.log(`[alert] NETWORK ISSUE ${instanceId}`);
   if (player?.tenantId) {
     await sendTenantTelegram(player.tenantId, alert.body);
-    await sendTenantEmail(player.tenantId, alert.subject, `${alert.body}\n- Heartbeat missing, so the latest playback state is unknown.`);
+    await sendTenantEmail(
+      player.tenantId,
+      alert.subject,
+      `${alert.body}\n- Heartbeat missing, so the latest playback state is unknown.`,
+      alert.html,
+    );
   }
 }

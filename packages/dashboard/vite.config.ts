@@ -11,7 +11,7 @@ export default defineConfig({
       filename: 'sw.ts',
       registerType: 'autoUpdate',
       injectRegister: 'script',
-      includeAssets: ['pulse.svg', 'pulse-icon-192.png', 'pulse-icon-512.png', 'apple-touch-icon.png'],
+      includeAssets: ['pulse.svg', 'pulse-icon-192.png', 'pulse-icon-512.png', 'pulse-icon-maskable-512.png', 'apple-touch-icon.png'],
       manifest: {
         name: 'Clarix Pulse',
         short_name: 'Pulse',
@@ -34,22 +34,16 @@ export default defineConfig({
             purpose: 'any',
           },
           {
-            src: '/pulse-icon-192.png',
-            sizes: '192x192',
-            type: 'image/png',
-            purpose: 'maskable',
-          },
-          {
             src: '/pulse-icon-512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'any',
           },
           {
-            src: '/pulse-icon-512.png',
+            src: '/pulse-icon-maskable-512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any maskable',
+            purpose: 'maskable',
           },
         ],
       },

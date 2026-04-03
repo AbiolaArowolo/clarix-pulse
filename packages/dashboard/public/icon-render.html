@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 512px; height: 512px; overflow: hidden; background: #020617; }
+</style>
+</head>
+<body>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="55%">
+      <stop offset="0%" stop-color="#0d2137" />
+      <stop offset="100%" stop-color="#020617" />
+    </radialGradient>
+    <filter id="outerGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="14" result="blur"/>
+      <feColorMatrix in="blur" type="matrix"
+        values="0 0 0 0 0.08  0 0 0 0 0.72  0 0 0 0 0.65  0 0 0 1.2 0" result="glow"/>
+      <feBlend mode="screen" in="glow" in2="SourceGraphic"/>
+    </filter>
+    <filter id="innerGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur"/>
+      <feColorMatrix in="blur" type="matrix"
+        values="0 0 0 0 0.5  0 0 0 0 0.95  0 0 0 0 0.9  0 0 0 1.5 0" result="glow"/>
+      <feBlend mode="screen" in="glow" in2="SourceGraphic"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="72" fill="#020617"/>
+  <rect width="512" height="512" rx="72" fill="url(#bg)"/>
+
+  <!-- Subtle teal center bloom -->
+  <ellipse cx="256" cy="256" rx="200" ry="130"
+    fill="none" stroke="#14b8a6" stroke-width="0" opacity="0"/>
+  <radialGradient id="bloom" cx="50%" cy="50%" r="42%">
+    <stop offset="0%" stop-color="#14b8a6" stop-opacity="0.18"/>
+    <stop offset="100%" stop-color="#14b8a6" stop-opacity="0"/>
+  </radialGradient>
+  <rect width="512" height="512" rx="72" fill="url(#bloom)"/>
+
+  <!-- Glow layer -->
+  <path filter="url(#outerGlow)"
+    d="M72 256H176C194 256 199 200 218 200C237 200 242 328 261 328C280 328 295 108 317 108C340 108 341 394 363 394C385 394 391 222 418 222C435 222 450 256 450 256"
+    stroke="#14b8a6" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"
+    fill="none" opacity="0.7"/>
+
+  <!-- Core bright line -->
+  <path filter="url(#innerGlow)"
+    d="M72 256H176C194 256 199 200 218 200C237 200 242 328 261 328C280 328 295 108 317 108C340 108 341 394 363 394C385 394 391 222 418 222C435 222 450 256 450 256"
+    stroke="#a7f3e8" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"
+    fill="none"/>
+
+  <!-- Bright white highlight -->
+  <path
+    d="M72 256H176C194 256 199 200 218 200C237 200 242 328 261 328C280 328 295 108 317 108C340 108 341 394 363 394C385 394 391 222 418 222C435 222 450 256 450 256"
+    stroke="rgba(255,255,255,0.55)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"
+    fill="none"/>
+</svg>
+</body>
+</html>
