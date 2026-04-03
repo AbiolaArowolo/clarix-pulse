@@ -101,7 +101,7 @@ function isNumericTelegramChatId(value: string): boolean {
 
 async function listTelegramTargets(token: string): Promise<TelegramResolvedTarget[]> {
   try {
-    const response = await fetch(`https://api.telegram.org/bot${token}/getUpdates`);
+    const response = await fetch(`https://api.telegram.org/bot${token}/getUpdates?limit=100`);
     if (!response.ok) {
       return [];
     }
@@ -110,7 +110,7 @@ async function listTelegramTargets(token: string): Promise<TelegramResolvedTarge
     const updates = Array.isArray(payload.result) ? payload.result : [];
     const targets = new Map<string, TelegramResolvedTarget>();
 
-    for (const update of updates.slice(-50)) {
+    for (const update of updates.slice(0, 100)) {
       const message = (
         update.message
         ?? update.edited_message
@@ -139,7 +139,7 @@ async function listTelegramTargets(token: string): Promise<TelegramResolvedTarge
   }
 }
 
-async function sendTenantTelegram(tenantId: string, message: string): Promise<void> {
+export async function sendTenantTelegram(tenantId: string, message: string): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return;
 
@@ -160,9 +160,19 @@ async function sendTenantTelegram(tenantId: string, message: string): Promise<vo
     if (!trimmedRecipient) continue;
     attempted += 1;
 
-    const resolvedChatId = isNumericTelegramChatId(trimmedRecipient)
-      ? trimmedRecipient
-      : targetByUsername.get(normalizeTelegramRecipient(trimmedRecipient)) ?? trimmedRecipient;
+    const normalizedUsername = normalizeTelegramRecipient(trimmedRecipient);
+    const isNumeric = isNumericTelegramChatId(trimmedRecipient);
+    const resolvedFromUsername = !isNumeric ? targetByUsername.get(normalizedUsername) : undefined;
+
+    if (!isNumeric && resolvedFromUsername === undefined) {
+      console.warn(
+        `[alerting] Telegram: cannot resolve @${normalizedUsername} — user must send a message to the bot first, or use a numeric chat_id`,
+      );
+      attempted -= 1;
+      continue;
+    }
+
+    const resolvedChatId = isNumeric ? trimmedRecipient : resolvedFromUsername!;
 
     try {
       const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -340,7 +350,7 @@ function buildAlertMessage(
   };
 }
 
-async function sendTenantEmail(tenantId: string, subject: string, body: string): Promise<void> {
+export async function sendTenantEmail(tenantId: string, subject: string, body: string): Promise<void> {
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER) return;
 
   const settings = await getAlertSettings(tenantId);

@@ -5,6 +5,7 @@ import { createServer } from 'http';
 import path from 'path';
 import { Server as SocketServer } from 'socket.io';
 import { readBuildInfo } from './buildInfo';
+import { createAlertTestRouter } from './routes/alertTest';
 import { createAdminRouter } from './routes/admin';
 import { createAuthRouter } from './routes/auth';
 import { createConfigRouter } from './routes/config';
@@ -54,6 +55,7 @@ app.use('/api/thumbnail', createThumbnailRouter(io));
 app.use('/api/status', requireSession, createStatusRouter());
 app.use('/api/admin', requirePlatformAdmin, createAdminRouter());
 app.use('/api/push', createPushRouter());
+app.use('/api/alerts', createAlertTestRouter());
 
 const processStartedAt = Date.now();
 
