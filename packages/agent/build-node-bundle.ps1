@@ -134,12 +134,9 @@ if (-not (Resolve-AgentBinary)) {
 
 $requiredRepoFiles = @(
     @{ Source = (Resolve-AgentBinary); Target = 'clarix-agent.exe' }
-    @{ Source = (Join-Path $PSScriptRoot 'install.bat'); Target = 'install.bat' }
-    @{ Source = (Join-Path $PSScriptRoot 'uninstall.bat'); Target = 'uninstall.bat' }
-    @{ Source = (Join-Path $PSScriptRoot 'configure.bat'); Target = 'configure.bat' }
-    @{ Source = (Join-Path $PSScriptRoot 'install-from-url.ps1'); Target = 'install-from-url.ps1' }
+    @{ Source = (Join-Path $PSScriptRoot 'setup.bat'); Target = 'setup.bat' }
     @{ Source = (Join-Path $PSScriptRoot 'discover-node.ps1'); Target = 'discover-node.ps1' }
-    @{ Source = (Join-Path $PSScriptRoot 'config.example.yaml'); Target = 'config.example.yaml' }
+    @{ Source = (Join-Path $PSScriptRoot 'README.txt'); Target = 'README.txt' }
 )
 
 $vendorFiles = @(
@@ -189,36 +186,7 @@ try {
         Copy-Item -Path (Join-Path $PSScriptRoot 'config.example.yaml') -Destination $targetConfigPath -Force
     }
 
-    $manifestPath = Join-Path $bundleDir 'BUNDLE-INFO.txt'
-@"
-Pulse Node Bundle
-Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')
-Bundle Path: $bundleDir
-Bundle Name: $effectiveBundleName
-
-Contents:
-- clarix-agent.exe
-- install.bat
-- uninstall.bat
-- configure.bat
-- install-from-url.ps1
-- discover-node.ps1
-- config.example.yaml
-- config.yaml
-- nssm.exe (required for installation)
-- ffmpeg.exe / ffprobe.exe (bundled and auto-installed for UDP monitoring)
-
-Usage:
-1. Copy this folder to the target node.
-2. Double-click install.bat.
-3. Pulse opens local setup first and saves node-specific settings locally.
-4. Windows asks for one Administrator approval only when the service install is ready to finish.
-5. install.bat uses clarix-agent.exe automatically. No separate EXE launch is required.
-6. If config.yaml is already valid for this node, Pulse installs without extra editing.
-7. If config.yaml is incomplete, Pulse asks for the missing node/player/selector/stream details itself.
-8. discover-node.ps1 can generate a JSON report that the local UI or remote dashboard can import before saving config.yaml.
-9. install-from-url.ps1 can pull this bundle from a VPS/cloud URL and optionally launch install.bat.
-"@ | Set-Content -Path $manifestPath -Encoding ASCII
+    # README.txt is already copied from $requiredRepoFiles — nothing more to generate here
 
     if ($Zip) {
         $zipPath = Join-Path $OutputRoot ($effectiveBundleName + '.zip')
