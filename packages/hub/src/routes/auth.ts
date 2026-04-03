@@ -110,7 +110,7 @@ export function createAuthRouter(): Router {
           accessKey: result.accessKey,
           accessKeyExpiresAt: result.accessKeyExpiresAt,
           appUrl: requestBaseUrl(req),
-          enabled: false,
+          enabled: true,
         });
       } catch (error) {
         console.error('[auth] Failed to send registration access email', error);
@@ -124,15 +124,15 @@ export function createAuthRouter(): Router {
         authenticated: false,
         registered: true,
         notice: emailSent
-          ? 'Account created. Your 365-day access key was emailed and the account is now pending activation.'
-          : 'Account created. The access key email could not be delivered automatically, so the key is shown below once. Keep it safe while the account is pending activation.',
+          ? 'Account created and active. Your access key was emailed — sign in with your email and password.'
+          : 'Account created and active. The access key email could not be delivered, so the key is shown below once. Keep it safe.',
         registration: {
           companyName: result.tenantName,
           email: result.ownerEmail,
           accessKey: emailSent ? null : result.accessKey,
           accessKeyHint: result.accessKeyHint,
           accessKeyExpiresAt: result.accessKeyExpiresAt,
-          pendingActivation: true,
+          pendingActivation: false,
           emailSent,
         },
       });

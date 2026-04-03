@@ -723,14 +723,14 @@ export async function registerTenantOwner(input: {
         created_at,
         updated_at
       )
-      VALUES ($1, $2, $3, $4, $5, FALSE, $6, $7, $8, $9, $10, $9, $9)
+      VALUES ($1, $2, $3, $4, $5, TRUE, $6, $7, $8, $9, $10, $9, $9)
     `, [
       tenantId,
       companyName,
       tenantSlug,
       enrollmentKey,
       email,
-      'Pending activation by Clarix.',
+      null,
       accessKeyHash,
       accessKeyHint(accessKey),
       timestamp,

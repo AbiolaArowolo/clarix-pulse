@@ -115,9 +115,9 @@ export function LoginPage({
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/90 px-4 py-3 text-sm uppercase tracking-[0.18em] text-slate-100 outline-none focus:border-cyan-400"
                 />
                 <p className="mt-2 text-xs leading-5 text-slate-500">
-                  Once your account is activated, leave this blank — email and password are enough.
-                  Your access key was sent to your registration email. You can re-request it from
-                  Account settings after signing in.
+                  Leave blank — your account is active and only email + password are needed.
+                  Your access key was sent to your registration email as a recovery credential.
+                  You can request a new one from Account settings at any time.
                 </p>
               </label>
             </div>

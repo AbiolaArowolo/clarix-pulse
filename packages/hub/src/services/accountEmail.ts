@@ -61,9 +61,7 @@ export async function sendRegistrationAccessKeyEmail(input: AccountEmailInput): 
     `Access key: ${input.accessKey}`,
     `Key expires: ${input.accessKeyExpiresAt}`,
     '',
-    input.enabled
-      ? 'Your account is enabled. Use your email, password, and this access key to sign in.'
-      : 'Your account is pending activation by Clarix. Keep this key safe. Once the account is enabled, use your email, password, and this key to sign in.',
+    'Your account is active. Sign in with your email and password. Keep this access key safe — you can use it as a recovery credential or request a new one from your account settings.',
     '',
     `Sign in: ${input.appUrl}/login`,
     '',
