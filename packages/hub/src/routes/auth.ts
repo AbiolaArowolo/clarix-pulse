@@ -8,6 +8,7 @@ import {
   recordImpersonationEnded,
   registerTenantOwner,
   resetPasswordWithToken,
+  rotateAccessKeyForTenant,
 } from '../store/auth';
 import {
   ADMIN_RETURN_COOKIE_NAME,
@@ -19,7 +20,7 @@ import {
   serializeClearedSessionCookie,
   serializeSessionCookie,
 } from '../serverAuth';
-import { accountEmailReady, sendPasswordResetEmail, sendRegistrationAccessKeyEmail } from '../services/accountEmail';
+import { accountEmailReady, sendAccessKeyResendEmail, sendPasswordResetEmail, sendRegistrationAccessKeyEmail } from '../services/accountEmail';
 
 function asString(value: unknown, fallback = ''): string {
   if (typeof value === 'string') return value.trim();
@@ -232,6 +233,43 @@ export function createAuthRouter(): Router {
     } catch (error) {
       return res.status(400).json({
         error: error instanceof Error ? error.message : 'Failed to reset the password.',
+      });
+    }
+  });
+
+  router.post('/resend-access-key', async (req: Request, res: Response) => {
+    const session = await getSessionFromRequest(req);
+    if (!session) {
+      return res.status(401).json({ error: 'Sign in required.' });
+    }
+
+    try {
+      const rotation = await rotateAccessKeyForTenant(session.tenantId);
+      let emailSent = false;
+      try {
+        emailSent = await sendAccessKeyResendEmail({
+          to: session.email,
+          companyName: session.tenantName,
+          displayName: session.displayName,
+          accessKey: rotation.accessKey,
+          accessKeyExpiresAt: rotation.accessKeyExpiresAt,
+          appUrl: requestBaseUrl(req),
+        });
+      } catch (err) {
+        console.error('[auth] Failed to send access key resend email', err);
+      }
+
+      return res.json({
+        ok: true,
+        emailSent,
+        accessKeyHint: rotation.accessKeyHint,
+        notice: emailSent
+          ? 'A new access key has been sent to your email address.'
+          : 'A new access key was generated but the email could not be delivered. Contact Clarix support.',
+      });
+    } catch (err) {
+      return res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to rotate access key.',
       });
     }
   });

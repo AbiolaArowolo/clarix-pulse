@@ -80,6 +80,48 @@ export async function sendRegistrationAccessKeyEmail(input: AccountEmailInput): 
   return true;
 }
 
+interface AccessKeyResendInput {
+  to: string;
+  companyName: string;
+  displayName: string;
+  accessKey: string;
+  accessKeyExpiresAt: string;
+  appUrl: string;
+}
+
+export async function sendAccessKeyResendEmail(input: AccessKeyResendInput): Promise<boolean> {
+  if (!smtpReady()) {
+    return false;
+  }
+
+  const subject = `Your Clarix Pulse access key — ${input.companyName}`;
+  const lines = [
+    `Hello ${input.displayName || input.companyName},`,
+    '',
+    'You requested your Clarix Pulse access key. A new key has been generated for your workspace.',
+    '',
+    `Access key: ${input.accessKey}`,
+    `Key expires: ${input.accessKeyExpiresAt}`,
+    '',
+    'Use this key together with your email and password when signing in.',
+    '',
+    `Sign in: ${input.appUrl}/login`,
+    '',
+    'If you did not request this, contact your Clarix administrator.',
+    '',
+    'Clarix Pulse',
+  ];
+
+  await transporter().sendMail({
+    from: fromAddress(),
+    to: input.to,
+    subject,
+    text: lines.join('\n'),
+  });
+
+  return true;
+}
+
 export async function sendPasswordResetEmail(input: PasswordResetEmailInput): Promise<boolean> {
   if (!smtpReady()) {
     return false;

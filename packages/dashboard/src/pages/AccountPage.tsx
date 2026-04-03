@@ -33,6 +33,27 @@ export function AccountPage({
   const [secureLink, setSecureLink] = useState<{ url: string; expiresAt: string } | null>(null);
   const [creatingLink, setCreatingLink] = useState(false);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
+  const [keyRequestBusy, setKeyRequestBusy] = useState(false);
+  const [keyRequestNotice, setKeyRequestNotice] = useState<string | null>(null);
+  const [keyRequestError, setKeyRequestError] = useState<string | null>(null);
+
+  const requestAccessKey = async () => {
+    setKeyRequestBusy(true);
+    setKeyRequestNotice(null);
+    setKeyRequestError(null);
+    try {
+      const res = await fetch('/api/auth/resend-access-key', { method: 'POST' });
+      const data = await res.json() as { ok?: boolean; notice?: string; error?: string };
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error ?? 'Request failed.');
+      }
+      setKeyRequestNotice(data.notice ?? 'A new access key was sent to your email.');
+    } catch (err) {
+      setKeyRequestError(err instanceof Error ? err.message : 'Failed to request access key.');
+    } finally {
+      setKeyRequestBusy(false);
+    }
+  };
 
   const downloadInstaller = async () => {
     setDownloadError(null);
@@ -175,6 +196,31 @@ export function AccountPage({
           <p className="mt-2 text-sm leading-6 text-slate-300">
             Access key expires: <span className="font-semibold text-white">{session.tenant.accessKeyExpiresAt ?? 'Not set'}</span>
           </p>
+        </div>
+
+        <div className="rounded-3xl border border-slate-800 bg-slate-900/58 p-5 shadow-[0_20px_60px_rgba(2,6,23,0.28)] backdrop-blur">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-100">Access key recovery</h3>
+          <p className="mt-3 text-sm leading-6 text-slate-300">
+            Lost or forgotten your access key? Request a new one — it will be emailed to <span className="font-semibold text-white">{session.user.email}</span>. This replaces any existing key.
+          </p>
+          {keyRequestNotice && (
+            <div className="mt-3 rounded-2xl border border-emerald-700/40 bg-emerald-900/20 px-4 py-3 text-sm text-emerald-100">
+              {keyRequestNotice}
+            </div>
+          )}
+          {keyRequestError && (
+            <div className="mt-3 rounded-2xl border border-red-700/40 bg-red-900/20 px-4 py-3 text-sm text-red-100">
+              {keyRequestError}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => void requestAccessKey()}
+            disabled={keyRequestBusy}
+            className="mt-4 rounded-full border border-cyan-400/35 bg-cyan-400/12 px-4 py-2 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {keyRequestBusy ? 'Sending...' : 'Email me a new access key'}
+          </button>
         </div>
 
         <div className="rounded-3xl border border-slate-800 bg-slate-900/58 p-5 shadow-[0_20px_60px_rgba(2,6,23,0.28)] backdrop-blur">

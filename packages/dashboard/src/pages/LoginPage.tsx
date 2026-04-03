@@ -103,7 +103,10 @@ export function LoginPage({
               </label>
 
               <label className="block">
-                <span className="text-sm text-slate-300">Access key</span>
+                <span className="text-sm text-slate-300">
+                  Access key{' '}
+                  <span className="text-xs font-normal text-slate-500">(required only while pending activation)</span>
+                </span>
                 <input
                   type="text"
                   value={accessKey}
@@ -112,7 +115,9 @@ export function LoginPage({
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/90 px-4 py-3 text-sm uppercase tracking-[0.18em] text-slate-100 outline-none focus:border-cyan-400"
                 />
                 <p className="mt-2 text-xs leading-5 text-slate-500">
-                  Use the access key from your welcome email or the fallback key shown during registration. Platform admin accounts can leave this blank.
+                  Once your account is activated, leave this blank — email and password are enough.
+                  Your access key was sent to your registration email. You can re-request it from
+                  Account settings after signing in.
                 </p>
               </label>
             </div>

@@ -833,15 +833,29 @@ export async function authenticateUser(
     };
   }
 
-  if (!isPlatformAdmin) {
+  // Access key is only required while the tenant is pending activation (enabled=false).
+  // Once the admin enables the account the user signs in with email + password only.
+  // If the user supplies a key anyway, validate it so they can still use it as a
+  // second factor (e.g., shared team workspace logins).
+  if (!isPlatformAdmin && !row.enabled) {
     if (!normalizeAccessKey(accessKeyInput)) {
       return {
         ok: false,
         statusCode: 400,
-        error: 'Access key is required.',
+        error: 'Access key is required while your account is pending activation.',
       };
     }
 
+    const validAccessKey = await verifyAccessKey(accessKeyInput, row.access_key_hash);
+    if (!validAccessKey) {
+      return {
+        ok: false,
+        statusCode: 401,
+        error: 'Invalid access key.',
+      };
+    }
+  } else if (!isPlatformAdmin && normalizeAccessKey(accessKeyInput)) {
+    // Account is enabled and user supplied a key — validate it as an optional check.
     const validAccessKey = await verifyAccessKey(accessKeyInput, row.access_key_hash);
     if (!validAccessKey) {
       return {
@@ -996,6 +1010,30 @@ export async function createImpersonationSessionForTenant(input: {
     ...created,
     target,
   };
+}
+
+export async function rotateAccessKeyForTenant(tenantId: string): Promise<{
+  accessKey: string;
+  accessKeyHint: string;
+  accessKeyExpiresAt: string;
+}> {
+  const accessKey = createAccessKey();
+  const accessKeyHash = await hashOpaqueToken(accessKey);
+  const hint = accessKeyHint(accessKey);
+  const expiresAt = accessKeyExpiryIso();
+  const now = new Date().toISOString();
+
+  await exec(`
+    UPDATE tenants
+    SET access_key_hash = $1,
+        access_key_hint = $2,
+        access_key_expires_at = $3,
+        access_key_generated_at = $4,
+        updated_at = $4
+    WHERE tenant_id = $5
+  `, [accessKeyHash, hint, expiresAt, now, tenantId]);
+
+  return { accessKey, accessKeyHint: hint, accessKeyExpiresAt: expiresAt };
 }
 
 export async function createPasswordResetForEmail(input: {
