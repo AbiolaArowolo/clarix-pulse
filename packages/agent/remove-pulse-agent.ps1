@@ -236,6 +236,7 @@ foreach ($dir in $dirsToRemove) {
 # -- Relative directories beside this script ----------------------------------
 $relativeDirs = @(
     'pulse-node-bundle',
+    'clarix-pulse-v1.17',
     'clarix-pulse-v1.9'
 )
 

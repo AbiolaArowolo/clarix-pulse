@@ -289,10 +289,11 @@ export function createConfigRouter(): Router {
     }
 
     const baseUrl = requestBaseUrl(req);
+    const installerBundleName = (process.env.PULSE_DOWNLOAD_BUNDLE_NAME ?? '').trim() || 'clarix-pulse-latest.zip';
     const installerLink = createBundleDownloadLink({
       baseUrl,
       tenantId: claims.tenantId,
-      fileName: 'clarix-pulse-v1.9.zip',
+      fileName: installerBundleName,
       expiresAt: claims.expiresAt,
     });
     const configLink = createNodeConfigDownloadLink({

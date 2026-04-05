@@ -1,4 +1,5 @@
 import json
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -7,6 +8,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DISCOVERY_SCRIPT = REPO_ROOT / "packages" / "agent" / "discover-node.ps1"
+POWERSHELL_EXE = shutil.which("pwsh") or shutil.which("powershell") or shutil.which("powershell.exe")
 
 
 def _ps_quote(value: Path | str) -> str:
@@ -14,6 +16,10 @@ def _ps_quote(value: Path | str) -> str:
 
 
 class DiscoverNodeScriptTests(unittest.TestCase):
+    def setUp(self) -> None:
+        if not POWERSHELL_EXE:
+            self.skipTest("PowerShell is required for discovery script tests.")
+
     def test_detects_native_players_without_generic_duplicates_and_finds_insta_fnf(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -52,7 +58,7 @@ class DiscoverNodeScriptTests(unittest.TestCase):
 """
             completed = subprocess.run(
                 [
-                    "powershell",
+                    POWERSHELL_EXE,
                     "-NoProfile",
                     "-ExecutionPolicy",
                     "Bypass",
@@ -75,8 +81,77 @@ class DiscoverNodeScriptTests(unittest.TestCase):
         self.assertEqual(playout_types.count("admax"), 1)
         self.assertNotIn("generic_windows", playout_types)
         self.assertEqual(len(insta_players), 2)
+        insta_instance_roots = {player["paths"]["instance_root"] for player in insta_players}
+        self.assertIn(str(program_files / "Indytek" / "Insta Playout" / "Settings"), insta_instance_roots)
+        self.assertIn(str(program_files / "Indytek" / "Insta Playout 2" / "Settings"), insta_instance_roots)
         for player in insta_players:
             self.assertTrue(player["paths"]["fnf_log"].endswith("Indytek\\Insta log\\FNF"))
+
+    def test_uses_pulse_account_json_as_fallback_for_missing_hub_and_key(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            script_copy = temp_root / "discover-node.ps1"
+            script_copy.write_text(DISCOVERY_SCRIPT.read_text(encoding="utf-8"), encoding="utf-8")
+
+            (temp_root / "config.yaml").write_text(
+                "\n".join(
+                    [
+                        "node_id: studio-a",
+                        "node_name: Studio A",
+                        "site_id: studio-a",
+                        "hub_url: \"\"",
+                        "enrollment_key: \"\"",
+                        "players: []",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (temp_root / "pulse-account.json").write_text(
+                json.dumps(
+                    {
+                        "hubUrl": "https://pulse.example.com",
+                        "enrollmentKey": "ENROLL-ABC-123",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            command = f"""
+& {{
+  $programFiles = '{_ps_quote(temp_root / "Program Files")}'
+  $programFilesX86 = '{_ps_quote(temp_root / "Program Files (x86)")}'
+  $programData = '{_ps_quote(temp_root / "ProgramData")}'
+  [Environment]::SetEnvironmentVariable('ProgramFiles', $programFiles, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramFiles(x86)', $programFilesX86, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramData', $programData, 'Process')
+  function Get-CimInstance {{
+    [CmdletBinding()]
+    param([string]$ClassName)
+    return @()
+  }}
+  & '{_ps_quote(script_copy)}' -StdOut
+}}
+"""
+            completed = subprocess.run(
+                [
+                    POWERSHELL_EXE,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    command,
+                ],
+                cwd=temp_root,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+        report = json.loads(completed.stdout)
+        self.assertEqual(report["node_id"], "studio-a")
+        self.assertEqual(report["hub_url"], "https://pulse.example.com")
+        self.assertEqual(report["enrollment_key"], "ENROLL-ABC-123")
 
 
 if __name__ == "__main__":

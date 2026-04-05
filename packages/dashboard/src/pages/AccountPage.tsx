@@ -3,6 +3,8 @@ import { InstallWorkspacePanel } from '../components/InstallWorkspacePanel';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { downloadAuthenticatedFile, requestAuthenticatedDownloadLink } from '../lib/downloads';
 
+const INSTALLER_DOWNLOAD_NAME = 'clarix-pulse-latest.zip';
+
 interface SessionShape {
   user: {
     displayName: string;
@@ -59,7 +61,7 @@ export function AccountPage({
     setDownloadError(null);
     setDownloading(true);
     try {
-      await downloadAuthenticatedFile('/api/downloads/bundle/windows/latest', 'clarix-pulse-v1.9.zip');
+      await downloadAuthenticatedFile('/api/downloads/bundle/windows/latest', INSTALLER_DOWNLOAD_NAME);
     } catch (error) {
       setDownloadError(error instanceof Error ? error.message : 'Failed to download the installer.');
     } finally {
@@ -201,7 +203,7 @@ export function AccountPage({
         <div className="rounded-3xl border border-slate-800 bg-slate-900/58 p-5 shadow-[0_20px_60px_rgba(2,6,23,0.28)] backdrop-blur">
           <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-100">Access key recovery</h3>
           <p className="mt-3 text-sm leading-6 text-slate-300">
-            Lost or forgotten your access key? Request a new one — it will be emailed to <span className="font-semibold text-white">{session.user.email}</span>. This replaces any existing key.
+            Lost or forgotten your access key? Request a new one - it will be emailed to <span className="font-semibold text-white">{session.user.email}</span>. This replaces any existing key.
           </p>
           {keyRequestNotice && (
             <div className="mt-3 rounded-2xl border border-emerald-700/40 bg-emerald-900/20 px-4 py-3 text-sm text-emerald-100">

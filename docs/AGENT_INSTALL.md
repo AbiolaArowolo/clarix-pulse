@@ -1,7 +1,7 @@
 # Clarix Pulse - Agent Installation Guide
 
-**Document Date**: `2026-03-29 -04:00`  
-**Current Bundle Baseline**: `v1.9`
+**Document Date**: `2026-04-05 -04:00`  
+**Current Bundle Baseline**: `v1.17`
 
 ## Purpose
 
@@ -25,7 +25,7 @@ Prepared site-specific bundles are no longer part of the supported product path.
 
 Use:
 
-- [clarix-pulse-v1.9.zip](/D:/monitoring/packages/agent/release/clarix-pulse-v1.9.zip)
+- [clarix-pulse-v1.17.zip](/D:/monitoring/packages/agent/release/clarix-pulse-v1.17.zip)
 
 Release folder:
 

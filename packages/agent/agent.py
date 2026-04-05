@@ -2458,6 +2458,43 @@ def _run_config_editor(existing: dict[str, Any] | None = None) -> dict[str, Any]
         return _run_config_wizard(existing)
 
 
+def _import_local_ui_state_from_path(import_path: str, current_state: dict[str, Any] | None = None) -> tuple[dict[str, Any], str]:
+    resolved_path = os.path.abspath(_as_str(import_path))
+    if not resolved_path:
+        raise ValueError("Discovery report path is required.")
+    if not os.path.isfile(resolved_path):
+        raise FileNotFoundError(f"Discovery report not found at {resolved_path}")
+
+    with open(resolved_path, "r", encoding="utf-8-sig") as handle:
+        document_text = handle.read()
+
+    return _import_local_ui_state(document_text, current_state)
+
+
+def configure_bundle_command(import_path: str | None = None) -> int:
+    try:
+        config_path = _bundle_path("config.yaml")
+        existing = _load_yaml_if_exists(config_path)
+        initial_state = existing
+
+        if import_path:
+            initial_state, message = _import_local_ui_state_from_path(import_path, existing)
+            print(message)
+
+        configured = _run_config_editor(initial_state)
+        _write_yaml(config_path, configured)
+        validated_config = load_config(config_path)
+
+        print()
+        print("Pulse bundle configuration updated.")
+        print(f"Node: {validated_config['node_id']} ({validated_config['node_name']})")
+        print(f"Saved to: {config_path}")
+        return 0
+    except Exception as exc:
+        print(f"ERROR: {exc}")
+        return 1
+
+
 def open_local_ui_command() -> int:
     url = _local_ui_url()
 
@@ -3236,7 +3273,7 @@ def poll_player(
         node_config_mirror=node_config_mirror,
     )
     if response_payload is not None:
-        log.debug(f"[{player_id}] heartbeat OK — {observations}")
+        log.debug(f"[{player_id}] heartbeat OK - {observations}")
 
     # POST thumbnail if captured
     if primary_udp:
@@ -3283,7 +3320,7 @@ def run_agent_loop() -> int:
             sort_keys=True,
         )
         if config_signature != last_config_signature:
-            log.info(f"Pulse Agent starting — node_id={node_id}, node_name={node_name}, hub={hub_url}")
+            log.info(f"Pulse Agent starting - node_id={node_id}, node_name={node_name}, hub={hub_url}")
             log.info(f"Monitoring {len(players)} player(s): {[p['player_id'] for p in players]}")
             last_config_signature = config_signature
 
@@ -3315,6 +3352,9 @@ def main() -> int:
             return install_service_admin_command()
         if command == "--configure":
             return configure_command()
+        if command == "--configure-bundle":
+            import_path = args[1] if len(args) > 1 else None
+            return configure_bundle_command(import_path)
         if command == "--open-local-ui":
             return open_local_ui_command()
         if command == "--uninstall-service":

@@ -8,60 +8,105 @@ WHAT IS THIS?
 
 BEFORE YOU START
   1. Create an account at  https://pulse.clarixtech.com
-  2. Sign in and go to the Onboarding section
-  3. Copy your enrollment key - you will need it during setup
+  2. Sign in - your account is ready to use immediately after registration
 
 
-STEP-BY-STEP INSTALLATION (most users)
-  1. Copy this entire folder to the target Windows machine
-  2. Double-click  setup.bat
-  3. Choose  [1] Install Pulse as a Windows service
-  4. Windows may ask for Administrator approval - click Yes
-  5. The Clarix Pulse setup UI opens in your browser automatically
-  6. Enter your enrollment key and follow the on-screen steps
-  7. Pulse discovers your players and registers this node - done
+STEP-BY-STEP INSTALLATION
+==========================
 
+STEP 1 - Download and extract
+  1. Sign in to  https://pulse.clarixtech.com
+  2. Go to Account > Downloads and click  Download Clarix Pulse
+  3. Save the .zip file to your Desktop
+  4. Right-click the zip and choose  Extract All
+  5. Extract to:  C:\ClarixPulse
+  6. Open C:\ClarixPulse and confirm these files are there:
+       setup.bat, clarix-agent.exe, discover-node.ps1, config.yaml
 
-OPTION: SCAN FIRST, CONFIGURE FROM DASHBOARD
-  If you want to preview what Pulse will find before committing to an install:
-
+STEP 2 - Scan and review local setup
   1. Double-click  setup.bat
-  2. Choose  [3] Scan this computer for playout players
-  3. A file called  pulse-node-discovery-report.json  is created in this folder
-  4. Log in to  https://pulse.clarixtech.com
-  5. Go to Onboarding > Remote Setup and upload the report
-  6. Review the detected players on the dashboard and adjust settings
-  7. Click Provision - the dashboard generates a ready-to-use config.yaml
-  8. Download that config.yaml and place it in this folder (replacing the existing one)
-  9. Run  setup.bat  again and choose  [1] Install
+     - If Windows asks for permission, click Yes
+  2. Press  2  then Enter:
+       [2]  Run discovery scan and open local setup UI
+  3. The scan runs automatically (under 60 seconds)
+  4. The local Pulse setup UI opens in your browser with this computer's
+     details already filled in from the scan
+  5. If your download included  pulse-account.json, the hub URL and
+     enrollment key are filled in automatically
+  6. Review the Node Name, Site ID, players, and paths
+  7. Click  Save Local Settings
+
+STEP 3 - Install the agent
+  1. Double-click  setup.bat
+     - Click Yes if Windows asks for Administrator approval
+  2. Press  1  then Enter:
+       [1]  Install Pulse as a Windows service
+  3. You will see  Service installed successfully  when done
+  4. Press any key, then press 5 to close
+
+The agent now runs in the background and starts automatically every time
+this computer boots. You do not need to do anything else.
+
+STEP 4 - Confirm it is working
+  1. Sign in to  https://pulse.clarixtech.com
+  2. Click  Dashboard
+  3. Wait up to 30 seconds - your node should appear with a green status
+
+If the node shows green, installation is complete.
 
 
 WHAT EACH FILE DOES
-  setup.bat          Main entry point. Install, configure, scan, or uninstall.
-  config.yaml        Node settings. Contains hub URL and enrollment/agent token.
-  discover-node.ps1  Scans this PC for playout software and streams.
+===================
+  setup.bat          Main entry point. Scan, configure, install, or uninstall.
+  config.yaml        Node settings. Contains hub URL and agent token.
+  discover-node.ps1  Scans this PC for playout software automatically.
   clarix-agent.exe   The Clarix Pulse agent that runs as a Windows service.
   nssm.exe           Windows service manager used during install/uninstall.
-  ffmpeg.exe         Stream probe tool used automatically for UDP monitoring.
-  ffprobe.exe        Stream probe tool used automatically for UDP monitoring.
-
-
-CHANGING SETTINGS AFTER INSTALL
-  - Run  setup.bat  and choose  [2] Open configuration and setup UI
-  - Or log in to the dashboard and use Remote Setup to push a new config
-
-
-UNINSTALLING
-  - Run  setup.bat  and choose  [4] Uninstall and remove Pulse service
-  - Your config.yaml is kept so you can reinstall without re-entering settings
+  ffmpeg.exe         Stream probe tool used for UDP stream monitoring.
+  ffprobe.exe        Stream probe tool used for UDP stream monitoring.
 
 
 TROUBLESHOOTING
-  - If install fails, right-click setup.bat and choose "Run as administrator"
-  - If the browser does not open automatically, go to  http://localhost:9000
-  - For further help, contact support or visit the dashboard
+===============
+
+Nothing appears on the dashboard after 2 minutes:
+  - Check this computer has an internet connection
+  - Run setup.bat again and choose [1] to reinstall the service
+  - Click Yes if Windows asks for Administrator approval
+  - Wait 30 seconds and refresh the dashboard
+
+Browser opens but the form is empty:
+  - Run setup.bat and choose [2] again
+  - If the guided UI still does not appear, run configure.bat
+  - Optional dashboard fallback:
+      Run setup.bat > choose [3] to save the report file
+      Go to dashboard > Onboarding > Remote Setup
+      Click Upload discovery report and select:
+        C:\ClarixPulse\pulse-node-discovery-report.json
+
+PowerShell says scripts are disabled:
+  - Right-click  discover-node.ps1  and choose Properties
+  - Look for an Unblock checkbox at the bottom - tick it and click OK
+  - Run setup.bat and choose [2] again
+
+Wrong players detected:
+  - In the local setup UI, edit the detected players before saving
+  - Or use the dashboard fallback above if you prefer remote provisioning
+
+Install fails even as Administrator:
+  - Run setup.bat and choose [4] to fully uninstall first
+  - Then run setup.bat and choose [1] to reinstall fresh
+
+Changing settings after install:
+  - Run setup.bat and choose [2] to open the configuration UI
+  - Or sign in to the dashboard and use Remote Setup to push a new config
+
+Uninstalling:
+  - Run setup.bat and choose [4] Uninstall and remove Pulse service
+  - Your config.yaml is kept so you can reinstall without losing settings
 
 
 SUPPORT
+=======
   Dashboard : https://pulse.clarixtech.com
   Email     : support@clarixtech.com

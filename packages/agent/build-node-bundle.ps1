@@ -137,6 +137,7 @@ $requiredRepoFiles = @(
     @{ Source = (Join-Path $PSScriptRoot 'setup.bat'); Target = 'setup.bat' }
     @{ Source = (Join-Path $PSScriptRoot 'discover-node.ps1'); Target = 'discover-node.ps1' }
     @{ Source = (Join-Path $PSScriptRoot 'README.txt'); Target = 'README.txt' }
+    @{ Source = (Join-Path $PSScriptRoot 'README.md'); Target = 'README.md' }
 )
 
 $vendorFiles = @(

@@ -1,6 +1,6 @@
 # Clarix Pulse - Authenticated Artifact Layout
 
-**Document Date**: `2026-03-29 -04:00`
+**Document Date**: `2026-04-05 -04:00`
 
 ## Purpose
 
@@ -43,23 +43,26 @@ Important:
 For local development, the hub serves the bundle by default from:
 
 ```text
-packages/agent/release/clarix-pulse-v1.9.zip
+packages/agent/release/clarix-pulse-v1.17.zip
 ```
 
 For the artifact-deployed VPS flow, the deploy helper now syncs the installer bundle to:
 
 ```text
-/var/lib/clarix-pulse/downloads/clarix-pulse-v1.9.zip
+/var/lib/clarix-pulse/downloads/clarix-pulse-v1.17.zip
 ```
 
 Optional override:
 
 ```env
-PULSE_DOWNLOAD_BUNDLE_PATH=/custom/path/clarix-pulse-v1.9.zip
-PULSE_DOWNLOAD_BUNDLE_NAME=clarix-pulse-v1.9.zip
+PULSE_DOWNLOAD_BUNDLE_PATH=/custom/path/clarix-pulse-v1.17.zip
+PULSE_DOWNLOAD_BUNDLE_NAME=clarix-pulse-v1.17.zip
 PULSE_DOWNLOAD_SIGNING_SECRET=REPLACE_WITH_LONG_RANDOM_SECRET
 PULSE_DOWNLOAD_LINK_TTL_MINUTES=1440
 ```
+
+If `PULSE_DOWNLOAD_BUNDLE_NAME` is omitted, the VPS redeploy helper now uses
+the newest `clarix-pulse-v*.zip` present in the repo release folder.
 
 ---
 
