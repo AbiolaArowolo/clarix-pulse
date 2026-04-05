@@ -325,6 +325,25 @@ const ALERT_ACCENT: Record<string, string> = {
   'NETWORK ISSUE': '#d97706',
 };
 
+export function formatAlertTimestamp(date: Date): string {
+  const datePart = new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    timeZone: 'UTC',
+  }).format(date);
+  const timePart = new Intl.DateTimeFormat('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+    timeZone: 'UTC',
+    timeZoneName: 'short',
+  }).format(date);
+
+  return `${datePart} ${timePart}`;
+}
+
 function buildAlertMessage(
   prefix: 'RECOVERED' | 'NETWORK ISSUE' | 'OFF AIR' | 'OFF AIR LIKELY',
   ctx: AlertContext,
@@ -333,12 +352,12 @@ function buildAlertMessage(
   const nodeId = ctx.nodeId ?? 'unknown-node';
   const playerId = ctx.instanceId;
   const causes = deriveLikelyCauses(ctx);
-  const timestamp = new Date().toISOString();
+  const timestamp = formatAlertTimestamp(new Date());
 
   // Plain text
   const bodyLines = [
     `Pulse Alert: ${prefix}`,
-    `Time: ${timestamp}`,
+    `Time (UTC): ${timestamp}`,
     `Site: ${siteName}`,
     `Node: ${nodeId}`,
     `Player: ${playerId}`,
@@ -369,7 +388,7 @@ function buildAlertMessage(
     </p>
     <table role="presentation" cellpadding="0" cellspacing="0" width="100%"
            style="border-collapse:collapse;margin-bottom:20px;">
-      ${detailRow('Time', timestamp)}
+      ${detailRow('Time (UTC)', timestamp)}
       ${detailRow('Site', siteName)}
       ${detailRow('Node', nodeId)}
       ${detailRow('Player', playerId)}

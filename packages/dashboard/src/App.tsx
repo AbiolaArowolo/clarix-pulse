@@ -12,6 +12,9 @@ import { MonitoringDashboardPage } from './pages/MonitoringDashboardPage';
 import { OnboardingPage } from './pages/OnboardingPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
+import { initInstallPromptTracking } from './lib/installPrompt';
+
+initInstallPromptTracking();
 
 function protectedPageMeta(pathname: string): { title: string; description: string } {
   if (pathname === '/app/onboarding') {

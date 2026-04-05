@@ -1,19 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
+import { getInstallPromptSnapshot, promptForInstall, subscribeInstallPrompt } from '../lib/installPrompt';
 import { PushNotificationToggle } from './PushNotificationToggle';
-
-interface BeforeInstallPromptEvent extends Event {
-  readonly platforms: string[];
-  readonly userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
-  prompt: () => Promise<void>;
-}
-
-function isStandaloneDisplay(): boolean {
-  if (typeof window === 'undefined') return false;
-
-  return window.matchMedia('(display-mode: standalone)').matches
-    || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
-}
 
 function isIPhoneLike(): boolean {
   if (typeof navigator === 'undefined') return false;
@@ -37,32 +25,13 @@ function needsLanFriendlyUrl(shareUrl: string): boolean {
 }
 
 function useInstallPrompt() {
-  const [promptEvent, setPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
-  const [installed, setInstalled] = useState(isStandaloneDisplay());
+  const [installState, setInstallState] = useState(() => getInstallPromptSnapshot());
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    const onBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setPromptEvent(event as BeforeInstallPromptEvent);
-    };
-
-    const onAppInstalled = () => {
-      setInstalled(true);
-      setPromptEvent(null);
-    };
-
-    window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt as EventListener);
-    window.addEventListener('appinstalled', onAppInstalled);
-
-    if (isStandaloneDisplay()) {
-      setInstalled(true);
-    }
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt as EventListener);
-      window.removeEventListener('appinstalled', onAppInstalled);
-    };
+    return subscribeInstallPrompt(() => {
+      setInstallState(getInstallPromptSnapshot());
+    });
   }, []);
 
   const shareUrl = useMemo(() => {
@@ -72,17 +41,7 @@ function useInstallPrompt() {
   }, []);
 
   const install = async () => {
-    if (!promptEvent) return false;
-
-    await promptEvent.prompt();
-    const choice = await promptEvent.userChoice;
-    if (choice.outcome === 'accepted') {
-      setInstalled(true);
-      setPromptEvent(null);
-      return true;
-    }
-
-    return false;
+    return promptForInstall();
   };
 
   const copyLink = async () => {
@@ -114,10 +73,10 @@ function useInstallPrompt() {
   };
 
   return {
-    canInstall: Boolean(promptEvent),
+    canInstall: Boolean(installState.promptEvent),
     canShare: typeof navigator !== 'undefined' && typeof navigator.share === 'function',
     copied,
-    installed,
+    installed: installState.installed,
     isIPhoneLike: isIPhoneLike(),
     isFirefoxLike: isFirefoxLike(),
     needsLanUrl: needsLanFriendlyUrl(shareUrl),

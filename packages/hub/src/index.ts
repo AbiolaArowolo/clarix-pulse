@@ -20,7 +20,7 @@ import { getSessionFromToken } from './store/auth';
 import { checkDbHealth, DATABASE_URL_DISPLAY, initDb } from './store/db';
 import { getInstanceControls, initInstanceControls, isAlertingSuppressed } from './store/instanceControls';
 import { getPlayer, initRegistry } from './store/registry';
-import { getAllStates, initState, markInstanceOffline, setConnectivity } from './store/state';
+import { clearStateCacheForInstances, getAllStates, initState, markInstanceOffline, setConnectivity } from './store/state';
 import { checkThumbnailStoreHealth, getThumbnailStorePath } from './store/thumbnails';
 
 const repoRoot = path.resolve(__dirname, '../../../..');
@@ -136,6 +136,11 @@ setInterval(async () => {
       });
       const controls = getInstanceControls(state.instanceId);
       const player = await getPlayer(state.instanceId);
+      if (!player) {
+        clearStateCacheForInstances([state.instanceId]);
+        networkIssueSentAt.delete(state.instanceId);
+        continue;
+      }
       if (player) {
         io.to(`tenant:${player.tenantId}`).emit('state_update', {
           instanceId: state.instanceId,
@@ -160,6 +165,11 @@ setInterval(async () => {
       setConnectivity(state.instanceId, 'stale').catch(console.error);
       const controls = getInstanceControls(state.instanceId);
       const player = await getPlayer(state.instanceId);
+      if (!player) {
+        clearStateCacheForInstances([state.instanceId]);
+        networkIssueSentAt.delete(state.instanceId);
+        continue;
+      }
       if (player) {
         io.to(`tenant:${player.tenantId}`).emit('state_update', {
           instanceId: state.instanceId,
