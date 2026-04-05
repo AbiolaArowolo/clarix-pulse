@@ -24,6 +24,12 @@ function asMirroredNodeConfig(value: unknown): MirroredNodeConfig | null {
   return value as MirroredNodeConfig;
 }
 
+function emitRemovedPlayers(io: SocketServer, tenantId: string, nodeId: string, playerIds: readonly string[]): void {
+  for (const playerId of playerIds) {
+    io.to(`tenant:${tenantId}`).emit('player_removed', { playerId, nodeId });
+  }
+}
+
 export function createHeartbeatRouter(io: SocketServer): Router {
   const router = Router();
 
@@ -61,14 +67,16 @@ export function createHeartbeatRouter(io: SocketServer): Router {
 
       let mirroredConfig: MirroredNodeConfig | null = null;
       if (nodeConfigMirror !== undefined) {
-        mirroredConfig = await updateMirroredNodeConfig(tenantId, nodeId, nodeConfigMirror);
+        const mirrorUpdate = await updateMirroredNodeConfig(tenantId, nodeId, nodeConfigMirror);
+        mirroredConfig = mirrorUpdate?.config ?? null;
+        emitRemovedPlayers(io, tenantId, nodeId, mirrorUpdate?.removedPlayerIds ?? []);
       } else {
         mirroredConfig = asMirroredNodeConfig(nodeConfigMirror);
       }
 
       let playerRecord = await getPlayer(resolvedPlayerId, tenantId);
       if ((!playerRecord || playerRecord.nodeId !== nodeId) && mirroredConfig) {
-        await syncRegistryFromNodeMirror({
+        const syncResult = await syncRegistryFromNodeMirror({
           tenantId,
           nodeId,
           nodeName: mirroredConfig.nodeName,
@@ -79,6 +87,7 @@ export function createHeartbeatRouter(io: SocketServer): Router {
             label: `${mirroredConfig!.nodeName} - ${player.playerId}`,
           })),
         });
+        emitRemovedPlayers(io, tenantId, nodeId, syncResult.removedPlayerIds);
         playerRecord = await getPlayer(resolvedPlayerId, tenantId);
       }
 
@@ -87,7 +96,7 @@ export function createHeartbeatRouter(io: SocketServer): Router {
         for (const event of playerEvents) {
           if (event.type === 'player_removed' && event.playerId) {
             await removePlayer(event.playerId, nodeId, tenantId);
-            io.to(`tenant:${tenantId}`).emit('player_removed', { playerId: event.playerId, nodeId });
+            emitRemovedPlayers(io, tenantId, nodeId, [event.playerId]);
           }
         }
       }
@@ -99,7 +108,7 @@ export function createHeartbeatRouter(io: SocketServer): Router {
         for (const dbPlayer of dbPlayers) {
           if (!manifestSet.has(dbPlayer.playerId)) {
             await removePlayer(dbPlayer.playerId, nodeId, tenantId);
-            io.to(`tenant:${tenantId}`).emit('player_removed', { playerId: dbPlayer.playerId, nodeId });
+            emitRemovedPlayers(io, tenantId, nodeId, [dbPlayer.playerId]);
           }
         }
       }

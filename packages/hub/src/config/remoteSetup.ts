@@ -306,7 +306,7 @@ function normalizePlayerDraft(rawValue: unknown, index: number, fallbackNodeId: 
 }
 
 function parseStructuredText(reportText: string): unknown {
-  const trimmed = reportText.trim();
+  const trimmed = reportText.replace(/^\uFEFF/, '').trim();
   if (!trimmed) {
     throw new Error('Upload a JSON or YAML discovery report first.');
   }
@@ -384,7 +384,7 @@ export function normalizeRemoteSetupDraft(rawValue: unknown, fallbackHubUrl: str
     hubUrl: importedHubUrl && !isPlaceholderHubUrl(importedHubUrl)
       ? importedHubUrl
       : asString(fallbackHubUrl),
-    pollIntervalSeconds: clampInt(raw.pollIntervalSeconds ?? raw.poll_interval_seconds, 5, 1, 120),
+    pollIntervalSeconds: clampInt(raw.pollIntervalSeconds ?? raw.poll_interval_seconds, 3, 1, 120),
     players,
   };
 }

@@ -22,7 +22,7 @@ hub_url: https://monitor.example.com
 # If enrollment_key is provided and agent_token is blank, the local UI enrolls this node and saves the returned agent token.
 agent_token:
 # enrollment_key: REPLACE_WITH_HUB_ENROLLMENT_KEY
-poll_interval_seconds: 10
+poll_interval_seconds: 3
 
 players: []
 

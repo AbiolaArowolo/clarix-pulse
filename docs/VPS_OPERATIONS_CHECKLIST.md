@@ -30,9 +30,9 @@ This checklist assumes:
 
 Recommended agent poll interval:
 
-- default: `10` seconds
-- acceptable range for most nodes: `10-15` seconds
-- avoid dropping below `5` seconds unless there is a proven operational need
+- default: `3` seconds
+- acceptable range for most nodes: `3-10` seconds
+- avoid dropping below `3` seconds unless there is a proven operational need
 
 ---
 

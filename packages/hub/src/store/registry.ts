@@ -2,6 +2,9 @@ import crypto from 'crypto';
 import { QueryResultRow } from 'pg';
 import { INSTANCES, SITES } from '../config/instances';
 import { exec, query, queryOne, withTransaction } from './db';
+import { clearInstanceControlsCacheForInstances } from './instanceControls';
+import { clearStateCacheForInstances } from './state';
+import { deleteThumbnailsForPlayers } from './thumbnails';
 
 export interface SiteRecord {
   tenantId: string;
@@ -101,6 +104,10 @@ interface PlayerRow extends QueryResultRow {
 const DEFAULT_LOCAL_UI_URL = 'http://127.0.0.1:3210/';
 const LEGACY_TENANT_ID = 'legacy-hub';
 const LEGACY_SITE_NAME_MAP = new Map(SITES.map((site) => [site.id, site.name]));
+
+function normalizePlayerId(value: string): string {
+  return value.trim();
+}
 
 function toIso(value: Date | string | null | undefined): string | null {
   if (!value) return null;
@@ -645,6 +652,10 @@ export async function removePlayer(playerId: string, nodeId: string, tenantId: s
     'DELETE FROM players WHERE player_id = $1 AND node_id = $2 AND site_id IN (SELECT site_id FROM sites WHERE tenant_id = $3)',
     [playerId, nodeId, tenantId],
   );
+
+  clearStateCacheForInstances([playerId]);
+  clearInstanceControlsCacheForInstances([playerId]);
+  await deleteThumbnailsForPlayers([playerId]);
 }
 
 export async function markPlayerSeen(playerId: string, observedAt = new Date().toISOString()): Promise<void> {
@@ -653,6 +664,21 @@ export async function markPlayerSeen(playerId: string, observedAt = new Date().t
     SET last_seen_at = $2, updated_at = $2
     WHERE player_id = $1
   `, [playerId, observedAt]);
+}
+
+export function diffRemovedPlayerIds(
+  existingPlayerIds: readonly string[],
+  incomingPlayerIds: readonly string[],
+): string[] {
+  const incomingSet = new Set(
+    incomingPlayerIds
+      .map((playerId) => normalizePlayerId(playerId))
+      .filter(Boolean),
+  );
+
+  return existingPlayerIds
+    .map((playerId) => normalizePlayerId(playerId))
+    .filter((playerId) => playerId && !incomingSet.has(playerId));
 }
 
 export async function syncRegistryFromNodeMirror(input: {
@@ -665,7 +691,7 @@ export async function syncRegistryFromNodeMirror(input: {
     playoutType?: string;
     label?: string;
   }>;
-}): Promise<{ node: NodeRecord; players: PlayerRecord[] }> {
+}): Promise<{ node: NodeRecord; players: PlayerRecord[]; removedPlayerIds: string[] }> {
   const siteId = input.siteId?.trim() || input.nodeId;
   const site = await upsertSite({
     tenantId: input.tenantId,
@@ -680,6 +706,15 @@ export async function syncRegistryFromNodeMirror(input: {
     localUiUrl: DEFAULT_LOCAL_UI_URL,
     commissioned: true,
   });
+
+  const existingPlayers = await listPlayersForNode(node.nodeId, input.tenantId);
+  const incomingPlayerIds = (input.players ?? [])
+    .map((player) => normalizePlayerId(player.playerId))
+    .filter(Boolean);
+  const removedPlayerIds = diffRemovedPlayerIds(
+    existingPlayers.map((player) => player.playerId),
+    incomingPlayerIds,
+  );
 
   const players: PlayerRecord[] = [];
   for (const player of input.players ?? []) {
@@ -697,7 +732,11 @@ export async function syncRegistryFromNodeMirror(input: {
     }));
   }
 
-  return { node, players };
+  for (const playerId of removedPlayerIds) {
+    await removePlayer(playerId, node.nodeId, input.tenantId);
+  }
+
+  return { node, players, removedPlayerIds };
 }
 
 export async function enrollNode(input: EnrollmentInput): Promise<EnrollmentResult> {

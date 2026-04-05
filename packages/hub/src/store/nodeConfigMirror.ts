@@ -28,6 +28,11 @@ export interface MirroredNodeConfig {
   updatedAt: string;
 }
 
+export interface MirroredNodeConfigUpdateResult {
+  config: MirroredNodeConfig;
+  removedPlayerIds: string[];
+}
+
 function asString(value: unknown, fallback = ''): string {
   if (typeof value === 'string') return value.trim();
   if (typeof value === 'number') return String(value);
@@ -156,7 +161,7 @@ function normalizeNodeConfig(raw: unknown, fallbackNodeId = ''): MirroredNodeCon
     nodeName: asString(doc.nodeName ?? doc.node_name, nodeId),
     siteId: asString(doc.siteId ?? doc.site_id, nodeId),
     hubUrl: asString(doc.hubUrl ?? doc.hub_url),
-    pollIntervalSeconds: clampInt(doc.pollIntervalSeconds ?? doc.poll_interval_seconds, 5, 1, 300),
+    pollIntervalSeconds: clampInt(doc.pollIntervalSeconds ?? doc.poll_interval_seconds, 3, 1, 300),
     players,
     updatedAt: asString(doc.updatedAt ?? doc.updated_at, new Date().toISOString()),
   };
@@ -170,7 +175,7 @@ export async function updateMirroredNodeConfig(
   tenantId: string,
   nodeId: string,
   payload: unknown,
-): Promise<MirroredNodeConfig | null> {
+): Promise<MirroredNodeConfigUpdateResult | null> {
   const normalized = normalizeNodeConfig(payload, nodeId);
   if (!normalized) return null;
 
@@ -181,7 +186,7 @@ export async function updateMirroredNodeConfig(
     updatedAt,
   };
 
-  await syncRegistryFromNodeMirror({
+  const syncResult = await syncRegistryFromNodeMirror({
     tenantId,
     nodeId,
     nodeName: stored.nodeName,
@@ -201,7 +206,10 @@ export async function updateMirroredNodeConfig(
       updated_at = EXCLUDED.updated_at
   `, [nodeId, serializePayload(stored), updatedAt]);
 
-  return stored;
+  return {
+    config: stored,
+    removedPlayerIds: syncResult.removedPlayerIds,
+  };
 }
 
 export async function updateMirroredPlayerStreamUrl(

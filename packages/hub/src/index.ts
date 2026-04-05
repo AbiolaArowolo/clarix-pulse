@@ -49,7 +49,7 @@ const io = new SocketServer(httpServer, {
 app.use('/api/auth', createAuthRouter());
 app.use('/api/heartbeat', createHeartbeatRouter(io));
 app.use('/api/agent/heartbeat', createHeartbeatRouter(io));
-app.use('/api/config', createConfigRouter());
+app.use('/api/config', createConfigRouter(io));
 app.use('/api/downloads', createDownloadsRouter());
 app.use('/api/thumbnail', createThumbnailRouter(io));
 app.use('/api/status', requireSession, createStatusRouter());

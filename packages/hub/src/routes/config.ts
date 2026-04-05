@@ -1,4 +1,5 @@
 import { Request, Response, Router } from 'express';
+import { Server as SocketServer } from 'socket.io';
 import {
   buildEnrollmentInput,
   buildMirrorPayload,
@@ -165,7 +166,13 @@ function isLocalStreamUrl(url: string): boolean {
   }
 }
 
-export function createConfigRouter(): Router {
+function emitRemovedPlayers(io: SocketServer, tenantId: string, nodeId: string, playerIds: readonly string[]): void {
+  for (const playerId of playerIds) {
+    io.to(`tenant:${tenantId}`).emit('player_removed', { playerId, nodeId });
+  }
+}
+
+export function createConfigRouter(io: SocketServer): Router {
   const router = Router();
 
   router.post('/enroll', async (req: Request, res: Response) => {
@@ -251,6 +258,34 @@ export function createConfigRouter(): Router {
       updatedAt: node.updatedAt,
       mirror,
     });
+  });
+
+  router.post('/node/mirror', async (req: Request, res: Response) => {
+    const token = bearerToken(req);
+    const nodeAuth = token ? await resolveNodeAuthForToken(token) : null;
+    if (!nodeAuth) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    try {
+      const mirrorUpdate = await updateMirroredNodeConfig(nodeAuth.tenantId, nodeAuth.nodeId, req.body);
+      if (!mirrorUpdate) {
+        return res.status(400).json({ error: 'Invalid mirrored node payload.' });
+      }
+
+      emitRemovedPlayers(io, nodeAuth.tenantId, nodeAuth.nodeId, mirrorUpdate.removedPlayerIds);
+
+      return res.json({
+        ok: true,
+        nodeId: nodeAuth.nodeId,
+        removedPlayerIds: mirrorUpdate.removedPlayerIds,
+        updatedAt: mirrorUpdate.config.updatedAt,
+      });
+    } catch (error) {
+      return res.status(400).json({
+        error: error instanceof Error ? error.message : 'Failed to update mirrored node config.',
+      });
+    }
   });
 
   router.get('/remote/install-handoff', async (req: Request, res: Response) => {
@@ -615,7 +650,9 @@ export function createConfigRouter(): Router {
         tenantId: req.auth!.tenantId,
         ...buildEnrollmentInput(draft),
       });
-      const mirrored = await updateMirroredNodeConfig(req.auth!.tenantId, draft.nodeId, buildMirrorPayload(draft));
+      const mirroredUpdate = await updateMirroredNodeConfig(req.auth!.tenantId, draft.nodeId, buildMirrorPayload(draft));
+      const mirrored = mirroredUpdate?.config ?? null;
+      emitRemovedPlayers(io, req.auth!.tenantId, draft.nodeId, mirroredUpdate?.removedPlayerIds ?? []);
 
       for (const player of draft.players) {
         await updateInstanceControls(player.playerId, {

@@ -82,7 +82,7 @@ SERVICE_DISPLAY_NAME = "Pulse Agent"
 DEFAULT_HUB_URL = "https://monitor.example.com"
 LOCAL_UI_HOST = "127.0.0.1"
 LOCAL_UI_PORT = 3210
-DEFAULT_POLL_INTERVAL_SECONDS = 10
+DEFAULT_POLL_INTERVAL_SECONDS = 3
 HEARTBEAT_POST_TIMEOUT_SECONDS = 5
 HEARTBEAT_RETRY_DELAYS_SECONDS = (1.0, 2.0)
 RETRYABLE_HTTP_STATUS_CODES = {408, 429, 500, 502, 503, 504}
@@ -478,7 +478,7 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
       document.getElementById("hub_url").value = state.hub_url || DEFAULTS.hubUrl;
       document.getElementById("agent_token").value = state.agent_token || "";
       document.getElementById("enrollment_key").value = state.enrollment_key || "";
-      document.getElementById("poll_interval_seconds").value = state.poll_interval_seconds || 10;
+      document.getElementById("poll_interval_seconds").value = state.poll_interval_seconds || 3;
       document.getElementById("import_setup_url").value = state.import_setup_url || "";
       document.getElementById("unlock_sensitive_fields").checked = !!state.unlock_sensitive_fields;
       document.getElementById("node_id").readOnly = lock;
@@ -877,7 +877,7 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
         }
         state = payload.config;
         render();
-        showMessage("notice", "Local settings saved. Pulse will mirror these to the web app on the next heartbeat.");
+        showMessage("notice", payload.message || "Local settings saved.");
       },
       async reload() {
         showMessage("", "");
@@ -1519,7 +1519,7 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
     node_name = _as_str(raw.get("node_name") or raw.get("pc_name") or node_id)
     hub_url = _as_str(raw.get("hub_url"))
     agent_token = _as_non_placeholder_str(raw.get("agent_token"))
-    poll_interval_seconds = max(1, _as_int(raw.get("poll_interval_seconds"), 10))
+    poll_interval_seconds = max(1, _as_int(raw.get("poll_interval_seconds"), DEFAULT_POLL_INTERVAL_SECONDS))
 
     if not hub_url:
         raise ValueError("config.yaml missing hub_url")
@@ -1790,6 +1790,38 @@ def _load_yaml_if_exists(path: str) -> dict[str, Any]:
 def _runtime_config_path() -> str:
     installed_config = _installed_path("config.yaml")
     return installed_config if os.path.exists(installed_config) else os.path.join(_base_dir(), "config.yaml")
+
+
+def _config_for_hub_sync(raw: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+
+    node_id = _as_str(raw.get("node_id") or raw.get("agent_id"))
+    hub_url = _as_str(raw.get("hub_url"))
+    agent_token = _as_non_placeholder_str(raw.get("agent_token"))
+    if not node_id or not hub_url or not agent_token:
+        return None
+
+    players_raw = raw.get("players")
+    if players_raw is None:
+        players_raw = raw.get("instances", [])
+
+    players: list[dict[str, Any]] = []
+    if isinstance(players_raw, list):
+        for index, player in enumerate(players_raw):
+            normalized = _normalize_player(player, index)
+            if normalized is not None:
+                players.append(normalized)
+
+    return {
+        "node_id": node_id,
+        "node_name": _as_str(raw.get("node_name") or raw.get("pc_name") or node_id),
+        "site_id": _as_str(raw.get("site_id")),
+        "hub_url": hub_url,
+        "agent_token": agent_token,
+        "poll_interval_seconds": max(1, _as_int(raw.get("poll_interval_seconds"), DEFAULT_POLL_INTERVAL_SECONDS)),
+        "players": players,
+    }
 
 
 def _sync_udp_inputs(player_id: str, value: Any) -> list[dict[str, Any]]:
@@ -2158,10 +2190,94 @@ def _render_local_config_ui_html(initial_config: dict[str, Any]) -> bytes:
 
 _persistent_local_ui_lock = threading.Lock()
 _persistent_local_ui_started = False
+_runtime_local_config_lock = threading.Lock()
+_runtime_local_config_override: dict[str, Any] | None = None
+_runtime_suppressed_player_ids: set[str] = set()
 
 
 def _local_ui_url() -> str:
     return f"http://{LOCAL_UI_HOST}:{LOCAL_UI_PORT}/"
+
+
+def _player_ids_from_config(config: dict[str, Any] | None) -> list[str]:
+    if not isinstance(config, dict):
+        return []
+
+    players = config.get("players")
+    if not isinstance(players, list):
+        return []
+
+    player_ids: list[str] = []
+    for player in players:
+        if not isinstance(player, dict):
+            continue
+        player_id = _as_str(player.get("player_id"))
+        if player_id:
+            player_ids.append(player_id)
+    return player_ids
+
+
+def _removed_player_ids_between_configs(previous: dict[str, Any] | None, current: dict[str, Any] | None) -> list[str]:
+    previous_ids = _player_ids_from_config(previous)
+    current_id_set = set(_player_ids_from_config(current))
+    return [player_id for player_id in previous_ids if player_id and player_id not in current_id_set]
+
+
+def _runtime_override_signature(config: dict[str, Any] | None) -> str:
+    if not isinstance(config, dict):
+        return ""
+    try:
+        return json.dumps(_build_node_config_mirror(config), sort_keys=True)
+    except Exception:
+        return ""
+
+
+def _apply_runtime_local_config_override(
+    config: dict[str, Any],
+    removed_player_ids: list[str] | tuple[str, ...] | set[str] | None = None,
+) -> None:
+    global _runtime_local_config_override, _runtime_suppressed_player_ids
+
+    with _runtime_local_config_lock:
+        _runtime_local_config_override = copy.deepcopy(config)
+        _runtime_suppressed_player_ids = {
+            _as_str(player_id)
+            for player_id in (removed_player_ids or [])
+            if _as_str(player_id)
+        }
+
+
+def _clear_runtime_local_config_override_if_matches(config: dict[str, Any]) -> None:
+    global _runtime_local_config_override, _runtime_suppressed_player_ids
+
+    config_signature = _runtime_override_signature(config)
+    if not config_signature:
+        return
+
+    with _runtime_local_config_lock:
+        if _runtime_override_signature(_runtime_local_config_override) != config_signature:
+            return
+        _runtime_local_config_override = None
+        _runtime_suppressed_player_ids = set()
+
+
+def _current_runtime_local_config_override() -> dict[str, Any] | None:
+    with _runtime_local_config_lock:
+        if _runtime_local_config_override is None:
+            return None
+        return copy.deepcopy(_runtime_local_config_override)
+
+
+def _current_runtime_node_config_mirror(default: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    override = _current_runtime_local_config_override()
+    if override is not None:
+        return _build_node_config_mirror(override)
+    return copy.deepcopy(default) if isinstance(default, dict) else None
+
+
+def _player_is_runtime_suppressed(player_id: str) -> bool:
+    with _runtime_local_config_lock:
+        return player_id in _runtime_suppressed_player_ids
 
 
 def _current_local_ui_config() -> dict[str, Any]:
@@ -2242,15 +2358,29 @@ def _materialize_local_ui_config(payload: dict[str, Any], existing: dict[str, An
     return config
 
 
-def _save_local_ui_config(payload: dict[str, Any]) -> dict[str, Any]:
+def _save_local_ui_config(payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
     config_path = _runtime_config_path()
     existing = _load_yaml_if_exists(config_path)
     config = _materialize_local_ui_config(payload, existing)
     _write_yaml(config_path, config)
+    removed_player_ids = _removed_player_ids_between_configs(existing, config)
+    _apply_runtime_local_config_override(config, removed_player_ids)
 
     _ensure_ff_tools(required=_config_has_enabled_udp(config))
 
-    return _config_for_local_ui(config)
+    sync_result = _sync_node_config_mirror_to_hub(config)
+    if sync_result.get("ok"):
+        if removed_player_ids:
+            message = "Local settings saved. Removed players were removed from the hub immediately."
+        else:
+            message = "Local settings saved. Hub details updated immediately."
+    else:
+        details = _as_str(sync_result.get("error"))
+        message = "Local settings saved. Hub sync will retry on the next heartbeat."
+        if details:
+            message = f"{message} ({details})"
+
+    return _config_for_local_ui(config), message
 
 
 def _start_persistent_local_ui_server() -> None:
@@ -2315,12 +2445,12 @@ def _start_persistent_local_ui_server() -> None:
                         self._send_json(200, {"ok": True, "config": config, "message": message})
                         return
 
-                    config = _save_local_ui_config(payload)
+                    config, message = _save_local_ui_config(payload)
                 except Exception as exc:
                     self._send_json(400, {"error": str(exc)})
                     return
 
-                self._send_json(200, {"ok": True, "config": config})
+                self._send_json(200, {"ok": True, "config": config, "message": message})
 
         try:
             server = ThreadingHTTPServer((LOCAL_UI_HOST, LOCAL_UI_PORT), PersistentConfigUiHandler)
@@ -2882,8 +3012,20 @@ def uninstall_service_command() -> int:
         return _relaunch_as_admin(["--uninstall-service"])
 
     try:
+        existing_config = _config_for_hub_sync(_load_yaml_if_exists(_runtime_config_path()))
         nssm_path = _installed_path("nssm.exe") if os.path.exists(_installed_path("nssm.exe")) else ""
         _stop_existing_service(nssm_path or None)
+
+        if existing_config is not None:
+            sync_result = _sync_node_config_mirror_to_hub(existing_config, players_override=[])
+            if sync_result.get("ok"):
+                removed_count = len(_player_ids_from_config(existing_config))
+                if removed_count > 0:
+                    print(f"Removed {removed_count} player(s) from the hub immediately.")
+            else:
+                details = _as_str(sync_result.get("error"))
+                if details:
+                    print(f"WARNING: Pulse was removed locally, but hub cleanup failed: {details}")
 
         if os.path.exists(INSTALL_DIR) and _prompt_yes_no(f"Delete installed files from {INSTALL_DIR}", False):
             shutil.rmtree(INSTALL_DIR, ignore_errors=True)
@@ -2989,6 +3131,12 @@ def post_heartbeat(
     }
     if node_config_mirror is not None:
         payload["nodeConfigMirror"] = node_config_mirror
+        if isinstance(node_config_mirror, dict) and isinstance(node_config_mirror.get("players"), list):
+            payload["playerManifest"] = [
+                _as_str(player.get("player_id"))
+                for player in node_config_mirror.get("players", [])
+                if isinstance(player, dict) and _as_str(player.get("player_id"))
+            ]
     try:
         r = _post_json_with_retry(
             url,
@@ -3191,7 +3339,7 @@ def _build_node_config_mirror(config: dict[str, Any]) -> dict[str, Any]:
         "node_name": config["node_name"],
         "site_id": config.get("site_id", ""),
         "hub_url": config["hub_url"],
-        "poll_interval_seconds": int(config.get("poll_interval_seconds", 10)),
+        "poll_interval_seconds": int(config.get("poll_interval_seconds", DEFAULT_POLL_INTERVAL_SECONDS)),
         "players": [
             {
                 "player_id": player["player_id"],
@@ -3202,6 +3350,71 @@ def _build_node_config_mirror(config: dict[str, Any]) -> dict[str, Any]:
             for player in config.get("players", [])
             if isinstance(player, dict) and player.get("player_id")
         ],
+    }
+
+
+def _sync_node_config_mirror_to_hub(
+    config: dict[str, Any],
+    players_override: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    hub_url = _as_str(config.get("hub_url")).rstrip("/")
+    token = _as_non_placeholder_str(config.get("agent_token"))
+    if not hub_url or not token:
+        return {
+            "ok": False,
+            "removed_player_ids": [],
+            "updated_at": "",
+            "error": "Hub URL or agent token is missing.",
+        }
+
+    mirror_config = copy.deepcopy(config)
+    if players_override is not None:
+        mirror_config["players"] = copy.deepcopy(players_override)
+    payload = _build_node_config_mirror(mirror_config)
+
+    try:
+        response = _post_json_with_retry(
+            f"{hub_url}/api/config/node/mirror",
+            token,
+            payload,
+            f"Node mirror sync for {mirror_config.get('node_id', 'node')}",
+            timeout_seconds=20,
+        )
+    except requests.RequestException as exc:
+        return {
+            "ok": False,
+            "removed_player_ids": [],
+            "updated_at": "",
+            "error": str(exc),
+        }
+
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+
+    if response.status_code >= 400:
+        error_message = _as_str(body.get("error")) if isinstance(body, dict) else ""
+        return {
+            "ok": False,
+            "removed_player_ids": [],
+            "updated_at": "",
+            "error": error_message or f"HTTP {response.status_code}",
+        }
+
+    removed_player_ids = []
+    if isinstance(body, dict) and isinstance(body.get("removedPlayerIds"), list):
+        removed_player_ids = [
+            _as_str(player_id)
+            for player_id in body.get("removedPlayerIds", [])
+            if _as_str(player_id)
+        ]
+
+    return {
+        "ok": True,
+        "removed_player_ids": removed_player_ids,
+        "updated_at": _as_str(body.get("updatedAt")) if isinstance(body, dict) else "",
+        "error": "",
     }
 
 
@@ -3263,6 +3476,8 @@ def poll_player(
     if primary_udp:
         observations.update(primary_udp.get("metrics", {}))
 
+    effective_node_config_mirror = _current_runtime_node_config_mirror(node_config_mirror)
+
     # POST heartbeat
     response_payload = post_heartbeat(
         hub_url,
@@ -3270,7 +3485,7 @@ def poll_player(
         node_id,
         player_id,
         observations,
-        node_config_mirror=node_config_mirror,
+        node_config_mirror=effective_node_config_mirror,
     )
     if response_payload is not None:
         log.debug(f"[{player_id}] heartbeat OK - {observations}")
@@ -3300,13 +3515,14 @@ def run_agent_loop() -> int:
 
     while True:
         config = load_config(config_path)
+        _clear_runtime_local_config_override_if_matches(config)
         _start_persistent_local_ui_server()
 
         node_id = config["node_id"]
         node_name = config["node_name"]
         hub_url = config["hub_url"].rstrip("/")
         token = config["agent_token"]
-        poll_interval = int(config.get("poll_interval_seconds", 10))
+        poll_interval = int(config.get("poll_interval_seconds", DEFAULT_POLL_INTERVAL_SECONDS))
         players = config.get("players", [])
         node_config_mirror = _build_node_config_mirror(config)
 
@@ -3327,6 +3543,9 @@ def run_agent_loop() -> int:
         cycle_start = time.time()
 
         for player in players:
+            player_id = _as_str(player.get("player_id"))
+            if player_id and _player_is_runtime_suppressed(player_id):
+                continue
             try:
                 poll_player(node_id, hub_url, token, player, node_config_mirror=node_config_mirror)
             except Exception:

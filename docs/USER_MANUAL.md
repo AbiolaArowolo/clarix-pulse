@@ -284,6 +284,7 @@ Fields:
 - `Site ID`: the group/site identifier
 - `Hub URL`: the base hub URL the node will report to
 - `Poll Interval`: how often the node posts a heartbeat
+  Default: `3` seconds
 
 What each field is for:
 
@@ -292,6 +293,7 @@ What each field is for:
 - `Site ID` controls grouping on the live dashboard
 - `Hub URL` must point to the correct Clarix Pulse hub
 - `Poll Interval` controls how frequently the node reports
+  Recommended default: `3` seconds
 
 #### Player card
 
@@ -529,6 +531,7 @@ What these mean:
 - `Agent Token`: the preferred authenticated identity issued by provisioning
 - `Enrollment Key`: fallback only; used when no agent token is available yet
 - `Poll Interval (Seconds)`: how often the node sends heartbeat data
+  Default: `3` seconds
 
 Sensitive settings lock:
 

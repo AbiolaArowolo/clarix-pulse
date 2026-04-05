@@ -98,7 +98,7 @@ every time this computer boots - you do not need to do anything else.
 
 1. Sign in to [pulse.clarixtech.com](https://pulse.clarixtech.com).
 2. Click **Dashboard** in the left-hand menu.
-3. Wait up to 30 seconds. Your node should appear with a **green** status
+3. Wait about 10 to 15 seconds. Your node should appear with a **green** status
    indicator.
 
 **If the node shows green, installation is complete.**
@@ -113,7 +113,7 @@ every time this computer boots - you do not need to do anything else.
 - Open `C:\ClarixPulse\clarix-pulse-v1.17` and double-click `setup.bat`.
 - Choose **1** to re-run the install. If prompted for Administrator approval,
   click Yes.
-- Wait 30 seconds, then refresh your dashboard.
+- Wait about 15 seconds, then refresh your dashboard.
 
 ### PowerShell says "cannot be loaded because running scripts is disabled"
 

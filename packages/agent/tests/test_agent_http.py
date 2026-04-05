@@ -98,5 +98,99 @@ class ConfigureBundleCommandTests(unittest.TestCase):
         self.assertEqual(captured_state["enrollment_key"], "ENROLL-123")
 
 
+class MirrorSyncTests(unittest.TestCase):
+    def test_sync_node_config_mirror_to_hub_posts_payload_and_returns_removed_players(self) -> None:
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            "ok": True,
+            "removedPlayerIds": ["studio-a-insta-2"],
+            "updatedAt": "2026-04-05T12:00:00Z",
+        }
+        config = {
+            "node_id": "studio-a",
+            "node_name": "Studio A",
+            "site_id": "studio-a",
+            "hub_url": "https://pulse.example.com",
+            "agent_token": "TOKEN-123",
+            "poll_interval_seconds": 3,
+            "players": [
+                {"player_id": "studio-a-insta-1", "playout_type": "insta", "paths": {}, "udp_inputs": []},
+            ],
+        }
+
+        with patch.object(agent, "_post_json_with_retry", return_value=response) as post_mock:
+            result = agent._sync_node_config_mirror_to_hub(config)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["removed_player_ids"], ["studio-a-insta-2"])
+        self.assertEqual(result["updated_at"], "2026-04-05T12:00:00Z")
+        post_mock.assert_called_once()
+        self.assertEqual(
+            post_mock.call_args.args[0],
+            "https://pulse.example.com/api/config/node/mirror",
+        )
+        self.assertEqual(post_mock.call_args.args[1], "TOKEN-123")
+        self.assertEqual(
+            post_mock.call_args.args[2]["players"][0]["player_id"],
+            "studio-a-insta-1",
+        )
+
+    def test_save_local_ui_config_reports_immediate_hub_sync_after_player_removal(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.yaml"
+            existing_config = {
+                "node_id": "studio-a",
+                "node_name": "Studio A",
+                "site_id": "studio-a",
+                "hub_url": "https://pulse.example.com",
+                "agent_token": "TOKEN-123",
+                "poll_interval_seconds": 3,
+                "players": [
+                    {"player_id": "studio-a-insta-1", "playout_type": "insta", "paths": {}, "udp_inputs": []},
+                    {"player_id": "studio-a-insta-2", "playout_type": "insta", "paths": {}, "udp_inputs": []},
+                ],
+            }
+            agent._write_yaml(str(config_path), existing_config)
+
+            payload = {
+                "node_id": "studio-a",
+                "node_name": "Studio A",
+                "site_id": "studio-a",
+                "hub_url": "https://pulse.example.com",
+                "agent_token": "TOKEN-123",
+                "unlock_sensitive_fields": True,
+                "poll_interval_seconds": 3,
+                "players": [
+                    {
+                        "player_id": "studio-a-insta-1",
+                        "playout_type": "insta",
+                        "paths": {"shared_log_dir": "C:\\Insta log", "instance_root": "C:\\Insta\\Settings"},
+                        "udp_inputs": [],
+                    }
+                ],
+            }
+
+            with patch.object(agent, "_runtime_config_path", return_value=str(config_path)):
+                with patch.object(agent, "_ensure_ff_tools") as ensure_ff_tools_mock:
+                    with patch.object(agent, "_apply_runtime_local_config_override") as override_mock:
+                        with patch.object(
+                            agent,
+                            "_sync_node_config_mirror_to_hub",
+                            return_value={
+                                "ok": True,
+                                "removed_player_ids": ["studio-a-insta-2"],
+                                "updated_at": "2026-04-05T12:00:00Z",
+                            },
+                        ) as sync_mock:
+                            config, message = agent._save_local_ui_config(payload)
+
+        ensure_ff_tools_mock.assert_called_once()
+        override_mock.assert_called_once()
+        sync_mock.assert_called_once()
+        self.assertEqual(config["players"][0]["player_id"], "studio-a-insta-1")
+        self.assertIn("removed from the hub immediately", message.lower())
+
+
 if __name__ == "__main__":
     unittest.main()

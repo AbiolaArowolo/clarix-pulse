@@ -50,7 +50,7 @@ this computer boots. You do not need to do anything else.
 STEP 4 - Confirm it is working
   1. Sign in to  https://pulse.clarixtech.com
   2. Click  Dashboard
-  3. Wait up to 30 seconds - your node should appear with a green status
+  3. Wait about 10 to 15 seconds - your node should appear with a green status
 
 If the node shows green, installation is complete.
 
@@ -73,7 +73,7 @@ Nothing appears on the dashboard after 2 minutes:
   - Check this computer has an internet connection
   - Run setup.bat again and choose [1] to reinstall the service
   - Click Yes if Windows asks for Administrator approval
-  - Wait 30 seconds and refresh the dashboard
+  - Wait about 15 seconds and refresh the dashboard
 
 Browser opens but the form is empty:
   - Run setup.bat and choose [2] again
