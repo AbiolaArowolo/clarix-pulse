@@ -21,7 +21,9 @@ STEP 1 - Download and extract
   4. Right-click the zip and choose  Extract All
   5. Extract to:  C:\ClarixPulse
   6. Open the extracted Clarix Pulse folder and confirm these files are there:
-       setup.bat, clarix-agent.exe, discover-node.ps1, config.yaml, README.txt
+       setup.bat, configure.bat, install.bat, uninstall.bat,
+       clarix-agent.exe, discover-node.ps1, show-discovery-summary.ps1,
+       config.yaml, README.txt
 
 STEP 2 - Scan and review temporary local setup
   1. Double-click  setup.bat
@@ -67,6 +69,7 @@ WHAT EACH FILE DOES
   setup.bat          Main entry point. Scan, configure, install, or uninstall.
   config.yaml        Node settings. Contains hub URL and agent token.
   discover-node.ps1  Scans this PC for playout software automatically.
+  show-discovery-summary.ps1  Prints the scan summary used by setup.bat.
   clarix-agent.exe   The Clarix Pulse agent that runs as a Windows service.
   nssm.exe           Windows service manager used during install/uninstall.
   ffmpeg.exe         Stream probe tool used for UDP stream monitoring.

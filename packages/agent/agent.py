@@ -79,7 +79,7 @@ LOG_SELECTOR_KEYS = {
 INSTALL_DIR = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "ClarixPulse", "Agent")
 SERVICE_NAME = "ClarixPulseAgent"
 SERVICE_DISPLAY_NAME = "Pulse Agent"
-DEFAULT_HUB_URL = "https://monitor.example.com"
+DEFAULT_HUB_URL = "https://pulse.clarixtech.com"
 LOCAL_UI_HOST = "127.0.0.1"
 LOCAL_UI_PORT = 3210
 TEMP_LOCAL_UI_PORT_START = 3211
@@ -381,7 +381,7 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
     const DEFAULTS = {
       instaLogDir: "C:\\Program Files\\Indytek\\Insta log",
       instaRoot: "C:\\Program Files\\Indytek\\Insta Playout\\Settings",
-      hubUrl: "https://monitor.example.com"
+      hubUrl: "https://pulse.clarixtech.com"
     };
 
     let state = structuredClone(INITIAL_STATE);

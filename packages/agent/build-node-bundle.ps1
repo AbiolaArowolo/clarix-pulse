@@ -135,7 +135,11 @@ if (-not (Resolve-AgentBinary)) {
 $requiredRepoFiles = @(
     @{ Source = (Resolve-AgentBinary); Target = 'clarix-agent.exe' }
     @{ Source = (Join-Path $PSScriptRoot 'setup.bat'); Target = 'setup.bat' }
+    @{ Source = (Join-Path $PSScriptRoot 'configure.bat'); Target = 'configure.bat' }
+    @{ Source = (Join-Path $PSScriptRoot 'install.bat'); Target = 'install.bat' }
+    @{ Source = (Join-Path $PSScriptRoot 'uninstall.bat'); Target = 'uninstall.bat' }
     @{ Source = (Join-Path $PSScriptRoot 'discover-node.ps1'); Target = 'discover-node.ps1' }
+    @{ Source = (Join-Path $PSScriptRoot 'show-discovery-summary.ps1'); Target = 'show-discovery-summary.ps1' }
     @{ Source = (Join-Path $PSScriptRoot 'README.txt'); Target = 'README.txt' }
 )
 

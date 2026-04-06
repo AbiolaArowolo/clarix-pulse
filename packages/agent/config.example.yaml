@@ -17,7 +17,7 @@ node_id:
 node_name:
 site_id:
 # hub_url may point to a local LAN hub or a remote internet-facing hub
-hub_url: https://monitor.example.com
+hub_url: https://pulse.clarixtech.com
 # Use either agent_token or enrollment_key during setup.
 # If enrollment_key is provided and agent_token is blank, the local UI enrolls this node and saves the returned agent token.
 agent_token:

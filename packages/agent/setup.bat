@@ -49,11 +49,8 @@ if "%CHOICE%"=="5" exit /b 0
 goto MENU
 
 :DETECT_VERSION
-if not defined BUNDLE_VERSION (
-    for %%I in ("%BASE_DIR:~0,-1%") do set "BUNDLE_VERSION=%%~nxI"
-    if /i "%BUNDLE_VERSION:~0,13%"=="clarix-pulse-" set "BUNDLE_VERSION=%BUNDLE_VERSION:~13%"
-)
-
+if not defined BUNDLE_VERSION for %%I in ("%BASE_DIR:~0,-1%") do set "BUNDLE_VERSION=%%~nxI"
+if /i "%BUNDLE_VERSION:~0,13%"=="clarix-pulse-" set "BUNDLE_VERSION=%BUNDLE_VERSION:~13%"
 if not defined BUNDLE_VERSION set "BUNDLE_VERSION=local"
 exit /b 0
 
@@ -156,38 +153,5 @@ if "%ERRORLEVEL%"=="2" (
 exit /b 0
 
 :SHOW_SUMMARY
-set "PULSE_REPORT_PATH=%REPORT_PATH%"
-"%PS_EXE%" -ExecutionPolicy Bypass -NoProfile -Command ^
-    "$rp = $env:PULSE_REPORT_PATH; ^
-     if (-not (Test-Path $rp)) { Write-Host '  (No scan report found)'; exit }; ^
-     try { ^
-       $raw = [System.IO.File]::ReadAllText($rp, (New-Object System.Text.UTF8Encoding $false)); ^
-       $raw = $raw.TrimStart([char]0xFEFF); ^
-       $r   = $raw | ConvertFrom-Json; ^
-       Write-Host ''; ^
-       Write-Host '  -------------------------------------------------'; ^
-       Write-Host ('  Computer : ' + $r.node_name); ^
-       Write-Host ('  Node ID  : ' + $r.node_id); ^
-       Write-Host ('  Hub URL  : ' + $(if ($r.hub_url) { $r.hub_url } else { '(none found)' })); ^
-       $pl = @($r.players); ^
-       Write-Host ('  Players  : ' + $pl.Count + ' detected'); ^
-       Write-Host '  -------------------------------------------------'; ^
-       if ($pl.Count -gt 0) { ^
-         Write-Host ''; ^
-         Write-Host ('  {0,-4} {1,-20} {2,-6} {3}' -f '#', 'Type', 'State', 'Label'); ^
-         Write-Host ('  {0,-4} {1,-20} {2,-6} {3}' -f '----', '--------------------', '------', '-----'); ^
-         for ($i = 0; $i -lt $pl.Count; $i++) { ^
-           $p     = $pl[$i]; ^
-           $lbl   = if ($p.label)   { $p.label }   else { $p.player_id }; ^
-           $state = if ($p.running -eq $true) { 'ON' } elseif ($p.installed -eq $true) { 'idle' } else { 'found' }; ^
-           Write-Host ('  {0,-4} {1,-20} {2,-6} {3}' -f ($i+1), $p.playout_type, $state, $lbl) ^
-         } ^
-       } else { ^
-         Write-Host '  No broadcast software detected automatically.'; ^
-         Write-Host '  You can add players manually in the local setup UI.' ^
-       }; ^
-       Write-Host '  -------------------------------------------------'; ^
-       Write-Host '' ^
-     } catch { Write-Host '  (Could not read scan report)' }"
-set "PULSE_REPORT_PATH="
+"%PS_EXE%" -ExecutionPolicy Bypass -NoProfile -File "%BASE_DIR%show-discovery-summary.ps1" -ReportPath "%REPORT_PATH%"
 exit /b 0
