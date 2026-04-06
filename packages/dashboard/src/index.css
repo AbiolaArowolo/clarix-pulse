@@ -164,6 +164,17 @@
 [data-theme="light"] .text-slate-500 { color: #64748b; }
 [data-theme="light"] .text-slate-600 { color: #475569; }
 
+/* Amber / orange / teal text (light variants invisible on light bg) */
+[data-theme="light"] .text-amber-50,
+[data-theme="light"] .text-amber-100  { color: #92400e; }
+[data-theme="light"] .text-amber-100\/80,
+[data-theme="light"] .text-amber-100\/85 { color: rgba(146, 64, 14, 0.85); }
+[data-theme="light"] .text-amber-300  { color: #b45309; }
+[data-theme="light"] .text-orange-200 { color: #c2410c; }
+[data-theme="light"] .text-teal-200   { color: #0f766e; }
+
+[data-theme="light"] .text-cyan-50,
+[data-theme="light"] .text-cyan-100  { color: #0f766e; }
 [data-theme="light"] .text-cyan-200  { color: #0d9488; }
 [data-theme="light"] .text-cyan-300  { color: #0f766e; }
 [data-theme="light"] .text-cyan-400  { color: #0d9488; }
@@ -174,14 +185,70 @@
 [data-theme="light"] .bg-slate-800 { background-color: #f1f5f9; }
 [data-theme="light"] .bg-slate-700 { background-color: #e2e8f0; }
 
-/* Backgrounds -- opacity variants */
+/* Backgrounds -- opacity variants (slate-950: all card/panel variants -> white) */
+[data-theme="light"] .bg-slate-950\/30,
+[data-theme="light"] .bg-slate-950\/35,
+[data-theme="light"] .bg-slate-950\/40,
+[data-theme="light"] .bg-slate-950\/45,
+[data-theme="light"] .bg-slate-950\/48,
+[data-theme="light"] .bg-slate-950\/50,
+[data-theme="light"] .bg-slate-950\/55,
+[data-theme="light"] .bg-slate-950\/60,
+[data-theme="light"] .bg-slate-950\/62,
+[data-theme="light"] .bg-slate-950\/65,
+[data-theme="light"] .bg-slate-950\/70,
+[data-theme="light"] .bg-slate-950\/72,
+[data-theme="light"] .bg-slate-950\/78,
+[data-theme="light"] .bg-slate-950\/80,
+[data-theme="light"] .bg-slate-950\/90 { background-color: var(--card-bg); }
+
 [data-theme="light"] .bg-slate-950\/82,
 [data-theme="light"] .bg-slate-950\/85 { background-color: var(--header-bg); }
+
+/* Backgrounds -- opacity variants (slate-900) */
+[data-theme="light"] .bg-slate-900\/40,
+[data-theme="light"] .bg-slate-900\/55,
+[data-theme="light"] .bg-slate-900\/58,
+[data-theme="light"] .bg-slate-900\/62,
 [data-theme="light"] .bg-slate-900\/70,
 [data-theme="light"] .bg-slate-900\/75,
 [data-theme="light"] .bg-slate-900\/80 { background-color: rgba(248, 250, 252, 0.95); }
+
+[data-theme="light"] .bg-slate-800\/50,
 [data-theme="light"] .bg-slate-800\/60,
-[data-theme="light"] .bg-slate-800\/50 { background-color: rgba(241, 245, 249, 0.9); }
+[data-theme="light"] .bg-slate-800\/90 { background-color: rgba(241, 245, 249, 0.9); }
+
+/* Amber/warning banner backgrounds (impersonation banner, warning highlights) */
+[data-theme="light"] .bg-amber-400\/10  { background-color: rgba(254, 243, 199, 0.8); }
+[data-theme="light"] .bg-amber-400\/12  { background-color: rgba(254, 243, 199, 0.9); }
+[data-theme="light"] .bg-amber-200\/10  { background-color: rgba(254, 243, 199, 0.6); }
+[data-theme="light"] .bg-amber-500\/10  { background-color: rgba(254, 243, 199, 0.9); }
+[data-theme="light"] .bg-amber-500\/12  { background-color: rgba(254, 243, 199, 0.95); }
+
+/* Cyan/teal accent backgrounds (hint boxes, onboarding buttons, advanced-open button) */
+[data-theme="light"] .bg-cyan-400\/10,
+[data-theme="light"] .bg-cyan-400\/12,
+[data-theme="light"] .bg-cyan-400\/14  { background-color: rgba(204, 251, 241, 0.8); }
+[data-theme="light"] .bg-cyan-500\/8,
+[data-theme="light"] .bg-cyan-500\/10  { background-color: rgba(204, 251, 241, 0.7); }
+
+/* Emerald accent backgrounds (monitoring-enabled button, UDP enabled state) */
+[data-theme="light"] .bg-emerald-500\/8  { background-color: rgba(209, 250, 229, 0.7); }
+[data-theme="light"] .bg-emerald-500\/12 { background-color: rgba(209, 250, 229, 0.85); }
+
+/* Red accent backgrounds (remove/danger action buttons) */
+[data-theme="light"] .bg-red-500\/10 { background-color: rgba(254, 226, 226, 0.8); }
+
+/* Alert/status background variants */
+[data-theme="light"] .bg-red-900\/20,
+[data-theme="light"] .bg-red-900\/40,
+[data-theme="light"] .bg-red-900\/60   { background-color: rgba(254, 242, 242, 0.95); }
+[data-theme="light"] .bg-red-950\/35   { background-color: rgba(254, 242, 242, 0.90); }
+[data-theme="light"] .bg-emerald-900\/15,
+[data-theme="light"] .bg-emerald-900\/20 { background-color: rgba(240, 253, 244, 0.95); }
+[data-theme="light"] .bg-yellow-900\/15,
+[data-theme="light"] .bg-yellow-900\/30 { background-color: rgba(254, 252, 232, 0.95); }
+[data-theme="light"] .bg-orange-900\/15 { background-color: rgba(255, 247, 237, 0.95); }
 
 /* Borders -- opaque */
 [data-theme="light"] .border-slate-900 { border-color: #f1f5f9; }
@@ -212,6 +279,104 @@
 /* Placeholder text */
 [data-theme="light"] .placeholder-slate-500::placeholder { color: #94a3b8; }
 [data-theme="light"] .placeholder-slate-600::placeholder { color: #64748b; }
+
+/* Status badge overrides (300-level colors fail WCAG on light bg) */
+[data-theme="light"] .status-green  { @apply bg-emerald-100 border-emerald-600 text-emerald-700; }
+[data-theme="light"] .status-yellow { @apply bg-yellow-100 border-yellow-600 text-yellow-700; }
+[data-theme="light"] .status-red    { @apply bg-red-100 border-red-600 text-red-700; }
+[data-theme="light"] .status-orange { @apply bg-orange-100 border-orange-600 text-orange-700; }
+[data-theme="light"] .status-gray   { @apply bg-slate-100 border-slate-400 text-slate-600; }
+
+/* Inline badge text colors used in SiteGroup (yellow-300/red-300 on dark bg) */
+[data-theme="light"] .text-yellow-300 { color: #a16207; }
+[data-theme="light"] .text-red-300    { color: #b91c1c; }
+
+/* Toast info variant (cyan-900 bg / cyan-100 text - dark only) */
+[data-theme="light"] .bg-cyan-900\/70  { background-color: rgba(240, 253, 250, 0.95); }
+[data-theme="light"] .border-cyan-500\/40 { border-color: rgba(13, 148, 136, 0.5); }
+[data-theme="light"] .text-cyan-100    { color: #0f766e; }
+
+/* Toast success/error on light */
+[data-theme="light"] .bg-emerald-900\/80 { background-color: rgba(240, 253, 244, 0.95); }
+[data-theme="light"] .text-emerald-100   { color: #065f46; }
+[data-theme="light"] .bg-red-900\/80     { background-color: rgba(255, 241, 242, 0.95); }
+[data-theme="light"] .text-red-100       { color: #991b1b; }
+
+/* -- Premium visual identity: Inter | CSS-token surfaces | accent-aware atmosphere -- */
+
+/* 1. Atmospheric radial-gradient - driven by per-theme CSS variables, not hardcoded colors */
+[data-theme="midnight"] body,
+[data-theme="carbon"] body,
+[data-theme="storm"] body {
+  background:
+    radial-gradient(ellipse 90% 55% at 50% -15%, var(--gradient-tl), transparent),
+    radial-gradient(ellipse 65% 45% at 85% 85%, var(--gradient-tr), transparent),
+    var(--bg-primary);
+}
+
+/* 2. Card depth: 1 px inset highlight simulates light source from above */
+[data-theme="midnight"] .rounded-3xl,
+[data-theme="carbon"] .rounded-3xl,
+[data-theme="storm"] .rounded-3xl {
+  box-shadow: 0 1px 0 0 rgba(255,255,255,0.05) inset, 0 20px 60px rgba(0,0,0,0.3);
+}
+
+/* 3. Subtle hover lift - restrained motion (1 px translate, 15 ms) */
+[data-theme="midnight"] .hover\:border-slate-600:hover,
+[data-theme="carbon"] .hover\:border-slate-600:hover,
+[data-theme="storm"] .hover\:border-slate-600:hover {
+  transform: translateY(-1px);
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 1px 0 0 rgba(255,255,255,0.06) inset;
+}
+
+/* 4. Status badge ring glow - WCAG-safe, restrained */
+.status-green  { box-shadow: 0 0 0 1px rgba(16,185,129,0.3); }
+.status-red    { box-shadow: 0 0 0 1px rgba(239,68,68,0.3); }
+.status-yellow { box-shadow: 0 0 0 1px rgba(234,179,8,0.3); }
+
+/* 5. Inter optical features - cv02/cv03/cv04 improve legibility at small sizes */
+body {
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+/* 6. Accent button glow - uses theme accent variable for all themes */
+[data-theme="midnight"] .bg-cyan-400\/12,
+[data-theme="midnight"] .bg-cyan-500\/8,
+[data-theme="midnight"] .bg-cyan-500\/10 {
+  box-shadow: 0 0 0 1px rgba(20,184,166,0.15), 0 2px 10px rgba(20,184,166,0.1);
+}
+[data-theme="carbon"] .bg-cyan-400\/12,
+[data-theme="carbon"] .bg-cyan-500\/8,
+[data-theme="carbon"] .bg-cyan-500\/10 {
+  box-shadow: 0 0 0 1px rgba(99,102,241,0.2), 0 2px 10px rgba(99,102,241,0.12);
+}
+[data-theme="storm"] .bg-cyan-400\/12,
+[data-theme="storm"] .bg-cyan-500\/8,
+[data-theme="storm"] .bg-cyan-500\/10 {
+  box-shadow: 0 0 0 1px rgba(59,130,246,0.2), 0 2px 10px rgba(59,130,246,0.12);
+}
+
+/* 7. Large-radius consistency - 24-28 px radii on interactive surfaces */
+.rounded-3xl { border-radius: 1.5rem; }   /* 24 px */
+.rounded-\[32px\] { border-radius: 2rem; } /* 32 px - premium card */
+
+/* 8. Sparse purposeful motion - only transform/opacity/color animate, no layout shifts */
+*, *::before, *::after {
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* -- Light theme: auth/landing page background overrides --------------------- */
+
+/* Gradient overlay divs - hidden entirely in light mode */
+[data-theme="light"] .theme-gradient-overlay { display: none; }
+
+/* Dark gradient cards (linear-gradient backgrounds) - map to card-bg in light mode */
+[data-theme="light"] .theme-dark-gradient-card { background: var(--card-bg) !important; }
+
+/* Hardcoded deep-navy backgrounds on auth pages and landing page */
+[data-theme="light"] .bg-\[\#03111f\] { background-color: #f0f9ff; }
+[data-theme="light"] .bg-\[\#08131f\] { background-color: #f0f9ff; }
 
 /* -- Animations --------------------------------------------------------------- */
 

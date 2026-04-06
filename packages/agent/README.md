@@ -39,16 +39,19 @@ Work through every step in order. Do not skip any step.
    C:\ClarixPulse
    ```
 4. Click **Extract**.
-5. Open the folder `C:\ClarixPulse\clarix-pulse-v1.17`. You should see these files inside:
+5. Open the extracted Clarix Pulse folder. You should see these files inside:
    - `setup.bat`
    - `clarix-agent.exe`
    - `discover-node.ps1`
    - `config.yaml`
+   - `BUNDLE-INFO.txt`
    - `nssm.exe`
    - `ffmpeg.exe`
    - `ffprobe.exe`
 
 If you see these files, you are ready for the next step.
+
+`BUNDLE-INFO.txt` shows the exact installer version you downloaded.
 
 ---
 
@@ -57,7 +60,7 @@ If you see these files, you are ready for the next step.
 This step scans your computer for playout software and opens the local Pulse
 setup UI with the detected details pre-filled.
 
-1. Open `C:\ClarixPulse\clarix-pulse-v1.17`.
+1. Open the extracted Clarix Pulse folder.
 2. Double-click `setup.bat`.
    - If Windows asks "Do you want to allow this app to make changes?", click **Yes**.
 3. A menu appears with numbered options. Press **2** and then **Enter**:
@@ -110,7 +113,7 @@ every time this computer boots - you do not need to do anything else.
 ### Nothing appears on the dashboard after 2 minutes
 
 - Check that this computer has a working internet connection.
-- Open `C:\ClarixPulse\clarix-pulse-v1.17` and double-click `setup.bat`.
+- Open the extracted Clarix Pulse folder and double-click `setup.bat`.
 - Choose **1** to re-run the install. If prompted for Administrator approval,
   click Yes.
 - Wait about 15 seconds, then refresh your dashboard.
@@ -135,7 +138,7 @@ Alternatively, use the manual fallback:
 1. In setup.bat, choose option **3** (Scan this computer) to save the report file.
 2. In your dashboard, go to **Onboarding > Remote Setup**.
 3. Click **Upload discovery report** and select
-   `C:\ClarixPulse\clarix-pulse-v1.17\pulse-node-discovery-report.json`.
+   the `pulse-node-discovery-report.json` file from the extracted Clarix Pulse folder.
 
 ### The wrong players were detected
 

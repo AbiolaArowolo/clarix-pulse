@@ -111,16 +111,18 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
               </div>
             </div>
 
-            <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/8 px-4 py-3 text-sm text-slate-300">
-              New account? Start with the onboarding flow, then upload a discovery report to provision the first node.
-              <button
-                type="button"
-                onClick={() => onNavigate('/app/onboarding')}
-                className="ml-3 rounded-full border border-cyan-400/35 bg-cyan-400/12 px-3 py-1 text-xs font-semibold text-cyan-50 transition-colors hover:border-cyan-300"
-              >
-                Open onboarding
-              </button>
-            </div>
+            {sites.length === 0 && (
+              <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/8 px-4 py-3 text-sm text-slate-300">
+                New account? Start with the onboarding flow, then upload a discovery report to provision the first node.
+                <button
+                  type="button"
+                  onClick={() => onNavigate('/app/onboarding')}
+                  className="ml-3 rounded-full border border-cyan-400/35 bg-cyan-400/12 px-3 py-1 text-xs font-semibold text-cyan-50 transition-colors hover:border-cyan-300"
+                >
+                  Open onboarding
+                </button>
+              </div>
+            )}
           </div>
         </section>
 

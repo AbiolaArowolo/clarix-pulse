@@ -1,15 +1,27 @@
 [CmdletBinding()]
 param(
     [string]$RepoRoot = 'D:\monitoring',
-    [string]$BundleRoot = 'D:\monitoring\packages\agent\release\clarix-pulse-v1.17',
+    [string]$BundleRoot = '',
     [string]$ConfigBackupPath = 'D:\monitoring\temp\optimum-config-before-current.yaml'
 )
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
+. (Join-Path $PSScriptRoot 'PulseBundleTools.ps1')
+
 $serviceName = 'ClarixPulseAgent'
 $installDir = Join-Path $env:ProgramData 'ClarixPulse\Agent'
+$releaseRoot = Join-Path $RepoRoot 'packages\agent\release'
+
+if ([string]::IsNullOrWhiteSpace($BundleRoot)) {
+    $latestBundle = Get-PulseLatestReleaseDirectory -ReleaseRoot $releaseRoot -BundleName 'clarix-pulse'
+    if (-not $latestBundle) {
+        throw "No Clarix Pulse release folder found under $releaseRoot"
+    }
+    $BundleRoot = $latestBundle.FullName
+}
+
 $bundleName = Split-Path -Path $BundleRoot -Leaf
 $stagingRoot = Join-Path $RepoRoot 'temp\local-reinstall-current'
 $stagingBundle = Join-Path $stagingRoot ($bundleName + '-install')

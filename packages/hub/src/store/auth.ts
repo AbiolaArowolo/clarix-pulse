@@ -1378,6 +1378,14 @@ export async function getTenantAccessSummary(tenantId: string): Promise<TenantAc
   return row ? rowToTenantSummary(row) : null;
 }
 
+export async function getTenantEnrollmentKey(tenantId: string): Promise<string | null> {
+  const row = await queryOne<{ enrollment_key: string }>(`
+    SELECT enrollment_key FROM tenants WHERE tenant_id = $1
+  `, [tenantId]);
+
+  return row ? row.enrollment_key : null;
+}
+
 export async function updateTenantEnabledState(input: {
   tenantId: string;
   enabled: boolean;

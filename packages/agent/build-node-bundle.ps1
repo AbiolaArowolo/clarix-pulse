@@ -30,6 +30,40 @@ function Ensure-Directory {
     }
 }
 
+function Write-BundleInfoFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$BundleDir,
+        [Parameter(Mandatory = $true)]
+        [string]$BundleName,
+        [string]$VersionLabel,
+        [string]$ConfigPath
+    )
+
+    $releaseName = if ([string]::IsNullOrWhiteSpace($VersionLabel)) {
+        $BundleName
+    } else {
+        "$BundleName-$VersionLabel"
+    }
+
+    $configLabel = if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
+        'config.example.yaml'
+    } else {
+        [System.IO.Path]::GetFileName($ConfigPath)
+    }
+
+    $lines = @(
+        'Clarix Pulse Bundle Info'
+        "Bundle Name: $BundleName"
+        "Version: $(if ([string]::IsNullOrWhiteSpace($VersionLabel)) { 'unversioned' } else { $VersionLabel })"
+        "Release Name: $releaseName"
+        "Built At (UTC): $([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))"
+        "Config Source: $configLabel"
+    )
+
+    [System.IO.File]::WriteAllLines((Join-Path $BundleDir 'BUNDLE-INFO.txt'), $lines)
+}
+
 function Download-File {
     param(
         [string]$Uri,
@@ -187,7 +221,11 @@ try {
         Copy-Item -Path (Join-Path $PSScriptRoot 'config.example.yaml') -Destination $targetConfigPath -Force
     }
 
-    # README.txt is already copied from $requiredRepoFiles - nothing more to generate here
+    Write-BundleInfoFile `
+        -BundleDir $bundleDir `
+        -BundleName $BundleName `
+        -VersionLabel $VersionLabel `
+        -ConfigPath $ConfigPath
 
     if ($Zip) {
         $zipPath = Join-Path $OutputRoot ($effectiveBundleName + '.zip')

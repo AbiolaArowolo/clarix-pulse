@@ -192,7 +192,7 @@ export function InstanceCard({ instance }: Props) {
 
   return (
     <div
-      className={`rounded-2xl border bg-[linear-gradient(180deg,rgba(30,41,59,0.78),rgba(15,23,42,0.95))] p-4 transition-all duration-300 ${borderColorMap[color]} ${glowMap[color]}`}
+      className={`theme-dark-gradient-card rounded-2xl border bg-[linear-gradient(180deg,rgba(30,41,59,0.78),rgba(15,23,42,0.95))] p-4 transition-all duration-300 ${borderColorMap[color]} ${glowMap[color]}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">

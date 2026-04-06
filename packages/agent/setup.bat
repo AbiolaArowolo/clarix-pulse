@@ -5,7 +5,9 @@ title Clarix Pulse | Node Setup
 set "BASE_DIR=%~dp0"
 set "EXE_PATH=%BASE_DIR%clarix-agent.exe"
 set "REPORT_PATH=%BASE_DIR%pulse-node-discovery-report.json"
+set "BUNDLE_INFO_PATH=%BASE_DIR%BUNDLE-INFO.txt"
 set "PS_EXE="
+set "BUNDLE_VERSION="
 
 where pwsh.exe >nul 2>nul
 if not errorlevel 1 set "PS_EXE=pwsh.exe"
@@ -23,11 +25,13 @@ if not exist "%EXE_PATH%" (
     exit /b 1
 )
 
+call :DETECT_VERSION
+
 :MENU
 cls
 echo.
 echo  =====================================================
-echo    CLARIX PULSE  ^|  Node Setup  ^|  v1.17
+echo    CLARIX PULSE  ^|  Node Setup  ^|  %BUNDLE_VERSION%
 echo  =====================================================
 echo.
 echo    [1]  Install Pulse as a Windows service
@@ -44,6 +48,25 @@ if "%CHOICE%"=="3" goto SCAN
 if "%CHOICE%"=="4" goto UNINSTALL
 if "%CHOICE%"=="5" exit /b 0
 goto MENU
+
+:DETECT_VERSION
+if exist "%BUNDLE_INFO_PATH%" (
+    for /f "usebackq tokens=1,* delims=:" %%A in (`findstr /b /c:"Version:" "%BUNDLE_INFO_PATH%"`) do (
+        set "BUNDLE_VERSION=%%B"
+    )
+)
+
+if defined BUNDLE_VERSION (
+    for /f "tokens=* delims= " %%A in ("%BUNDLE_VERSION%") do set "BUNDLE_VERSION=%%A"
+)
+
+if not defined BUNDLE_VERSION (
+    for %%I in ("%BASE_DIR:~0,-1%") do set "BUNDLE_VERSION=%%~nxI"
+    if /i "%BUNDLE_VERSION:~0,13%"=="clarix-pulse-" set "BUNDLE_VERSION=%BUNDLE_VERSION:~13%"
+)
+
+if not defined BUNDLE_VERSION set "BUNDLE_VERSION=local"
+exit /b 0
 
 :INSTALL
 echo.

@@ -274,7 +274,7 @@ export function AlertContactsEditor() {
     });
   };
 
-  const sectionSummary = `${summary.emails} email · ${summary.telegram} telegram · ${summary.phones} phone · last saved ${formatUpdatedAt(updatedAt)}`;
+  const sectionSummary = `${summary.emails} email | ${summary.telegram} telegram | ${summary.phones} phone | last saved ${formatUpdatedAt(updatedAt)}`;
 
   return (
     <CollapsibleSection

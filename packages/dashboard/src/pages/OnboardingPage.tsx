@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { downloadAuthenticatedFile, requestAuthenticatedDownloadLink } from '../lib/downloads';
 
@@ -20,6 +20,19 @@ export function OnboardingPage({
   onNavigate: (pathname: string) => void;
 }) {
   const alertEmail = session.tenant.defaultAlertEmail ?? session.user.email;
+
+  // Auto-redirect to Remote Setup panel when setup.bat opens the onboarding URL
+  // with a #discovery=<base64> hash. React Router strips the hash on navigate,
+  // so we bridge it via sessionStorage before calling onNavigate.
+  useEffect(() => {
+    const match = /[#&]discovery=([A-Za-z0-9+/=]+)/.exec(window.location.hash);
+    if (!match) return;
+    sessionStorage.setItem('_pulse_discovery_b64', match[1]);
+    onNavigate('/app');
+  // onNavigate is stable — safe to omit from deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -31,7 +44,7 @@ export function OnboardingPage({
     setDownloadError(null);
     setDownloading(true);
     try {
-      await downloadAuthenticatedFile('/api/downloads/bundle/windows/latest', 'clarix-pulse-v1.9.zip');
+      await downloadAuthenticatedFile('/api/downloads/bundle/windows/latest', 'clarix-pulse-latest.zip');
     } catch (error) {
       setDownloadError(error instanceof Error ? error.message : 'Failed to download the installer.');
     } finally {
@@ -144,7 +157,7 @@ export function OnboardingPage({
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
-        <div className="rounded-3xl border border-cyan-500/20 bg-[linear-gradient(135deg,rgba(3,15,29,0.96),rgba(8,24,44,0.94)_45%,rgba(21,39,63,0.92))] p-5 shadow-[0_28px_90px_rgba(2,12,27,0.42)]">
+        <div className="theme-dark-gradient-card rounded-3xl border border-cyan-500/20 bg-[linear-gradient(135deg,rgba(3,15,29,0.96),rgba(8,24,44,0.94)_45%,rgba(21,39,63,0.92))] p-5 shadow-[0_28px_90px_rgba(2,12,27,0.42)]">
           <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-cyan-100">Install checklist</h3>
           <div className="mt-4 space-y-3 text-sm leading-6 text-slate-300">
             <p>1. Download the signed-in installer bundle for the Windows node.</p>

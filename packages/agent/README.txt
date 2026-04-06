@@ -20,8 +20,9 @@ STEP 1 - Download and extract
   3. Save the .zip file to your Desktop
   4. Right-click the zip and choose  Extract All
   5. Extract to:  C:\ClarixPulse
-  6. Open C:\ClarixPulse and confirm these files are there:
-       setup.bat, clarix-agent.exe, discover-node.ps1, config.yaml
+  6. Open the extracted Clarix Pulse folder and confirm these files are there:
+       setup.bat, clarix-agent.exe, discover-node.ps1, config.yaml, BUNDLE-INFO.txt
+  7. Open BUNDLE-INFO.txt if you want to confirm the exact installer version
 
 STEP 2 - Scan and review local setup
   1. Double-click  setup.bat

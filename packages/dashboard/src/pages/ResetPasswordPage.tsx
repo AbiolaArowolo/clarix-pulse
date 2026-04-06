@@ -42,7 +42,7 @@ export function ResetPasswordPage({
 
   return (
     <div className="relative min-h-dvh overflow-hidden bg-[#03111f] text-white">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(249,115,22,0.16),transparent_24%),radial-gradient(circle_at_84%_12%,rgba(20,184,166,0.14),transparent_20%),linear-gradient(180deg,#03111f_0%,#071b2b_58%,#0b1322_100%)]" />
+      <div className="theme-gradient-overlay pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(249,115,22,0.16),transparent_24%),radial-gradient(circle_at_84%_12%,rgba(20,184,166,0.14),transparent_20%),linear-gradient(180deg,#03111f_0%,#071b2b_58%,#0b1322_100%)]" />
 
       <div className="relative z-10 mx-auto flex min-h-dvh max-w-5xl items-center justify-center px-4 py-10 sm:px-6">
         <div className="grid w-full max-w-4xl gap-6 lg:grid-cols-[minmax(0,1fr)_440px]">

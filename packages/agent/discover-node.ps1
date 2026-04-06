@@ -914,14 +914,11 @@ function Find-PulseConfigPaths {
         # Beside this script
         (Join-Path $_scriptDir  'config.yaml'),
         (Join-Path (Get-Location) 'config.yaml'),
-        # Common bundle subfolder names beside or above the script
-        (Join-Path $_scriptDir                          'clarix-pulse-v1.17\config.yaml'),
+        # Common bundle roots beside or above the script
         (Join-Path $_scriptDir                          'clarix-pulse\config.yaml'),
-        (Join-Path (Split-Path $_scriptDir -Parent)     'clarix-pulse-v1.17\config.yaml'),
         (Join-Path (Split-Path $_scriptDir -Parent)     'clarix-pulse\config.yaml'),
         (Join-Path (Split-Path $_scriptDir -Parent)     'config.yaml'),
         # Default install-from-url.ps1 destination
-        'C:\pulse-node-bundle\clarix-pulse-v1.17\config.yaml',
         'C:\pulse-node-bundle\clarix-pulse\config.yaml',
         'C:\pulse-node-bundle\config.yaml'
     )

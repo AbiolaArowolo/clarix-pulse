@@ -7,7 +7,10 @@ Uploads hub and dashboard dist files, restarts PM2, and verifies.
 import os
 import sys
 import io
+import re
 import posixpath
+import zipfile
+from pathlib import Path
 import paramiko
 import time
 
@@ -21,6 +24,32 @@ PORT = 22
 
 LOCAL_HUB_DIST = r"D:\monitoring\packages\hub\dist"
 LOCAL_DASHBOARD_DIST = r"D:\monitoring\packages\dashboard\dist"
+LOCAL_RELEASE_ROOT = Path(r"D:\monitoring\packages\agent\release")
+
+
+def parse_bundle_version(name):
+    match = re.search(r"clarix-pulse-v([\d.]+)\.zip$", name)
+    if not match:
+        return (0,)
+    return tuple(int(part) for part in match.group(1).split("."))
+
+
+def resolve_latest_bundle_paths():
+    candidates = sorted(
+        LOCAL_RELEASE_ROOT.glob("clarix-pulse-v*.zip"),
+        key=lambda candidate: parse_bundle_version(candidate.name),
+        reverse=True,
+    )
+    if not candidates:
+        raise FileNotFoundError(f"No installer ZIP found under {LOCAL_RELEASE_ROOT}")
+
+    zip_path = candidates[0]
+    bundle_dir = LOCAL_RELEASE_ROOT / zip_path.stem
+    if not bundle_dir.exists():
+        raise FileNotFoundError(f"Bundle directory not found for {zip_path.name}: {bundle_dir}")
+
+    remote_zip = f"/var/www/clarix-pulse/packages/agent/release/{zip_path.name}"
+    return str(bundle_dir), str(zip_path), remote_zip
 
 
 def safe_print(text):
@@ -78,7 +107,9 @@ def main():
     client.connect(HOST, port=PORT, username=USER, password=PASSWORD, timeout=30)
     print("Connected.")
 
-    # ── Step 1: Discover PM2 hub entry point ──────────────────────────────
+    local_release_dir, local_installer_zip, remote_installer_zip = resolve_latest_bundle_paths()
+
+    # -- Step 1: Discover PM2 hub entry point ---------------------------------
     print("\n" + "=" * 60)
     print("STEP 1: Discover hub entry point")
     print("=" * 60)
@@ -101,8 +132,8 @@ def main():
     remote_hub_dist = None
     for line in pm2_out.splitlines():
         if "script" in line.lower() and "index.js" in line:
-            # Extract path from line like: │ script path    │ /var/www/.../index.js
-            parts = line.split("│")
+            # Extract path from line like: | script path    | /var/www/.../index.js
+            parts = line.split("|")
             for p in parts:
                 p = p.strip()
                 if p.endswith("index.js"):
@@ -123,7 +154,7 @@ def main():
 
     print(f"\nResolved remote hub dist path: {remote_hub_dist}")
 
-    # ── Step 2: Upload hub dist ───────────────────────────────────────────
+    # -- Step 2: Upload hub dist ----------------------------------------------
     print("\n" + "=" * 60)
     print(f"STEP 2: Upload hub dist -> {remote_hub_dist}")
     print("=" * 60)
@@ -145,7 +176,7 @@ def main():
     sftp_upload_dir(sftp, LOCAL_HUB_DIST, remote_hub_dist)
     print("Hub dist upload complete.")
 
-    # ── Step 3: Discover dashboard static path ────────────────────────────
+    # -- Step 3: Discover dashboard static path -------------------------------
     print("\n" + "=" * 60)
     print("STEP 3: Discover dashboard static path")
     print("=" * 60)
@@ -154,7 +185,7 @@ def main():
         "ls /var/www/clarix-pulse/public/ 2>/dev/null | head -10",
         "ls /var/www/clarix-pulse/public/")
     caddy_out, _, _ = ssh_run(client,
-        "cat /etc/caddy/Caddyfile 2>/dev/null | grep -A5 'clarixtech.com'",
+        "cat /etc/caddy/Caddyfile 2>/dev/null | grep -A50 'clarixtech.com'",
         "Caddyfile grep clarixtech.com")
 
     # Determine dashboard static path
@@ -187,7 +218,7 @@ def main():
 
     print(f"\nResolved remote dashboard path: {remote_dashboard}")
 
-    # ── Upload dashboard dist ─────────────────────────────────────────────
+    # -- Upload dashboard dist -------------------------------------------------
     print("\n" + "=" * 60)
     print(f"STEP 3b: Upload dashboard dist -> {remote_dashboard}")
     print("=" * 60)
@@ -208,7 +239,63 @@ def main():
     sftp.close()
     print("Dashboard dist upload complete.")
 
-    # ── Step 4: Restart PM2 and verify ───────────────────────────────────
+    # -- Step 3c: Repack installer ZIP from release folder --------------------
+    print("\n" + "=" * 60)
+    print("STEP 3c: Repack installer ZIP from release folder")
+    print("=" * 60)
+
+    print(f"  packing {local_release_dir} -> {local_installer_zip}")
+    with zipfile.ZipFile(local_installer_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, dirs, files in os.walk(local_release_dir):
+            for fname in files:
+                full = os.path.join(root, fname)
+                arcname = os.path.relpath(full, os.path.dirname(local_release_dir))
+                zf.write(full, arcname)
+    zip_mb = os.path.getsize(local_installer_zip) / 1024 / 1024
+    safe_print(f"  ZIP repacked: {zip_mb:.1f} MB")
+
+    # -- Step 3d: Upload installer ZIP ----------------------------------------
+    print("\n" + "=" * 60)
+    print("STEP 3d: Upload installer ZIP -> " + remote_installer_zip)
+    print("=" * 60)
+
+    sftp = client.open_sftp()
+    remote_zip_dir = posixpath.dirname(remote_installer_zip)
+    try:
+        sftp.stat(remote_zip_dir)
+    except FileNotFoundError:
+        ssh_run(client, f"mkdir -p {remote_zip_dir}", f"mkdir {remote_zip_dir}")
+
+    zip_size_mb = os.path.getsize(local_installer_zip) / 1024 / 1024
+    safe_print(f"  uploading {zip_size_mb:.1f} MB installer ZIP...")
+    sftp.put(local_installer_zip, remote_installer_zip)
+
+    # Also copy to the env-configured downloads dir so PULSE_DOWNLOAD_BUNDLE_PATH env
+    # overrides (if set on the server) also serve the latest version.
+    remote_dl_dir = "/var/lib/clarix-pulse/downloads"
+    zip_basename = posixpath.basename(remote_installer_zip)
+    remote_dl_zip = posixpath.join(remote_dl_dir, zip_basename)
+    try:
+        sftp.stat(remote_dl_dir)
+    except FileNotFoundError:
+        ssh_run(client, f"mkdir -p {remote_dl_dir}", f"mkdir {remote_dl_dir}")
+    safe_print(f"  copying to downloads dir: {remote_dl_zip}")
+    sftp.put(local_installer_zip, remote_dl_zip)
+
+    sftp.close()
+    safe_print("Installer ZIP upload complete.")
+
+    # Update .env.local on VPS to remove stale PULSE_DOWNLOAD_BUNDLE_* overrides
+    # so the auto-find code in downloads.ts takes over.
+    print("\n" + "=" * 60)
+    print("STEP 3e: Remove stale bundle env overrides from .env.local")
+    print("=" * 60)
+    ssh_run(client,
+        "sed -i '/^PULSE_DOWNLOAD_BUNDLE_PATH=/d; /^PULSE_DOWNLOAD_BUNDLE_NAME=/d' "
+        "/var/www/clarix-pulse/.env.local 2>/dev/null; echo 'done'",
+        "Remove stale PULSE_DOWNLOAD_BUNDLE_* from .env.local")
+
+    # -- Step 4: Restart PM2 and verify ---------------------------------------
     print("\n" + "=" * 60)
     print("STEP 4: Restart PM2 and verify")
     print("=" * 60)
@@ -218,7 +305,7 @@ def main():
     ssh_run(client, "pm2 status", "PM2 status")
     ssh_run(client, "pm2 logs clarix-hub --lines 20 --nostream", "PM2 logs (last 20)")
 
-    # ── Step 6: Test live hub API ─────────────────────────────────────────
+    # -- Step 6: Test live hub API --------------------------------------------
     print("\n" + "=" * 60)
     print("STEP 6: Test live hub API")
     print("=" * 60)
@@ -234,6 +321,7 @@ def main():
     print("=" * 60)
     print(f"Hub dist uploaded to:       {remote_hub_dist}")
     print(f"Dashboard dist uploaded to: {remote_dashboard}")
+    print(f"Installer ZIP uploaded to:  {remote_installer_zip}")
     print(f"API response snippet:       {api_out[:200]}")
 
     if "authenticated" in api_out or "{" in api_out:

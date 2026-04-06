@@ -60,7 +60,7 @@ PULSE_THUMBNAIL_DIR=/var/lib/clarix-pulse/thumbnails
 PULSE_ADMIN_EMAILS=you@example.com
 PULSE_ACCESS_KEY_TTL_DAYS=365
 PULSE_PASSWORD_RESET_TTL_MINUTES=60
-PULSE_DOWNLOAD_BUNDLE_NAME=clarix-pulse-v1.17.zip
+PULSE_DOWNLOAD_BUNDLE_NAME=clarix-pulse-v<baseline>.<yyyyMMdd>.<HHmmss>.zip
 PULSE_DOWNLOAD_SIGNING_SECRET=REPLACE_WITH_LONG_RANDOM_SECRET
 PULSE_DOWNLOAD_LINK_TTL_MINUTES=1440
 SMTP_HOST=
@@ -145,11 +145,11 @@ That process now:
 Default stable bundle path used by the deploy helper:
 
 ```text
-/var/lib/clarix-pulse/downloads/clarix-pulse-v1.17.zip
+/var/lib/clarix-pulse/downloads/clarix-pulse-v<baseline>.<yyyyMMdd>.<HHmmss>.zip
+```
 
 If `PULSE_DOWNLOAD_BUNDLE_NAME` is not set, the redeploy helper now auto-picks
 the newest `clarix-pulse-v*.zip` found under `packages/agent/release/`.
-```
 
 ### 2. Start or restart the hub
 

@@ -43,20 +43,20 @@ Important:
 For local development, the hub serves the bundle by default from:
 
 ```text
-packages/agent/release/clarix-pulse-v1.17.zip
+packages/agent/release/clarix-pulse-v<baseline>.<yyyyMMdd>.<HHmmss>.zip
 ```
 
 For the artifact-deployed VPS flow, the deploy helper now syncs the installer bundle to:
 
 ```text
-/var/lib/clarix-pulse/downloads/clarix-pulse-v1.17.zip
+/var/lib/clarix-pulse/downloads/clarix-pulse-v<baseline>.<yyyyMMdd>.<HHmmss>.zip
 ```
 
 Optional override:
 
 ```env
-PULSE_DOWNLOAD_BUNDLE_PATH=/custom/path/clarix-pulse-v1.17.zip
-PULSE_DOWNLOAD_BUNDLE_NAME=clarix-pulse-v1.17.zip
+PULSE_DOWNLOAD_BUNDLE_PATH=/custom/path/clarix-pulse-v<baseline>.<yyyyMMdd>.<HHmmss>.zip
+PULSE_DOWNLOAD_BUNDLE_NAME=clarix-pulse-v<baseline>.<yyyyMMdd>.<HHmmss>.zip
 PULSE_DOWNLOAD_SIGNING_SECRET=REPLACE_WITH_LONG_RANDOM_SECRET
 PULSE_DOWNLOAD_LINK_TTL_MINUTES=1440
 ```

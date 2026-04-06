@@ -12,6 +12,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'PulseBundleTools.ps1')
+
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Path $PSScriptRoot -Parent
 }
@@ -45,20 +47,6 @@ function Load-BundleManifest {
     }
 
     return $manifest
-}
-
-function Get-BundleVersion {
-    param(
-        [Parameter(Mandatory = $true)]
-        [pscustomobject]$Bundle,
-        [string]$DefaultVersion
-    )
-
-    if ($Bundle.PSObject.Properties.Name -contains 'version' -and -not [string]::IsNullOrWhiteSpace([string]$Bundle.version)) {
-        return [string]$Bundle.version
-    }
-
-    return [string]$DefaultVersion
 }
 
 function Get-ReleaseName {
@@ -141,7 +129,7 @@ foreach ($bundle in $manifest.bundles) {
     } else {
         $null
     }
-    $version = Get-BundleVersion -Bundle $bundle -DefaultVersion $defaultVersion
+    $version = Get-PulseBundleVersion -RepoRoot $RepoRoot -Bundle $bundle -DefaultVersion $defaultVersion
     $releaseName = Get-ReleaseName -BundleName ([string]$bundle.bundleName) -Version $version
     $bundlePath = Join-Path $ReleaseRoot $releaseName
     $zipPath = Join-Path $ReleaseRoot ($releaseName + '.zip')

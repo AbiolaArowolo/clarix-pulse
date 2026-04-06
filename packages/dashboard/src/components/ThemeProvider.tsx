@@ -55,13 +55,7 @@ interface ThemeContextValue {
   setTheme: (t: Theme) => void;
 }
 
-const ThemeContext = createContext<ThemeContextValue>({
-  theme: 'midnight',
-  colorMode: 'dark',
-  themeLabel: 'Midnight',
-  cycleTheme: () => undefined,
-  setTheme: () => undefined,
-});
+const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
@@ -113,5 +107,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function useTheme(): ThemeContextValue {
-  return useContext(ThemeContext);
+  const ctx = useContext(ThemeContext);
+  if (!ctx) throw new Error('useTheme must be used within ThemeProvider');
+  return ctx;
 }

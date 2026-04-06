@@ -1,4 +1,4 @@
-import React, { ChangeEvent, useMemo, useState } from 'react';
+import React, { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { CollapsibleSection } from './CollapsibleSection';
 
@@ -311,12 +311,38 @@ export function RemoteSetupPanel() {
   const [handoffLink, setHandoffLink] = useState<InstallHandoffLinkResponse | null>(null);
   const [creatingHandoffLink, setCreatingHandoffLink] = useState(false);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
+  const [discoveryAutoLoaded, setDiscoveryAutoLoaded] = useState(false);
 
   const stats = useMemo(() => ({
     players: form.players.length,
     monitoringOff: form.players.filter((player) => !player.monitoringEnabled).length,
     advancedOpen: form.players.filter((player) => player.advancedOpen).length,
   }), [form.players]);
+
+  useEffect(() => {
+    // Source 1: direct URL hash (setup.bat opened /app directly with #discovery=)
+    const hashMatch = /[#&]discovery=([A-Za-z0-9+/=]+)/.exec(window.location.hash);
+    // Source 2: sessionStorage bridge (OnboardingPage saved it before navigating here)
+    const storedB64 = sessionStorage.getItem('_pulse_discovery_b64');
+    const b64 = hashMatch?.[1] ?? storedB64 ?? null;
+
+    // Clean up both sources immediately
+    if (hashMatch) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+    sessionStorage.removeItem('_pulse_discovery_b64');
+
+    if (!b64) return;
+
+    try {
+      const decoded = atob(b64);
+      setDiscoveryAutoLoaded(true);
+      void autoImportFromText(decoded);
+    } catch {
+      // Ignore decode errors
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const requestHeaders = (contentType = true): HeadersInit => {
     const headers = new Headers();
@@ -446,38 +472,40 @@ export function RemoteSetupPanel() {
     setError(null);
   };
 
-  const importReport = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
+  const autoImportFromText = async (reportText: string, hubUrl?: string) => {
     setImporting(true);
     setError(null);
     setNotice(null);
 
     try {
-      const reportText = await file.text();
       const response = await fetch('/api/config/remote/import-report', {
         method: 'POST',
         headers: requestHeaders(),
         body: JSON.stringify({
           reportText,
-          hubUrl: form.hubUrl || defaultHubUrl(),
+          hubUrl: hubUrl ?? defaultHubUrl(),
         }),
       });
       const payload = await response.json() as RemoteSetupResponse;
       if (!response.ok || !payload.draft) {
         throw new Error(String(payload?.error ?? 'Failed to import discovery report.'));
       }
-
       setForm(draftFromPayload(payload.draft));
       setLastProvision(null);
-      setNotice(`Imported ${file.name}. Review the node details and provision when ready.`);
+      setNotice('Discovery report auto-loaded from setup. Review the details below and provision when ready.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to import discovery report.');
+      setError(err instanceof Error ? err.message : 'Failed to auto-load discovery report.');
     } finally {
       setImporting(false);
-      event.target.value = '';
     }
+  };
+
+  const importReport = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reportText = await file.text();
+    await autoImportFromText(reportText, form.hubUrl || defaultHubUrl());
+    event.target.value = '';
   };
 
   const buildProvisionPayload = (): RemoteSetupDraftPayload => ({
@@ -581,10 +609,11 @@ export function RemoteSetupPanel() {
       id="remote-setup"
       label="Remote Setup"
       badge="SETUP"
-      summary={`Provision nodes from the remote dashboard · ${stats.players} player${stats.players === 1 ? '' : 's'}`}
+      summary={`Provision nodes from the remote dashboard | ${stats.players} player${stats.players === 1 ? '' : 's'}`}
       defaultOpen={false}
+      forceOpen={discoveryAutoLoaded}
     >
-      <div className="overflow-hidden rounded-2xl border border-cyan-500/20 bg-[linear-gradient(135deg,rgba(3,15,29,0.96),rgba(8,24,44,0.94)_45%,rgba(21,39,63,0.92))] shadow-[0_12px_40px_rgba(2,12,27,0.32)]">
+      <div className="theme-dark-gradient-card overflow-hidden rounded-2xl border border-cyan-500/20 bg-[linear-gradient(135deg,rgba(3,15,29,0.96),rgba(8,24,44,0.94)_45%,rgba(21,39,63,0.92))] shadow-[0_12px_40px_rgba(2,12,27,0.32)]">
       <div className="border-b border-cyan-500/15 px-4 py-5 sm:px-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="max-w-3xl">
@@ -723,7 +752,7 @@ export function RemoteSetupPanel() {
               return (
                 <article
                   key={`${player.playerId}-${index}`}
-                  className="rounded-3xl border border-slate-800/80 bg-[linear-gradient(180deg,rgba(12,22,38,0.92),rgba(9,18,31,0.88))] p-4 shadow-[0_16px_50px_rgba(2,12,27,0.18)]"
+                  className="theme-dark-gradient-card rounded-3xl border border-slate-800/80 bg-[linear-gradient(180deg,rgba(12,22,38,0.92),rgba(9,18,31,0.88))] p-4 shadow-[0_16px_50px_rgba(2,12,27,0.18)]"
                 >
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div>

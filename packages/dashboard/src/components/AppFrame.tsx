@@ -189,7 +189,7 @@ export function AppFrame({
                 <button
                   type="button"
                   onClick={cycleTheme}
-                  title={`Theme: ${themeLabel} — click to cycle`}
+                  title={`Theme: ${themeLabel} - click to cycle`}
                   aria-label={`Current theme: ${themeLabel}. Click to change.`}
                   className={`flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${themeBtn}`}
                 >

@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import AdmZip from 'adm-zip';
 import { Request, Response, Router } from 'express';
 import { serializeAgentConfigYaml } from '../config/remoteSetup';
 import { getSessionFromRequest, requireSession } from '../serverAuth';
@@ -8,7 +9,7 @@ import {
   createNodeConfigDownloadLink,
   verifyDownloadToken,
 } from '../services/downloadTokens';
-import { getTenantAccessSummary } from '../store/auth';
+import { getTenantAccessSummary, getTenantEnrollmentKey } from '../store/auth';
 import { getMirroredNodeConfig } from '../store/nodeConfigMirror';
 import { getActiveAgentToken, getNode } from '../store/registry';
 
@@ -17,10 +18,40 @@ const repoRoot = path.resolve(__dirname, '../../../..');
 function resolveBundlePath(): { path: string; fileName: string } {
   const configuredPath = (process.env.PULSE_DOWNLOAD_BUNDLE_PATH ?? '').trim();
   const configuredName = (process.env.PULSE_DOWNLOAD_BUNDLE_NAME ?? '').trim();
-  const bundlePath = configuredPath || path.join(repoRoot, 'packages/agent/release/clarix-pulse-v1.9.zip');
-  const fileName = configuredName || path.basename(bundlePath);
 
-  return { path: bundlePath, fileName };
+  if (configuredPath) {
+    return { path: configuredPath, fileName: configuredName || path.basename(configuredPath) };
+  }
+
+  // Auto-find the latest clarix-pulse-v*.zip using numeric version comparison.
+  // String sort is wrong: "v1.9" > "v1.12" lexicographically. Parse as integers.
+  const releaseDir = path.join(repoRoot, 'packages/agent/release');
+  let bundleFileName = 'clarix-pulse-latest.zip';
+  try {
+    const parseVer = (f: string): number[] => {
+      const m = f.match(/v([\d.]+)\.zip$/);
+      return m ? m[1].split('.').map(Number) : [0];
+    };
+    const zips = fs.readdirSync(releaseDir)
+      .filter(f => /^clarix-pulse-v[\d.]+\.zip$/.test(f))
+      .sort((a, b) => {
+        const va = parseVer(a);
+        const vb = parseVer(b);
+        for (let i = 0; i < Math.max(va.length, vb.length); i++) {
+          const diff = (vb[i] ?? 0) - (va[i] ?? 0);
+          if (diff !== 0) return diff;
+        }
+        return 0;
+      });
+    if (zips.length > 0) bundleFileName = zips[0];
+  } catch {
+    // directory not readable — fall through to the default name
+  }
+
+  return {
+    path: path.join(releaseDir, bundleFileName),
+    fileName: configuredName || bundleFileName,
+  };
 }
 
 function asString(value: unknown, fallback = ''): string {
@@ -268,21 +299,32 @@ export function createDownloadsRouter(): Router {
       return res.status(404).json({ error: 'Installer bundle is not available on this server.' });
     }
 
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="${bundle.fileName}"`);
-    res.setHeader('Cache-Control', 'private, no-store');
+    try {
+      const enrollmentKey = await getTenantEnrollmentKey(auth.tenantId);
+      if (!enrollmentKey) {
+        return res.status(500).json({ error: 'Could not resolve enrollment key for this account.' });
+      }
 
-    const stream = fs.createReadStream(bundle.path);
-    stream.on('error', (error) => {
-      console.error('[downloads] Failed to stream bundle', error);
+      const hubUrl = (process.env.PULSE_HUB_URL ?? '').trim() || 'https://pulse.clarixtech.com';
+      const accountConfig = JSON.stringify({ hubUrl, enrollmentKey }, null, 2);
+
+      const zip = new AdmZip(bundle.path);
+      zip.addFile('pulse-account.json', Buffer.from(accountConfig, 'utf8'));
+      const modifiedBuffer = zip.toBuffer();
+
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${bundle.fileName}"`);
+      res.setHeader('Content-Length', modifiedBuffer.length);
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.end(modifiedBuffer);
+    } catch (error) {
+      console.error('[downloads] Failed to build tenant bundle', error);
       if (!res.headersSent) {
-        res.status(500).json({ error: 'Failed to stream installer bundle.' });
+        res.status(500).json({ error: 'Failed to prepare installer bundle.' });
       } else {
         res.end();
       }
-    });
-
-    stream.pipe(res);
+    }
   });
 
   router.get('/nodes/:nodeId/config.yaml', async (req: Request, res: Response) => {

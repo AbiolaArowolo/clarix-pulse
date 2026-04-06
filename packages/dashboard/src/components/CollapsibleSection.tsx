@@ -6,6 +6,7 @@ interface Props {
   badge?: string;
   summary?: string;
   defaultOpen?: boolean;
+  forceOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
   children: React.ReactNode;
 }
@@ -28,13 +29,17 @@ function writeStoredOpen(key: string, value: boolean): void {
   }
 }
 
-export function CollapsibleSection({ id, label, badge, summary, defaultOpen = true, onOpenChange, children }: Props) {
+export function CollapsibleSection({ id, label, badge, summary, defaultOpen = true, forceOpen, onOpenChange, children }: Props) {
   const storageKey = `clarix-pulse-section-${id}`;
   const [open, setOpen] = useState(() => readStoredOpen(storageKey, defaultOpen));
 
   useEffect(() => {
     writeStoredOpen(storageKey, open);
   }, [open, storageKey]);
+
+  useEffect(() => {
+    if (forceOpen) setOpen(true);
+  }, [forceOpen]);
 
   const toggle = () => {
     const next = !open;

@@ -46,7 +46,7 @@ export function LoginPage({
 
   return (
     <div className="relative min-h-dvh overflow-hidden bg-[#03111f] text-white">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.16),transparent_28%),radial-gradient(circle_at_88%_12%,rgba(34,197,94,0.12),transparent_20%),linear-gradient(180deg,#03111f_0%,#071b2b_56%,#0b1322_100%)]" />
+      <div className="theme-gradient-overlay pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.16),transparent_28%),radial-gradient(circle_at_88%_12%,rgba(34,197,94,0.12),transparent_20%),linear-gradient(180deg,#03111f_0%,#071b2b_56%,#0b1322_100%)]" />
 
       <div className="relative z-10 mx-auto flex min-h-dvh max-w-6xl items-center justify-center px-4 py-10 sm:px-6">
         <div className="grid w-full max-w-5xl gap-6 lg:grid-cols-[minmax(0,1fr)_440px]">
@@ -115,7 +115,7 @@ export function LoginPage({
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/90 px-4 py-3 text-sm uppercase tracking-[0.18em] text-slate-100 outline-none focus:border-cyan-400"
                 />
                 <p className="mt-2 text-xs leading-5 text-slate-500">
-                  Leave blank — your account is active and only email + password are needed.
+                  Leave blank - your account is active and only email + password are needed.
                   Your access key was sent to your registration email as a recovery credential.
                   You can request a new one from Account settings at any time.
                 </p>

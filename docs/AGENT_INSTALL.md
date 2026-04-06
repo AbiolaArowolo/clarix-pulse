@@ -1,7 +1,7 @@
 # Clarix Pulse - Agent Installation Guide
 
 **Document Date**: `2026-04-05 -04:00`  
-**Current Bundle Baseline**: `v1.17`
+**Installer Versioning**: installer bundles are auto-versioned as `clarix-pulse-v<baseline>.<yyyyMMdd>.<HHmmss>.zip`
 
 ## Purpose
 
@@ -23,13 +23,15 @@ Prepared site-specific bundles are no longer part of the supported product path.
 
 ## Supported Artifact
 
-Use:
+Use the latest installer matching:
 
-- [clarix-pulse-v1.17.zip](/D:/monitoring/packages/agent/release/clarix-pulse-v1.17.zip)
+- `clarix-pulse-v*.zip`
 
 Release folder:
 
 - [packages/agent/release](/D:/monitoring/packages/agent/release)
+
+Inside the extracted bundle, open `BUNDLE-INFO.txt` to confirm the exact version you are running.
 
 Every shipped bundle contains:
 
