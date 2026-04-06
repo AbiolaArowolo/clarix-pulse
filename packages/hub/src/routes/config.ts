@@ -545,7 +545,7 @@ export function createConfigRouter(io: SocketServer): Router {
     return res.json({
       settings: await getAlertSettings(req.auth!.tenantId),
       capabilities: {
-        emailDeliveryConfigured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER),
+        emailDeliveryConfigured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
         telegramDeliveryConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN),
         phoneDeliveryConfigured: false,
       },
@@ -587,7 +587,7 @@ export function createConfigRouter(io: SocketServer): Router {
       ok: true,
       settings,
       capabilities: {
-        emailDeliveryConfigured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER),
+        emailDeliveryConfigured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
         telegramDeliveryConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN),
         phoneDeliveryConfigured: false,
       },

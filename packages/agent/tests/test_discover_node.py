@@ -288,6 +288,73 @@ class DiscoverNodeScriptTests(unittest.TestCase):
         report = json.loads(completed.stdout)
         self.assertEqual(report["hub_url"], "https://pulse.clarixtech.com")
 
+    def test_generic_discovery_keeps_same_software_instances_separate_by_command_line(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            bundle_root = temp_root / "bundle"
+            bundle_root.mkdir()
+            program_files = temp_root / "Program Files"
+            program_files_x86 = temp_root / "Program Files (x86)"
+            program_data = temp_root / "ProgramData"
+            airbox_dir = program_files / "PlayBox Neo"
+            airbox_dir.mkdir(parents=True)
+            executable_path = airbox_dir / "AirBox.exe"
+            executable_path.write_text("", encoding="utf-8")
+
+            command = f"""
+& {{
+  $programFiles = '{_ps_quote(program_files)}'
+  $programFilesX86 = '{_ps_quote(program_files_x86)}'
+  $programData = '{_ps_quote(program_data)}'
+  [Environment]::SetEnvironmentVariable('ProgramFiles', $programFiles, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramFiles(x86)', $programFilesX86, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramData', $programData, 'Process')
+  function Get-CimInstance {{
+    [CmdletBinding()]
+    param([string]$ClassName)
+    if ($ClassName -ne 'Win32_Process') {{ return @() }}
+    return @(
+      [pscustomobject]@{{
+        Name='AirBox.exe';
+        ExecutablePath='{_ps_quote(executable_path)}';
+        CommandLine='\"{_ps_quote(executable_path)}\" --channel=1 --service=playout'
+      }},
+      [pscustomobject]@{{
+        Name='AirBox.exe';
+        ExecutablePath='{_ps_quote(executable_path)}';
+        CommandLine='\"{_ps_quote(executable_path)}\" --channel=2 --service=playout'
+      }}
+    )
+  }}
+  & '{_ps_quote(DISCOVERY_SCRIPT)}' -StdOut
+}}
+"""
+            completed = subprocess.run(
+                [
+                    POWERSHELL_EXE,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    command,
+                ],
+                cwd=bundle_root,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+        report = json.loads(completed.stdout)
+        players = [player for player in report["players"] if player["playout_type"] == "playbox_neo"]
+
+        self.assertEqual(len(players), 2)
+        command_line_selectors = {
+            tuple(player.get("process_selectors", {}).get("command_line_contains", []))
+            for player in players
+        }
+        self.assertIn(("--channel=1 --service=playout",), command_line_selectors)
+        self.assertIn(("--channel=2 --service=playout",), command_line_selectors)
+
 
 if __name__ == "__main__":
     unittest.main()

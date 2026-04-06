@@ -597,11 +597,23 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
               <label>Process Names
                 <textarea oninput="PulseUi.updateSelectorList(${playerIndex}, 'process_selectors', 'process_names', this.value)">${escapeHtml(listText(processSelectors.process_names))}</textarea>
               </label>
+              <label>Executable Path Contains
+                <textarea oninput="PulseUi.updateSelectorList(${playerIndex}, 'process_selectors', 'executable_path_contains', this.value)">${escapeHtml(listText(processSelectors.executable_path_contains))}</textarea>
+              </label>
+              <label>Command Line Contains
+                <textarea oninput="PulseUi.updateSelectorList(${playerIndex}, 'process_selectors', 'command_line_contains', this.value)">${escapeHtml(listText(processSelectors.command_line_contains))}</textarea>
+              </label>
               <label>Window Title Contains
                 <textarea oninput="PulseUi.updateSelectorList(${playerIndex}, 'process_selectors', 'window_title_contains', this.value)">${escapeHtml(listText(processSelectors.window_title_contains))}</textarea>
               </label>
               <label>Process Regex
                 <input value="${escapeHtml(processSelectors.process_name_regex || '')}" oninput="PulseUi.updateSelectorValue(${playerIndex}, 'process_selectors', 'process_name_regex', this.value)">
+              </label>
+              <label>Executable Path Regex
+                <input value="${escapeHtml(processSelectors.executable_path_regex || '')}" oninput="PulseUi.updateSelectorValue(${playerIndex}, 'process_selectors', 'executable_path_regex', this.value)">
+              </label>
+              <label>Command Line Regex
+                <input value="${escapeHtml(processSelectors.command_line_regex || '')}" oninput="PulseUi.updateSelectorValue(${playerIndex}, 'process_selectors', 'command_line_regex', this.value)">
               </label>
               <label>Window Title Regex
                 <input value="${escapeHtml(processSelectors.window_title_regex || '')}" oninput="PulseUi.updateSelectorValue(${playerIndex}, 'process_selectors', 'window_title_regex', this.value)">
@@ -677,7 +689,7 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
                 <button type="button" class="${player.advanced_open ? 'primary' : 'toggle-off'}" onclick="PulseUi.toggleAdvanced(${playerIndex})">
                   ${player.advanced_open ? 'Hide advanced' : 'Advanced'}
                 </button>
-                <button type="button" class="danger" ${playerLocked ? 'disabled' : ''} onclick="PulseUi.removePlayer(${playerIndex})">Remove player</button>
+                <button type="button" class="danger" onclick="PulseUi.removePlayer(${playerIndex})">Remove player</button>
               </div>
             </div>
             <div class="grid" style="margin-top:12px;">
@@ -783,10 +795,6 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
         renderPlayers();
       },
       removePlayer(index) {
-        if (playerIdentityLocked(state.players[index])) {
-          showMessage("error", "Unlock sensitive settings to remove an existing player.");
-          return;
-        }
         state.players.splice(index, 1);
         renderPlayers();
       },
@@ -2057,8 +2065,24 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
         raise ValueError("Pulse supports up to 10 players per node.")
 
     existing_players = existing.get("players") if isinstance(existing.get("players"), list) else []
-    if existing_registered and not allow_sensitive_edits and len(players_raw) != len(existing_players):
-        raise ValueError("Unlock sensitive settings to add or remove players.")
+    existing_players_by_id = {
+        _as_str(player.get("player_id")): player
+        for player in existing_players
+        if isinstance(player, dict) and _as_str(player.get("player_id"))
+    }
+    if existing_registered and not allow_sensitive_edits:
+        submitted_existing_ids = [
+            _as_str(raw_player.get("player_id"))
+            for raw_player in players_raw
+            if isinstance(raw_player, dict) and _as_str(raw_player.get("player_id"))
+        ]
+        unexpected_player_ids = [
+            player_id
+            for player_id in submitted_existing_ids
+            if player_id not in existing_players_by_id
+        ]
+        if unexpected_player_ids:
+            raise ValueError("Unlock sensitive settings to add a new player or change player IDs.")
 
     merged_players: list[dict[str, Any]] = []
 
@@ -2077,12 +2101,18 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
         )
         locked_existing_player_id = _as_str(indexed_existing_player.get("player_id"))
         submitted_player_id = _as_str(raw_player.get("player_id"), _default_player_id(node_id, playout_type, index))
-        player_id = locked_existing_player_id if (existing_registered and not allow_sensitive_edits and locked_existing_player_id) else submitted_player_id
+        if existing_registered and not allow_sensitive_edits:
+            existing_player = existing_players_by_id.get(submitted_player_id, indexed_existing_player)
+            player_id = _as_str(existing_player.get("player_id"), submitted_player_id)
+        else:
+            player_id = submitted_player_id
         if not player_id:
             raise ValueError(f"Player {index + 1} needs an ID.")
 
         existing_player = indexed_existing_player
-        if allow_sensitive_edits or not locked_existing_player_id:
+        if existing_registered and not allow_sensitive_edits:
+            existing_player = existing_players_by_id.get(player_id, indexed_existing_player)
+        elif allow_sensitive_edits or not locked_existing_player_id:
             existing_player = next(
                 (
                     player for player in existing_players

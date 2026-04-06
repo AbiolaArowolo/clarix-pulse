@@ -29,6 +29,16 @@ interface AlertMessage {
   html: string;
 }
 
+interface EmailAlertSettingsLike {
+  emailEnabled: boolean;
+  emailRecipients: string[];
+}
+
+interface TelegramAlertSettingsLike {
+  telegramEnabled: boolean;
+  telegramChatIds: string[];
+}
+
 interface AlertChannelDeliveryHealth {
   configured: boolean;
   lastSuccessAt: string | null;
@@ -93,6 +103,24 @@ export function getAlertDeliveryHealth(): Record<AlertChannelName, AlertChannelD
   };
 }
 
+export function shouldSendEmailAlerts(
+  settings: EmailAlertSettingsLike,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return Boolean(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS)
+    && settings.emailEnabled
+    && settings.emailRecipients.length > 0;
+}
+
+export function shouldSendTelegramAlerts(
+  settings: TelegramAlertSettingsLike,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return Boolean(env.TELEGRAM_BOT_TOKEN)
+    && settings.telegramEnabled
+    && settings.telegramChatIds.length > 0;
+}
+
 function normalizeTelegramRecipient(value: string): string {
   return value.trim().replace(/^@+/, '').toLowerCase();
 }
@@ -146,8 +174,7 @@ export async function sendTenantTelegram(tenantId: string, message: string): Pro
   if (!token) return;
 
   const settings = await getAlertSettings(tenantId);
-  if (!settings.telegramEnabled) return;
-  if (settings.telegramChatIds.length === 0) return;
+  if (!shouldSendTelegramAlerts(settings)) return;
 
   const discoveredTargets = await listTelegramTargets(token);
   const targetByUsername = new Map(
@@ -416,17 +443,15 @@ export async function sendTenantEmail(
   body: string,
   html?: string,
 ): Promise<void> {
-  if (!process.env.SMTP_HOST || !process.env.SMTP_USER) return;
-
   const settings = await getAlertSettings(tenantId);
-  if (!settings.emailEnabled) return;
-  if (settings.emailRecipients.length === 0) return;
+  if (!shouldSendEmailAlerts(settings)) return;
+  const fromAddress = process.env.SMTP_FROM ?? process.env.SMTP_USER ?? 'alerts@clarixpulse.local';
 
   try {
     await getTransporter().sendMail({
       from: {
         name: process.env.SMTP_FROM_NAME ?? 'Pulse Alerts',
-        address: process.env.SMTP_FROM ?? process.env.SMTP_USER,
+        address: fromAddress,
       },
       to: settings.emailRecipients.join(', '),
       subject,

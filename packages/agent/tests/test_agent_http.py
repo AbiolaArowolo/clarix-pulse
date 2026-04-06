@@ -123,6 +123,50 @@ class ConfigureBundleCommandTests(unittest.TestCase):
         self.assertEqual(config["agent_token"], "AGENT-TOKEN-123")
         self.assertEqual(config["enrollment_key"], "ENROLL-123")
 
+    def test_normalize_local_ui_submission_allows_removing_existing_player_without_sensitive_unlock(self) -> None:
+        existing = {
+            "node_id": "studio-a",
+            "node_name": "Studio A",
+            "site_id": "studio-a",
+            "hub_url": "https://pulse.example.com",
+            "agent_token": "TOKEN-123",
+            "poll_interval_seconds": 3,
+            "players": [
+                {
+                    "player_id": "studio-a-insta-1",
+                    "playout_type": "insta",
+                    "paths": {"shared_log_dir": "C:\\Insta log", "instance_root": "C:\\Insta\\One"},
+                    "udp_inputs": [],
+                },
+                {
+                    "player_id": "studio-a-insta-2",
+                    "playout_type": "insta",
+                    "paths": {"shared_log_dir": "C:\\Insta log", "instance_root": "C:\\Insta\\Two"},
+                    "udp_inputs": [],
+                },
+            ],
+        }
+        payload = {
+            "node_id": "studio-a",
+            "node_name": "Studio A",
+            "site_id": "studio-a",
+            "hub_url": "https://pulse.example.com",
+            "agent_token": "TOKEN-123",
+            "poll_interval_seconds": 3,
+            "players": [
+                {
+                    "player_id": "studio-a-insta-2",
+                    "playout_type": "insta",
+                    "paths": {"shared_log_dir": "C:\\Insta log", "instance_root": "C:\\Insta\\Two"},
+                    "udp_inputs": [],
+                },
+            ],
+        }
+
+        config = agent._normalize_local_ui_submission(payload, existing)
+
+        self.assertEqual([player["player_id"] for player in config["players"]], ["studio-a-insta-2"])
+
 
 class CycleContextTests(unittest.TestCase):
     def test_build_cycle_shared_context_collects_connectivity_once_and_counts_log_paths(self) -> None:
