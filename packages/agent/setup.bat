@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-title Clarix Pulse | Node Setup
+title Clarix Pulse ^| Node Setup
 
 set "BASE_DIR=%~dp0"
 set "EXE_PATH=%BASE_DIR%clarix-agent.exe"
