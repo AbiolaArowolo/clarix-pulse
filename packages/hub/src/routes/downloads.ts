@@ -54,6 +54,25 @@ function resolveBundlePath(): { path: string; fileName: string } {
   };
 }
 
+export function buildTenantBundleBuffer(input: {
+  bundlePath: string;
+  hubUrl: string;
+  enrollmentKey: string;
+}): Buffer {
+  const accountConfig = JSON.stringify(
+    {
+      hubUrl: input.hubUrl,
+      enrollmentKey: input.enrollmentKey,
+    },
+    null,
+    2,
+  );
+
+  const zip = new AdmZip(input.bundlePath);
+  zip.addFile('pulse-account.json', Buffer.from(accountConfig, 'utf8'));
+  return zip.toBuffer();
+}
+
 function asString(value: unknown, fallback = ''): string {
   if (typeof value === 'string') return value.trim();
   if (typeof value === 'number') return String(value);
@@ -306,11 +325,11 @@ export function createDownloadsRouter(): Router {
       }
 
       const hubUrl = (process.env.PULSE_HUB_URL ?? '').trim() || 'https://pulse.clarixtech.com';
-      const accountConfig = JSON.stringify({ hubUrl, enrollmentKey }, null, 2);
-
-      const zip = new AdmZip(bundle.path);
-      zip.addFile('pulse-account.json', Buffer.from(accountConfig, 'utf8'));
-      const modifiedBuffer = zip.toBuffer();
+      const modifiedBuffer = buildTenantBundleBuffer({
+        bundlePath: bundle.path,
+        hubUrl,
+        enrollmentKey,
+      });
 
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader('Content-Disposition', `attachment; filename="${bundle.fileName}"`);

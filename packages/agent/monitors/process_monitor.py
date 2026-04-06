@@ -31,6 +31,18 @@ _restart_events: Dict[str, Deque[datetime]] = {}
 _last_process_up: Dict[str, bool] = {}
 _prev_cpu_total: Dict[str, float] = {}
 _prev_cpu_ts: Dict[str, datetime] = {}
+_SERVICE_SELECTOR_KEYS = {
+    "service_name",
+    "service_names",
+    "service_name_regex",
+    "service_name_regexes",
+    "service_display_name",
+    "service_display_name_contains",
+    "service_display_name_regex",
+    "service_display_name_regexes",
+    "service_path_contains",
+    "service_path_regex",
+}
 
 
 def _as_list(value: object) -> list[str]:
@@ -110,6 +122,66 @@ def _matches_process_metadata(metadata: dict, selectors: dict, playout_type: str
     return True
 
 
+def _has_service_selectors(selectors: dict) -> bool:
+    for key in _SERVICE_SELECTOR_KEYS:
+        value = selectors.get(key)
+        if isinstance(value, (list, tuple, set)):
+            if any(str(item).strip() for item in value if item is not None):
+                return True
+            continue
+        if _as_text(value).strip():
+            return True
+    return False
+
+
+def _matches_service_metadata(metadata: dict, selectors: dict) -> bool:
+    service_name = _as_text(metadata.get("name")).strip().lower()
+    if not service_name:
+        return False
+
+    configured_names = {value.lower() for value in _as_list(selectors.get("service_names"))}
+    single_name = _as_text(selectors.get("service_name")).strip().lower()
+    if single_name:
+        configured_names.add(single_name)
+    if configured_names and service_name not in configured_names:
+        return False
+
+    name_regexes = [re.compile(pattern, re.IGNORECASE) for pattern in _as_list(selectors.get("service_name_regexes"))]
+    single_name_regex = _as_text(selectors.get("service_name_regex")).strip()
+    if single_name_regex:
+        name_regexes.append(re.compile(single_name_regex, re.IGNORECASE))
+    if name_regexes and not any(regex.search(service_name) for regex in name_regexes):
+        return False
+
+    display_name = _as_text(metadata.get("display_name")).strip()
+    display_name_lower = display_name.lower()
+    display_contains = [value.lower() for value in _as_list(selectors.get("service_display_name_contains"))]
+    single_display = _as_text(selectors.get("service_display_name")).strip().lower()
+    if single_display:
+        display_contains.append(single_display)
+    if display_contains and not any(value in display_name_lower for value in display_contains):
+        return False
+
+    display_regexes = [re.compile(pattern, re.IGNORECASE) for pattern in _as_list(selectors.get("service_display_name_regexes"))]
+    single_display_regex = _as_text(selectors.get("service_display_name_regex")).strip()
+    if single_display_regex:
+        display_regexes.append(re.compile(single_display_regex, re.IGNORECASE))
+    if display_regexes and not any(regex.search(display_name) for regex in display_regexes):
+        return False
+
+    service_path = _as_text(metadata.get("path") or metadata.get("binpath")).strip()
+    service_path_lower = service_path.lower()
+    path_contains = [value.lower() for value in _as_list(selectors.get("service_path_contains"))]
+    if path_contains and not any(value in service_path_lower for value in path_contains):
+        return False
+
+    path_regex = _as_text(selectors.get("service_path_regex")).strip()
+    if path_regex and not re.search(path_regex, service_path, re.IGNORECASE):
+        return False
+
+    return True
+
+
 def _iter_matching_processes(playout_type: str, selectors: dict) -> Iterable[psutil.Process]:
     for proc in psutil.process_iter(["name", "pid", "exe", "cmdline"]):
         try:
@@ -121,6 +193,65 @@ def _iter_matching_processes(playout_type: str, selectors: dict) -> Iterable[psu
             if _matches_process_metadata(metadata, selectors, playout_type):
                 yield proc
         except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+
+def _service_running(metadata: dict) -> bool:
+    status = _as_text(metadata.get("status")).strip().lower()
+    if status:
+        return status == "running"
+
+    started = metadata.get("started")
+    if isinstance(started, bool):
+        return started
+
+    try:
+        return int(metadata.get("pid") or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _read_service_metadata(service: object) -> dict:
+    info = {}
+    try:
+        info = service.as_dict()
+    except Exception:
+        info = {}
+
+    def _call(name: str) -> object:
+        attr = getattr(service, name, None)
+        if callable(attr):
+            try:
+                return attr()
+            except Exception:
+                return None
+        return attr
+
+    return {
+        "name": info.get("name") or _call("name"),
+        "display_name": info.get("display_name") or _call("display_name"),
+        "path": info.get("binpath") or _call("binpath"),
+        "status": info.get("status") or _call("status"),
+        "pid": info.get("pid") or _call("pid"),
+        "started": info.get("started"),
+    }
+
+
+def _iter_matching_services(selectors: dict) -> Iterable[dict]:
+    if not _has_service_selectors(selectors) or not hasattr(psutil, "win_service_iter"):
+        return
+
+    try:
+        services = psutil.win_service_iter()
+    except Exception:
+        return
+
+    for service in services:
+        try:
+            metadata = _read_service_metadata(service)
+            if _matches_service_metadata(metadata, selectors):
+                yield metadata
+        except Exception:
             continue
 
 
@@ -185,7 +316,9 @@ def _total_cpu_seconds(processes: list[psutil.Process]) -> float | None:
 def check(instance_id: str, playout_type: str, selectors: dict | None = None) -> dict:
     selectors = selectors or {}
     matching_processes = list(_iter_matching_processes(playout_type, selectors))
-    process_up = len(matching_processes) > 0
+    matching_services = list(_iter_matching_services(selectors))
+    service_up = any(_service_running(metadata) for metadata in matching_services)
+    process_up = len(matching_processes) > 0 or service_up
 
     if instance_id not in _restart_events:
         _restart_events[instance_id] = deque()
@@ -232,6 +365,7 @@ def check(instance_id: str, playout_type: str, selectors: dict | None = None) ->
 
     return {
         "playout_process_up": 1 if process_up else 0,
+        "playout_service_up": 1 if service_up else 0,
         "playout_window_up": 1 if window_up else 0,
         "restart_events_15m": restart_count,
         "playout_cpu_usage_ratio_poll": round(cpu_usage_ratio_poll, 3) if cpu_usage_ratio_poll is not None else None,

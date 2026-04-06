@@ -355,6 +355,166 @@ class DiscoverNodeScriptTests(unittest.TestCase):
         self.assertIn(("--channel=1 --service=playout",), command_line_selectors)
         self.assertIn(("--channel=2 --service=playout",), command_line_selectors)
 
+    def test_generic_discovery_keeps_service_hosted_instances_separate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            bundle_root = temp_root / "bundle"
+            bundle_root.mkdir()
+            program_files = temp_root / "Program Files"
+            program_files_x86 = temp_root / "Program Files (x86)"
+            program_data = temp_root / "ProgramData"
+            airbox_dir = program_files / "PlayBox Neo"
+            airbox_dir.mkdir(parents=True)
+            executable_path = airbox_dir / "AirBox.exe"
+            executable_path.write_text("", encoding="utf-8")
+
+            command = f"""
+& {{
+  $programFiles = '{_ps_quote(program_files)}'
+  $programFilesX86 = '{_ps_quote(program_files_x86)}'
+  $programData = '{_ps_quote(program_data)}'
+  [Environment]::SetEnvironmentVariable('ProgramFiles', $programFiles, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramFiles(x86)', $programFilesX86, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramData', $programData, 'Process')
+  function Get-CimInstance {{
+    [CmdletBinding()]
+    param([string]$ClassName)
+    if ($ClassName -eq 'Win32_Service') {{
+      return @(
+        [pscustomobject]@{{
+          Name='PlayBoxAirBoxChannel1';
+          DisplayName='PlayBox AirBox Channel 1';
+          PathName='"{_ps_quote(executable_path)}" --channel=1';
+          StartMode='Auto';
+          Started=$true;
+          State='Running';
+          ProcessId=2001
+        }},
+        [pscustomobject]@{{
+          Name='PlayBoxAirBoxChannel2';
+          DisplayName='PlayBox AirBox Channel 2';
+          PathName='"{_ps_quote(executable_path)}" --channel=2';
+          StartMode='Auto';
+          Started=$true;
+          State='Running';
+          ProcessId=2002
+        }}
+      )
+    }}
+    return @()
+  }}
+  function Get-Process {{
+    [CmdletBinding()]
+    param([int[]]$Id)
+    return @(
+      [pscustomobject]@{{ Id = 2001; MainWindowTitle = 'PlayBox AirBox Channel 1' }},
+      [pscustomobject]@{{ Id = 2002; MainWindowTitle = 'PlayBox AirBox Channel 2' }}
+    ) | Where-Object {{ $Id -contains $_.Id }}
+  }}
+  & '{_ps_quote(DISCOVERY_SCRIPT)}' -StdOut
+}}
+"""
+            completed = subprocess.run(
+                [
+                    POWERSHELL_EXE,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    command,
+                ],
+                cwd=bundle_root,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+        report = json.loads(completed.stdout)
+        players = [player for player in report["players"] if player["playout_type"] == "playbox_neo"]
+
+        self.assertEqual(len(players), 2)
+        self.assertEqual(
+            {
+                tuple(player.get("process_selectors", {}).get("service_names", []))
+                for player in players
+            },
+            {
+                ("PlayBoxAirBoxChannel1",),
+                ("PlayBoxAirBoxChannel2",),
+            },
+        )
+        self.assertEqual(
+            {
+                tuple(player.get("process_selectors", {}).get("command_line_contains", []))
+                for player in players
+            },
+            {
+                ("--channel=1",),
+                ("--channel=2",),
+            },
+        )
+
+    def test_generic_discovery_uses_startup_commands_when_process_is_not_running(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            bundle_root = temp_root / "bundle"
+            bundle_root.mkdir()
+            program_files = temp_root / "Program Files"
+            program_files_x86 = temp_root / "Program Files (x86)"
+            program_data = temp_root / "ProgramData"
+            playit_dir = program_files / "PlayIt Software"
+            playit_dir.mkdir(parents=True)
+            executable_path = playit_dir / "PlayItLive.exe"
+            executable_path.write_text("", encoding="utf-8")
+
+            command = f"""
+& {{
+  $programFiles = '{_ps_quote(program_files)}'
+  $programFilesX86 = '{_ps_quote(program_files_x86)}'
+  $programData = '{_ps_quote(program_data)}'
+  [Environment]::SetEnvironmentVariable('ProgramFiles', $programFiles, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramFiles(x86)', $programFilesX86, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramData', $programData, 'Process')
+  function Get-CimInstance {{
+    [CmdletBinding()]
+    param([string]$ClassName)
+    if ($ClassName -eq 'Win32_StartupCommand') {{
+      return @(
+        [pscustomobject]@{{
+          Name='PlayIt Live Channel 1';
+          Command='"{_ps_quote(executable_path)}" --channel=1';
+          Location='HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+        }}
+      )
+    }}
+    return @()
+  }}
+  & '{_ps_quote(DISCOVERY_SCRIPT)}' -StdOut
+}}
+"""
+            completed = subprocess.run(
+                [
+                    POWERSHELL_EXE,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    command,
+                ],
+                cwd=bundle_root,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+        report = json.loads(completed.stdout)
+        players = [player for player in report["players"] if player["playout_type"] == "playit_live"]
+
+        self.assertEqual(len(players), 1)
+        self.assertFalse(players[0]["running"])
+        self.assertEqual(players[0]["process_selectors"]["command_line_contains"], ["--channel=1"])
+        self.assertIn("Startup command", " ".join(players[0]["discovery"]["evidence"]))
+
 
 if __name__ == "__main__":
     unittest.main()

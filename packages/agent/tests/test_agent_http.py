@@ -123,6 +123,35 @@ class ConfigureBundleCommandTests(unittest.TestCase):
         self.assertEqual(config["agent_token"], "AGENT-TOKEN-123")
         self.assertEqual(config["enrollment_key"], "ENROLL-123")
 
+    def test_import_local_ui_state_preloads_enrollment_key_from_uploaded_discovery_data(self) -> None:
+        config, message = agent._import_local_ui_state(
+            "\n".join(
+                [
+                    "node_id: studio-a",
+                    "node_name: Studio A",
+                    "site_id: studio-a",
+                    "hub_url: https://pulse.example.com",
+                    "enrollment_key: ENROLL-ABC-123",
+                    "players:",
+                    "  - player_id: studio-a-playbox-1",
+                    "    playout_type: playbox_neo",
+                    "    paths:",
+                    "      log_path: C:\\ProgramData\\PlayBox\\Logs",
+                    "",
+                ]
+            ),
+            {
+                "node_id": "studio-a",
+                "node_name": "Studio A",
+                "site_id": "studio-a",
+                "players": [],
+            },
+        )
+
+        self.assertEqual(config["enrollment_key"], "ENROLL-ABC-123")
+        self.assertEqual(config["hub_url"], "https://pulse.example.com")
+        self.assertIn("imported", message.lower())
+
     def test_normalize_local_ui_submission_allows_removing_existing_player_without_sensitive_unlock(self) -> None:
         existing = {
             "node_id": "studio-a",
@@ -166,6 +195,36 @@ class ConfigureBundleCommandTests(unittest.TestCase):
         config = agent._normalize_local_ui_submission(payload, existing)
 
         self.assertEqual([player["player_id"] for player in config["players"]], ["studio-a-insta-2"])
+
+    def test_normalize_local_ui_submission_keeps_service_selectors(self) -> None:
+        payload = {
+            "node_id": "studio-a",
+            "node_name": "Studio A",
+            "site_id": "studio-a",
+            "hub_url": "https://pulse.example.com",
+            "enrollment_key": "ENROLL-123",
+            "poll_interval_seconds": 3,
+            "players": [
+                {
+                    "player_id": "studio-a-playbox-1",
+                    "playout_type": "playbox_neo",
+                    "paths": {"log_path": r"C:\ProgramData\PlayBox\Logs"},
+                    "process_selectors": {
+                        "service_names": ["PlayBoxAirBoxChannel1"],
+                        "service_display_name_contains": ["Channel 1"],
+                        "service_path_contains": [r"AirBox.exe"],
+                    },
+                    "udp_inputs": [],
+                }
+            ],
+        }
+
+        config = agent._normalize_local_ui_submission(payload, existing={})
+
+        selectors = config["players"][0]["process_selectors"]
+        self.assertEqual(selectors["service_names"], ["PlayBoxAirBoxChannel1"])
+        self.assertEqual(selectors["service_display_name_contains"], ["Channel 1"])
+        self.assertEqual(selectors["service_path_contains"], [r"AirBox.exe"])
 
 
 class CycleContextTests(unittest.TestCase):

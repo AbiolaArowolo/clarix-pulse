@@ -65,6 +65,16 @@ PROCESS_SELECTOR_KEYS = {
     "window_title_contains",
     "window_title_regex",
     "window_title_regexes",
+    "service_name",
+    "service_names",
+    "service_name_regex",
+    "service_name_regexes",
+    "service_display_name",
+    "service_display_name_contains",
+    "service_display_name_regex",
+    "service_display_name_regexes",
+    "service_path_contains",
+    "service_path_regex",
 }
 
 LOG_SELECTOR_KEYS = {
@@ -617,6 +627,24 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
               </label>
               <label>Window Title Regex
                 <input value="${escapeHtml(processSelectors.window_title_regex || '')}" oninput="PulseUi.updateSelectorValue(${playerIndex}, 'process_selectors', 'window_title_regex', this.value)">
+              </label>
+              <label>Service Names
+                <textarea oninput="PulseUi.updateSelectorList(${playerIndex}, 'process_selectors', 'service_names', this.value)">${escapeHtml(listText(processSelectors.service_names))}</textarea>
+              </label>
+              <label>Service Display Name Contains
+                <textarea oninput="PulseUi.updateSelectorList(${playerIndex}, 'process_selectors', 'service_display_name_contains', this.value)">${escapeHtml(listText(processSelectors.service_display_name_contains))}</textarea>
+              </label>
+              <label>Service Path Contains
+                <textarea oninput="PulseUi.updateSelectorList(${playerIndex}, 'process_selectors', 'service_path_contains', this.value)">${escapeHtml(listText(processSelectors.service_path_contains))}</textarea>
+              </label>
+              <label>Service Name Regex
+                <input value="${escapeHtml(processSelectors.service_name_regex || '')}" oninput="PulseUi.updateSelectorValue(${playerIndex}, 'process_selectors', 'service_name_regex', this.value)">
+              </label>
+              <label>Service Display Regex
+                <input value="${escapeHtml(processSelectors.service_display_name_regex || '')}" oninput="PulseUi.updateSelectorValue(${playerIndex}, 'process_selectors', 'service_display_name_regex', this.value)">
+              </label>
+              <label>Service Path Regex
+                <input value="${escapeHtml(processSelectors.service_path_regex || '')}" oninput="PulseUi.updateSelectorValue(${playerIndex}, 'process_selectors', 'service_path_regex', this.value)">
               </label>
               <label>Log Include Contains
                 <textarea oninput="PulseUi.updateSelectorList(${playerIndex}, 'log_selectors', 'include_contains', this.value)">${escapeHtml(listText(logSelectors.include_contains))}</textarea>
@@ -1418,6 +1446,11 @@ PROCESS_SELECTOR_LIST_UI_KEYS = {
     "command_line_contains",
     "window_title_contains",
     "window_title_regexes",
+    "service_names",
+    "service_name_regexes",
+    "service_display_name_contains",
+    "service_display_name_regexes",
+    "service_path_contains",
 }
 
 PROCESS_SELECTOR_STRING_UI_KEYS = {
@@ -1427,6 +1460,11 @@ PROCESS_SELECTOR_STRING_UI_KEYS = {
     "command_line_regex",
     "window_title",
     "window_title_regex",
+    "service_name",
+    "service_name_regex",
+    "service_display_name",
+    "service_display_name_regex",
+    "service_path_regex",
 }
 
 LOG_SELECTOR_LIST_UI_KEYS = {

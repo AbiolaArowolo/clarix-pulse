@@ -188,6 +188,8 @@ function New-PlayerReport {
 # PROCESS DETECTION
 # ============================================================================
 
+$_broadcastRuntimePatterns = '((^|[^a-z0-9])insta([^a-z0-9]|$)|(^|[^a-z0-9])admax([^a-z0-9]|$)|cinegy|airbox|itx|versio|broadstream|oasys|marina|evertz|xplayout|xtvsuit|youplay|mosart|florical|airboss|wideorbit|woplayout|bitcentral|inception|chyron|streampro|etere|aveco|astra|gallium|casparcg|enco|dad\.exe|zetta|dalet|galaxy|morpheus|vsn|myriad|playout|playoutone|radiodj|playit|zarastudio|zararadio|proppfrexx|sambroad|sam4|spl|mairlist|radioboss|jazler|dinesat|nextkast|nexgen|obs64|obs\.exe|mixxx)'
+
 # Returns names of any running processes whose exe lives inside a given directory
 function Get-ProcessNamesInDirectory {
     param([string]$DirectoryPath)
@@ -204,21 +206,162 @@ function Get-ProcessNamesInDirectory {
     return @(Get-UniqueStrings -Values @($names))
 }
 
+function Get-ExecutablePathFromCommand {
+    param([string]$CommandText)
+    $text = [string]$CommandText
+    if ([string]::IsNullOrWhiteSpace($text)) { return '' }
+
+    $candidate = ''
+    if ($text -match '^\s*"([^"]+?\.exe)"') {
+        $candidate = $matches[1]
+    } elseif ($text -match "^\s*'([^']+?\.exe)'") {
+        $candidate = $matches[1]
+    } elseif ($text -match '^\s*([^\s]+?\.exe)\b') {
+        $candidate = $matches[1]
+    }
+
+    if ([string]::IsNullOrWhiteSpace($candidate)) { return '' }
+    try {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    } catch { }
+    return $candidate.Trim()
+}
+
+function Get-CommandLineSelector {
+    param([string]$CommandText, [string]$ExecutablePath = '')
+    $selector = ([string]$CommandText).Trim()
+    if ([string]::IsNullOrWhiteSpace($selector)) { return '' }
+
+    foreach ($prefix in @(
+        ('"{0}"' -f $ExecutablePath),
+        ("'{0}'" -f $ExecutablePath),
+        $ExecutablePath
+    )) {
+        if ([string]::IsNullOrWhiteSpace($prefix)) { continue }
+        if ($selector.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $selector = $selector.Substring($prefix.Length).Trim()
+            break
+        }
+    }
+
+    return $selector
+}
+
+function Get-WindowTitleForProcessId {
+    param([int]$ProcessId)
+    if ($ProcessId -le 0) { return '' }
+    try {
+        $process = Get-Process -Id $ProcessId -ErrorAction Stop
+        $title = [string]$process.MainWindowTitle
+        if (-not [string]::IsNullOrWhiteSpace($title)) { return $title.Trim() }
+    } catch { }
+    return ''
+}
+
 function Get-RunningProcessHints {
-    $patterns = '(insta|admax|cinegy|airbox|itx|versio|broadstream|oasys|marina|evertz|xplayout|xtvsuit|youplay|mosart|florical|airboss|wideorbit|woplayout|bitcentral|inception|chyron|streampro|etere|aveco|astra|gallium|casparcg|enco|dad\.exe|zetta|dalet|galaxy|morpheus|vsn|myriad|playout|playoutone|radiodj|playit|zarastudio|zararadio|proppfrexx|sambroad|sam4|spl|mairlist|radioboss|jazler|dinesat|nextkast|nexgen|obs64|obs\.exe|mixxx)'
     $rows = New-Object System.Collections.Generic.List[object]
     try {
         $processes = Get-CimInstance Win32_Process -ErrorAction Stop |
-            Where-Object { $_.Name -match $patterns -or $_.ExecutablePath -match $patterns }
+            Where-Object {
+                $_.Name -match $_broadcastRuntimePatterns -or
+                $_.ExecutablePath -match $_broadcastRuntimePatterns -or
+                $_.CommandLine -match $_broadcastRuntimePatterns
+            }
         foreach ($process in $processes) {
+            $processId = 0
+            try { $processId = [int]$process.ProcessId } catch { $processId = 0 }
             [void]$rows.Add([ordered]@{
                 name            = $process.Name
                 executable_path = $process.ExecutablePath
                 command_line    = $process.CommandLine
+                process_id      = $processId
+                window_title    = (Get-WindowTitleForProcessId -ProcessId $processId)
             })
         }
     } catch { return @() }
-    return @($rows | Select-Object -First 25)
+    return @($rows | Select-Object -First 50)
+}
+
+function Get-ServiceHints {
+    $rows = New-Object System.Collections.Generic.List[object]
+    try {
+        $services = Get-CimInstance Win32_Service -ErrorAction Stop |
+            Where-Object {
+                $_.Name -match $_broadcastRuntimePatterns -or
+                $_.DisplayName -match $_broadcastRuntimePatterns -or
+                $_.PathName -match $_broadcastRuntimePatterns
+            }
+        foreach ($service in $services) {
+            $processId = 0
+            try { $processId = [int]$service.ProcessId } catch { $processId = 0 }
+            $pathName = [string]$service.PathName
+            $executablePath = Get-ExecutablePathFromCommand -CommandText $pathName
+            [void]$rows.Add([ordered]@{
+                name            = $service.Name
+                display_name    = $service.DisplayName
+                path_name       = $pathName
+                executable_path = $executablePath
+                process_id      = $processId
+                started         = [bool]$service.Started
+                state           = [string]$service.State
+                start_mode      = [string]$service.StartMode
+                window_title    = (Get-WindowTitleForProcessId -ProcessId $processId)
+            })
+        }
+    } catch { return @() }
+    return @($rows | Select-Object -First 50)
+}
+
+function Get-StartupCommandHints {
+    $rows = New-Object System.Collections.Generic.List[object]
+    try {
+        $commands = Get-CimInstance Win32_StartupCommand -ErrorAction Stop |
+            Where-Object {
+                $_.Name -match $_broadcastRuntimePatterns -or
+                $_.Command -match $_broadcastRuntimePatterns -or
+                $_.Location -match $_broadcastRuntimePatterns
+            }
+        foreach ($command in $commands) {
+            $commandText = [string]$command.Command
+            [void]$rows.Add([ordered]@{
+                name            = $command.Name
+                command         = $commandText
+                location        = [string]$command.Location
+                executable_path = (Get-ExecutablePathFromCommand -CommandText $commandText)
+            })
+        }
+    } catch { return @() }
+    return @($rows | Select-Object -First 50)
+}
+
+function Get-ScheduledTaskHints {
+    $rows = New-Object System.Collections.Generic.List[object]
+    if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) { return @() }
+
+    try {
+        foreach ($task in (Get-ScheduledTask -ErrorAction SilentlyContinue)) {
+            foreach ($action in @($task.Actions)) {
+                $execute = [string]$action.Execute
+                $arguments = [string]$action.Arguments
+                $workingDirectory = [string]$action.WorkingDirectory
+                $commandText = (@($execute, $arguments) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ' '
+                $identity = @($task.TaskName, $task.TaskPath, $execute, $arguments, $workingDirectory) -join ' '
+                if ($identity -notmatch $_broadcastRuntimePatterns) { continue }
+
+                [void]$rows.Add([ordered]@{
+                    task_name         = $task.TaskName
+                    task_path         = $task.TaskPath
+                    command           = $commandText.Trim()
+                    executable_path   = (Get-ExecutablePathFromCommand -CommandText $commandText)
+                    working_directory = $workingDirectory
+                })
+            }
+        }
+    } catch { return @() }
+
+    return @($rows | Select-Object -First 50)
 }
 
 # ============================================================================
@@ -781,7 +924,7 @@ function Get-PlayoutProfileDescriptor {
         @{ id='cinegy_air';        label='Cinegy Air';               match='cinegy';                                                log_keywords=@('cinegy') },
         @{ id='playbox_neo';       label='PlayBox AirBox';           match='playbox|airbox|titlebox';                               log_keywords=@('playbox','airbox') },
         @{ id='grass_valley_itx';  label='Grass Valley iTX';         match='grass[\s\-_]*valley|(^|[^a-z0-9])itx([^a-z0-9]|$)';   log_keywords=@('grass valley','itx') },
-        @{ id='imagine_versio';    label='Imagine Versio';           match='imagine[\s\-_]*communications|versio|nexio';            log_keywords=@('imagine','versio','nexio') },
+        @{ id='imagine_versio';    label='Imagine Versio';           match='imagine[\s\-_]*communications|(^|[^a-z0-9])versio([^a-z0-9]|$)|nexio';            log_keywords=@('imagine','versio','nexio') },
         @{ id='broadstream_oasys'; label='BroadStream OASYS';        match='broadstream|oasys';                                     log_keywords=@('broadstream','oasys') },
         @{ id='pebble_marina';     label='Pebble Marina';            match='pebble[\s\-_]*beach|marina';                            log_keywords=@('pebble','marina') },
         @{ id='evertz_streampro';  label='Evertz StreamPro';         match='evertz|streampro|overture';                             log_keywords=@('evertz','streampro','overture') },
@@ -834,7 +977,7 @@ function Get-PlayoutProfileDescriptorById {
         'cinegy_air'        = @{ id='cinegy_air';        label='Cinegy Air';              match='cinegy';                                               log_keywords=@('cinegy') }
         'playbox_neo'       = @{ id='playbox_neo';       label='PlayBox AirBox';          match='playbox|airbox';                                       log_keywords=@('playbox','airbox') }
         'grass_valley_itx'  = @{ id='grass_valley_itx';  label='Grass Valley iTX';        match='grass[\s\-_]*valley|(^|[^a-z0-9])itx([^a-z0-9]|$)';  log_keywords=@('grass valley','itx') }
-        'imagine_versio'    = @{ id='imagine_versio';    label='Imagine Versio';          match='imagine|versio';                                       log_keywords=@('imagine','versio') }
+        'imagine_versio'    = @{ id='imagine_versio';    label='Imagine Versio';          match='imagine|(^|[^a-z0-9])versio([^a-z0-9]|$)';           log_keywords=@('imagine','versio') }
         'broadstream_oasys' = @{ id='broadstream_oasys'; label='BroadStream OASYS';       match='broadstream|oasys';                                    log_keywords=@('broadstream','oasys') }
         'pebble_marina'     = @{ id='pebble_marina';     label='Pebble Marina';           match='pebble|marina';                                        log_keywords=@('pebble','marina') }
         'evertz_streampro'  = @{ id='evertz_streampro';  label='Evertz StreamPro';        match='evertz|streampro|overture';                            log_keywords=@('evertz','streampro','overture') }
@@ -889,63 +1032,292 @@ function Get-ProfileLogHint {
     return ''
 }
 
+function Get-NearbyConfigHint {
+    param([string]$ExecutablePath)
+    if ([string]::IsNullOrWhiteSpace($ExecutablePath) -or -not (Test-Path -LiteralPath $ExecutablePath -PathType Leaf)) { return '' }
+    $searchRoots = Get-UniqueStrings -Values @(
+        (Split-Path -Path $ExecutablePath -Parent),
+        (Split-Path -Path (Split-Path -Path $ExecutablePath -Parent) -Parent),
+        (Split-Path -Path (Split-Path -Path (Split-Path -Path $ExecutablePath -Parent) -Parent) -Parent)
+    )
+    $configDirNames = @('config','configs','configuration','settings','profiles','channels','data')
+    $configFileFilters = @('*.ini','*.cfg','*.xml','*.json','*.db','*.sqlite')
+    foreach ($root in $searchRoots) {
+        if ([string]::IsNullOrWhiteSpace($root) -or -not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+        foreach ($dirName in $configDirNames) {
+            $directCandidate = Join-Path $root $dirName
+            if (Test-Path -LiteralPath $directCandidate -PathType Container) {
+                return (Resolve-Path -LiteralPath $directCandidate).Path
+            }
+            foreach ($nested in (Get-SafeDirectories -Path $root -Filter $dirName -Recurse | Select-Object -First 5)) {
+                return $nested.FullName
+            }
+        }
+        foreach ($filter in $configFileFilters) {
+            $configFile = Get-SafeFiles -Path $root -Filter $filter -Recurse | Select-Object -First 1
+            if ($configFile) { return $configFile.FullName }
+        }
+    }
+    return ''
+}
+
+function Get-ListSignature {
+    param([object]$Value)
+    if ($null -eq $Value) { return '' }
+    if ($Value -is [System.Collections.IEnumerable] -and -not ($Value -is [string])) {
+        $items = @($Value | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+        return ($items -join ';')
+    }
+    return ([string]$Value).Trim().ToLowerInvariant()
+}
+
+function Get-PlayerIdentitySignature {
+    param([object]$Player)
+    $selectors = if ($Player.process_selectors) { $Player.process_selectors } else { @{} }
+    $paths = if ($Player.paths) { $Player.paths } else { @{} }
+    $parts = @(
+        ([string]$Player.playout_type).Trim().ToLowerInvariant(),
+        (Get-ListSignature -Value $selectors['service_names']),
+        (Get-ListSignature -Value $selectors['service_path_contains']),
+        (Get-ListSignature -Value $selectors['command_line_contains']),
+        (Get-ListSignature -Value $selectors['window_title_contains']),
+        (Get-ListSignature -Value $selectors['executable_path_contains']),
+        (Get-ListSignature -Value $paths['install_dir']),
+        (Get-ListSignature -Value $paths['executable'])
+    )
+    if ((@($parts | Select-Object -Skip 1 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })).Count -eq 0) {
+        $parts += (Get-ListSignature -Value $selectors['process_names'])
+    }
+    return ($parts -join '|')
+}
+
+function Get-DedupedPlayers {
+    param([object[]]$Players)
+    $deduped = New-Object System.Collections.Generic.List[object]
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($player in @($Players)) {
+        $signature = Get-PlayerIdentitySignature -Player $player
+        if ([string]::IsNullOrWhiteSpace($signature)) {
+            $signature = [string]$player.player_id
+        }
+        if ($seen.Add($signature)) {
+            [void]$deduped.Add($player)
+        }
+    }
+    return @($deduped | ForEach-Object { $_ })
+}
+
 function Find-GenericProfilePlayers {
     param([string]$NodeId, [int]$StartIndex = 0, [string]$PlayoutHint = 'auto')
-    $players          = New-Object System.Collections.Generic.List[object]
-    $runningProcesses = @(Get-RunningProcessHints)
-    $logHints         = @(Get-GenericLogHints)
-    $seen             = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-    $profileCounts    = @{}
-    $nextIndex        = $StartIndex
-    $hintDescriptor   = if ($PlayoutHint -and $PlayoutHint -ne 'auto') { Get-PlayoutProfileDescriptorById -PlayoutType $PlayoutHint } else { $null }
+    $players            = New-Object System.Collections.Generic.List[object]
+    $runningProcesses   = @(Get-RunningProcessHints)
+    $serviceHints       = @(Get-ServiceHints)
+    $startupHints       = @(Get-StartupCommandHints)
+    $scheduledTaskHints = @(Get-ScheduledTaskHints)
+    $logHints           = @(Get-GenericLogHints)
+    $seen               = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $profileCounts      = @{}
+    $nextIndex          = $StartIndex
+    $hintDescriptor     = if ($PlayoutHint -and $PlayoutHint -ne 'auto') { Get-PlayoutProfileDescriptorById -PlayoutType $PlayoutHint } else { $null }
 
     foreach ($process in $runningProcesses) {
-        $name           = [string]$process.name
+        $name = [string]$process.name
         $executablePath = [string]$process.executable_path
-        $commandLine    = [string]$process.command_line
-        $identityText   = @($name, $executablePath, $commandLine) -join ' '
-        $descriptor     = Get-PlayoutProfileDescriptor -Text $identityText
+        $commandLine = [string]$process.command_line
+        $windowTitle = [string]$process.window_title
+        $identityText = @($name, $executablePath, $commandLine, $windowTitle) -join ' '
+        $descriptor = Get-PlayoutProfileDescriptor -Text $identityText
         if ($null -eq $descriptor -and $hintDescriptor) { $descriptor = $hintDescriptor }
-        if ($null -eq $descriptor) { continue }
-        if ($descriptor.id -in @('insta','admax')) { continue }
+        if ($null -eq $descriptor -or $descriptor.id -in @('insta','admax')) { continue }
 
-        $dedupeSource = if ($commandLine) { $commandLine } elseif ($executablePath) { $executablePath } else { $name }
+        $commandLineSelector = Get-CommandLineSelector -CommandText $commandLine -ExecutablePath $executablePath
+        $dedupeSource = if ($commandLineSelector) { "proc:$commandLineSelector" } elseif ($windowTitle) { "proc:$windowTitle" } elseif ($executablePath) { "proc:$executablePath" } else { "proc:$name" }
         $dedupeKey = '{0}|{1}' -f $descriptor.id, $dedupeSource
         if (-not $seen.Add($dedupeKey)) { continue }
 
         if ($profileCounts.ContainsKey($descriptor.id)) { $profileCounts[$descriptor.id] += 1 } else { $profileCounts[$descriptor.id] = 1 }
         $labelNumber = $profileCounts[$descriptor.id]
-        $matchedLog  = Get-ProfileLogHint -Descriptor $descriptor -LogHints $logHints -ExecutablePath $executablePath
-        $commandLineSelector = ''
-        if ($commandLine) {
-            $commandLineSelector = $commandLine.Trim()
-            if ($executablePath) {
-                $quotedExecutable = ('"{0}"' -f $executablePath)
-                if ($commandLineSelector.ToLowerInvariant().StartsWith($quotedExecutable.ToLowerInvariant())) {
-                    $commandLineSelector = $commandLineSelector.Substring($quotedExecutable.Length).Trim()
-                } elseif ($commandLineSelector.ToLowerInvariant().StartsWith($executablePath.ToLowerInvariant())) {
-                    $commandLineSelector = $commandLineSelector.Substring($executablePath.Length).Trim()
-                }
-            }
-        }
+        $matchedLog = Get-ProfileLogHint -Descriptor $descriptor -LogHints $logHints -ExecutablePath $executablePath
+        $configHint = Get-NearbyConfigHint -ExecutablePath $executablePath
+        $installDir = ''
+        if ($executablePath) { $installDir = Split-Path -Path $executablePath -Parent }
 
         $evidence = New-Object System.Collections.Generic.List[string]
-        if ($name)           { [void]$evidence.Add("Running process detected: $name") }
+        if ($name) { [void]$evidence.Add("Running process detected: $name") }
         if ($executablePath) { [void]$evidence.Add("Executable path: $executablePath") }
         if ($commandLineSelector) { [void]$evidence.Add("Command line selector: $commandLineSelector") }
-        if ($matchedLog)     { [void]$evidence.Add("Likely log folder found at $matchedLog") }
+        if ($windowTitle) { [void]$evidence.Add("Window title: $windowTitle") }
+        if ($matchedLog) { [void]$evidence.Add("Likely log folder found at $matchedLog") }
+        if ($configHint) { [void]$evidence.Add("Nearby config hint: $configHint") }
 
         $processSelectors = @{}
         if ($name) { $processSelectors.process_names = @($name) }
         if ($executablePath) { $processSelectors.executable_path_contains = @($executablePath) }
         if ($commandLineSelector) { $processSelectors.command_line_contains = @($commandLineSelector) }
+        if ($windowTitle -and -not $commandLineSelector) { $processSelectors.window_title_contains = @($windowTitle) }
 
-        $confidence = if ($matchedLog) { 0.72 } else { 0.61 }
-        if ($descriptor.id -eq 'generic_windows') { $confidence = if ($matchedLog) { 0.58 } else { 0.46 } }
+        $paths = @{}
+        if ($matchedLog) { $paths.log_path = $matchedLog }
+        if ($installDir) { $paths.install_dir = $installDir }
+        if ($configHint) { $paths.config_path = $configHint }
 
-        [void]$players.Add((New-PlayerReport -NodeId $NodeId -Index $nextIndex -PlayoutType $descriptor.id -Label ('{0} {1}' -f $descriptor.label, $labelNumber) -Paths @{
-            log_path = $matchedLog
-        } -ProcessSelectors $processSelectors -LogSelectors @{} -Evidence @($evidence) -Confidence $confidence))
+        $confidence = if ($matchedLog -or $configHint) { 0.74 } else { 0.62 }
+        if ($descriptor.id -eq 'generic_windows') { $confidence = if ($matchedLog -or $configHint) { 0.6 } else { 0.47 } }
+
+        [void]$players.Add((New-PlayerReport -NodeId $NodeId -Index $nextIndex -PlayoutType $descriptor.id -Label ('{0} {1}' -f $descriptor.label, $labelNumber) -Paths $paths -ProcessSelectors $processSelectors -LogSelectors @{} -Evidence @($evidence) -Confidence $confidence -Running $true))
+        $nextIndex += 1
+    }
+
+    foreach ($service in $serviceHints) {
+        $serviceName = [string]$service.name
+        $displayName = [string]$service.display_name
+        $pathName = [string]$service.path_name
+        $executablePath = [string]$service.executable_path
+        $windowTitle = [string]$service.window_title
+        $identityText = @($serviceName, $displayName, $pathName, $executablePath, $windowTitle) -join ' '
+        $descriptor = Get-PlayoutProfileDescriptor -Text $identityText
+        if ($null -eq $descriptor -and $hintDescriptor) { $descriptor = $hintDescriptor }
+        if ($null -eq $descriptor -or $descriptor.id -in @('insta','admax')) { continue }
+
+        $commandLineSelector = Get-CommandLineSelector -CommandText $pathName -ExecutablePath $executablePath
+        $dedupeSource = if ($serviceName) { "svc:$serviceName" } elseif ($commandLineSelector) { "svc:$commandLineSelector" } elseif ($executablePath) { "svc:$executablePath" } else { "svc:$displayName" }
+        $dedupeKey = '{0}|{1}' -f $descriptor.id, $dedupeSource
+        if (-not $seen.Add($dedupeKey)) { continue }
+
+        if ($profileCounts.ContainsKey($descriptor.id)) { $profileCounts[$descriptor.id] += 1 } else { $profileCounts[$descriptor.id] = 1 }
+        $labelNumber = $profileCounts[$descriptor.id]
+        $matchedLog = Get-ProfileLogHint -Descriptor $descriptor -LogHints $logHints -ExecutablePath $executablePath
+        $configHint = Get-NearbyConfigHint -ExecutablePath $executablePath
+        $installDir = ''
+        if ($executablePath) { $installDir = Split-Path -Path $executablePath -Parent }
+
+        $evidence = New-Object System.Collections.Generic.List[string]
+        if ($serviceName) { [void]$evidence.Add("Windows service detected: $serviceName") }
+        if ($displayName) { [void]$evidence.Add("Service display name: $displayName") }
+        if ($pathName) { [void]$evidence.Add("Service path: $pathName") }
+        if ($commandLineSelector) { [void]$evidence.Add("Command line selector: $commandLineSelector") }
+        if ($windowTitle) { [void]$evidence.Add("Window title: $windowTitle") }
+        if ($service.state) { [void]$evidence.Add("Service state: $($service.state)") }
+        if ($service.start_mode) { [void]$evidence.Add("Service start mode: $($service.start_mode)") }
+        if ($matchedLog) { [void]$evidence.Add("Likely log folder found at $matchedLog") }
+        if ($configHint) { [void]$evidence.Add("Nearby config hint: $configHint") }
+
+        $processSelectors = @{}
+        if ($serviceName) { $processSelectors.service_names = @($serviceName) }
+        if ($displayName) { $processSelectors.service_display_name_contains = @($displayName) }
+        if ($pathName) { $processSelectors.service_path_contains = @($pathName) }
+        if ($executablePath) {
+            $processSelectors.executable_path_contains = @($executablePath)
+            $leafName = Split-Path -Path $executablePath -Leaf
+            if ($leafName) { $processSelectors.process_names = @($leafName) }
+        }
+        if ($commandLineSelector) { $processSelectors.command_line_contains = @($commandLineSelector) }
+        if ($windowTitle -and -not $commandLineSelector) { $processSelectors.window_title_contains = @($windowTitle) }
+
+        $paths = @{}
+        if ($matchedLog) { $paths.log_path = $matchedLog }
+        if ($installDir) { $paths.install_dir = $installDir }
+        if ($configHint) { $paths.config_path = $configHint }
+
+        $running = $false
+        if ($service.started) { $running = $true }
+        if (-not $running -and $service.state -match 'running') { $running = $true }
+        $confidence = if ($running) { 0.83 } elseif ($matchedLog -or $configHint) { 0.71 } else { 0.64 }
+
+        [void]$players.Add((New-PlayerReport -NodeId $NodeId -Index $nextIndex -PlayoutType $descriptor.id -Label ('{0} {1}' -f $descriptor.label, $labelNumber) -Paths $paths -ProcessSelectors $processSelectors -LogSelectors @{} -Evidence @($evidence) -Confidence $confidence -Running $running))
+        $nextIndex += 1
+    }
+
+    foreach ($startup in $startupHints) {
+        $name = [string]$startup.name
+        $commandText = [string]$startup.command
+        $executablePath = [string]$startup.executable_path
+        $identityText = @($name, $commandText, $startup.location, $executablePath) -join ' '
+        $descriptor = Get-PlayoutProfileDescriptor -Text $identityText
+        if ($null -eq $descriptor -and $hintDescriptor) { $descriptor = $hintDescriptor }
+        if ($null -eq $descriptor -or $descriptor.id -in @('insta','admax')) { continue }
+
+        $commandLineSelector = Get-CommandLineSelector -CommandText $commandText -ExecutablePath $executablePath
+        $dedupeSource = if ($commandLineSelector) { "startup:$commandLineSelector" } elseif ($name) { "startup:$name" } else { "startup:$executablePath" }
+        $dedupeKey = '{0}|{1}' -f $descriptor.id, $dedupeSource
+        if (-not $seen.Add($dedupeKey)) { continue }
+
+        if ($profileCounts.ContainsKey($descriptor.id)) { $profileCounts[$descriptor.id] += 1 } else { $profileCounts[$descriptor.id] = 1 }
+        $labelNumber = $profileCounts[$descriptor.id]
+        $matchedLog = Get-ProfileLogHint -Descriptor $descriptor -LogHints $logHints -ExecutablePath $executablePath
+        $configHint = Get-NearbyConfigHint -ExecutablePath $executablePath
+        $installDir = ''
+        if ($executablePath) { $installDir = Split-Path -Path $executablePath -Parent }
+
+        $evidence = New-Object System.Collections.Generic.List[string]
+        if ($name) { [void]$evidence.Add("Startup command detected: $name") }
+        if ($commandText) { [void]$evidence.Add("Startup command line: $commandText") }
+        if ($startup.location) { [void]$evidence.Add("Startup location: $($startup.location)") }
+        if ($matchedLog) { [void]$evidence.Add("Likely log folder found at $matchedLog") }
+        if ($configHint) { [void]$evidence.Add("Nearby config hint: $configHint") }
+
+        $processSelectors = @{}
+        if ($executablePath) {
+            $processSelectors.executable_path_contains = @($executablePath)
+            $leafName = Split-Path -Path $executablePath -Leaf
+            if ($leafName) { $processSelectors.process_names = @($leafName) }
+        }
+        if ($commandLineSelector) { $processSelectors.command_line_contains = @($commandLineSelector) }
+
+        $paths = @{}
+        if ($matchedLog) { $paths.log_path = $matchedLog }
+        if ($installDir) { $paths.install_dir = $installDir }
+        if ($configHint) { $paths.config_path = $configHint }
+
+        $confidence = if ($matchedLog -or $configHint) { 0.68 } else { 0.57 }
+        [void]$players.Add((New-PlayerReport -NodeId $NodeId -Index $nextIndex -PlayoutType $descriptor.id -Label ('{0} {1}' -f $descriptor.label, $labelNumber) -Paths $paths -ProcessSelectors $processSelectors -LogSelectors @{} -Evidence @($evidence) -Confidence $confidence -Running $false))
+        $nextIndex += 1
+    }
+
+    foreach ($taskHint in $scheduledTaskHints) {
+        $taskName = [string]$taskHint.task_name
+        $commandText = [string]$taskHint.command
+        $executablePath = [string]$taskHint.executable_path
+        $identityText = @($taskName, $taskHint.task_path, $commandText, $executablePath) -join ' '
+        $descriptor = Get-PlayoutProfileDescriptor -Text $identityText
+        if ($null -eq $descriptor -and $hintDescriptor) { $descriptor = $hintDescriptor }
+        if ($null -eq $descriptor -or $descriptor.id -in @('insta','admax')) { continue }
+
+        $commandLineSelector = Get-CommandLineSelector -CommandText $commandText -ExecutablePath $executablePath
+        $dedupeSource = if ($commandLineSelector) { "task:$commandLineSelector" } elseif ($taskName) { "task:$taskName" } else { "task:$executablePath" }
+        $dedupeKey = '{0}|{1}' -f $descriptor.id, $dedupeSource
+        if (-not $seen.Add($dedupeKey)) { continue }
+
+        if ($profileCounts.ContainsKey($descriptor.id)) { $profileCounts[$descriptor.id] += 1 } else { $profileCounts[$descriptor.id] = 1 }
+        $labelNumber = $profileCounts[$descriptor.id]
+        $matchedLog = Get-ProfileLogHint -Descriptor $descriptor -LogHints $logHints -ExecutablePath $executablePath
+        $configHint = Get-NearbyConfigHint -ExecutablePath $executablePath
+        $installDir = ''
+        if ($executablePath) { $installDir = Split-Path -Path $executablePath -Parent }
+
+        $evidence = New-Object System.Collections.Generic.List[string]
+        if ($taskName) { [void]$evidence.Add("Scheduled task detected: $taskName") }
+        if ($taskHint.task_path) { [void]$evidence.Add("Task path: $($taskHint.task_path)") }
+        if ($commandText) { [void]$evidence.Add("Task command line: $commandText") }
+        if ($taskHint.working_directory) { [void]$evidence.Add("Task working directory: $($taskHint.working_directory)") }
+        if ($matchedLog) { [void]$evidence.Add("Likely log folder found at $matchedLog") }
+        if ($configHint) { [void]$evidence.Add("Nearby config hint: $configHint") }
+
+        $processSelectors = @{}
+        if ($executablePath) {
+            $processSelectors.executable_path_contains = @($executablePath)
+            $leafName = Split-Path -Path $executablePath -Leaf
+            if ($leafName) { $processSelectors.process_names = @($leafName) }
+        }
+        if ($commandLineSelector) { $processSelectors.command_line_contains = @($commandLineSelector) }
+
+        $paths = @{}
+        if ($matchedLog) { $paths.log_path = $matchedLog }
+        if ($installDir) { $paths.install_dir = $installDir }
+        if ($configHint) { $paths.config_path = $configHint }
+
+        $confidence = if ($matchedLog -or $configHint) { 0.66 } else { 0.55 }
+        [void]$players.Add((New-PlayerReport -NodeId $NodeId -Index $nextIndex -PlayoutType $descriptor.id -Label ('{0} {1}' -f $descriptor.label, $labelNumber) -Paths $paths -ProcessSelectors $processSelectors -LogSelectors @{} -Evidence @($evidence) -Confidence $confidence -Running $false))
         $nextIndex += 1
     }
 
@@ -1103,10 +1475,7 @@ $registryPlayers     = @(Find-RegistryBroadcastPlayers -NodeId $nodeId -StartInd
 $registryPlayers     = @($registryPlayers | Where-Object { $_.playout_type -notin @('insta','admax') })
 $knownCount          = $instaPlayers.Count + $admaxPlayers.Count + $registryPlayers.Count
 $genericPlayers      = @(Find-GenericProfilePlayers -NodeId $nodeId -StartIndex $knownCount -PlayoutHint $PlayoutHint)
-# Exclude generic detections already covered by registry scan
-$registryTypes       = @($registryPlayers | ForEach-Object { $_.playout_type })
-$genericPlayers      = @($genericPlayers | Where-Object { $_.playout_type -notin $registryTypes })
-$players             = @($instaPlayers + $admaxPlayers + $registryPlayers + $genericPlayers)
+$players             = @(Get-DedupedPlayers -Players @($instaPlayers + $admaxPlayers + $registryPlayers + $genericPlayers))
 $localTimeZone       = [TimeZoneInfo]::Local
 $utcOffsetMinutes    = [int]$localTimeZone.GetUtcOffset((Get-Date)).TotalMinutes
 

@@ -2,6 +2,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 AGENT_DIR = Path(__file__).resolve().parents[1]
 if str(AGENT_DIR) not in sys.path:
@@ -67,6 +68,29 @@ class ProcessSelectorTests(unittest.TestCase):
                 "generic_windows",
             )
         )
+
+    def test_check_treats_matching_running_service_as_up(self) -> None:
+        fake_service = Mock()
+        fake_service.as_dict.return_value = {
+            "name": "PlayBoxAirBoxChannel2",
+            "display_name": "PlayBox AirBox Channel 2",
+            "binpath": r'"C:\Broadcast\PlayBox\AirBox.exe" --channel=2',
+            "status": "running",
+            "pid": 4242,
+        }
+
+        with patch.object(process_monitor.psutil, "win_service_iter", return_value=[fake_service], create=True):
+            observation = process_monitor.check(
+                "studio-a-playbox-2",
+                "playbox_neo",
+                {
+                    "service_names": ["PlayBoxAirBoxChannel2"],
+                    "service_path_contains": [r"AirBox.exe"],
+                },
+            )
+
+        self.assertEqual(observation["playout_process_up"], 1)
+        self.assertEqual(observation["playout_service_up"], 1)
 
 
 if __name__ == "__main__":
