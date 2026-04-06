@@ -116,11 +116,11 @@ export function PushNotificationToggle() {
   if (status === 'unsupported') return null;
 
   return (
-    <div className="mt-4 rounded-3xl border border-slate-800 bg-slate-950/55 p-4">
+    <div className="mt-5 rounded-[var(--radius-panel)] border border-slate-800/70 bg-slate-950/45 p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-slate-100">Alert notifications</p>
-          <p className="mt-1 text-xs text-slate-400">
+          <p className="mt-1 text-xs leading-5 text-slate-400">
             {status === 'denied'
               ? 'Blocked by your browser. Enable notifications in browser settings to use this feature.'
               : status === 'subscribed'
@@ -134,10 +134,10 @@ export function PushNotificationToggle() {
             type="button"
             disabled={busy}
             onClick={() => void (status === 'subscribed' ? unsubscribe() : subscribe())}
-            className={`shrink-0 rounded-full border px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+            className={`shrink-0 rounded-[var(--radius-control)] border px-4 py-2.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
               status === 'subscribed'
-                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-200'
-                : 'border-cyan-400/35 bg-cyan-400/12 text-cyan-50 hover:border-cyan-300'
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:border-emerald-400'
+                : 'border-indigo-400/35 bg-indigo-400/14 text-indigo-50 hover:border-indigo-300'
             }`}
           >
             {busy ? '...' : status === 'subscribed' ? 'Turn off' : 'Turn on'}
