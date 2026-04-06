@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlarmBanner } from '../components/AlarmBanner';
 import { AlertContactsEditor } from '../components/AlertContactsEditor';
+import { InstallWorkspacePanel } from '../components/InstallWorkspacePanel';
 import { RemoteSetupPanel } from '../components/RemoteSetupPanel';
 import { SiteGroup } from '../components/SiteGroup';
 import { useAlarm } from '../hooks/useAlarm';
@@ -125,6 +126,8 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
             )}
           </div>
         </section>
+
+        <InstallWorkspacePanel />
 
         <AlertContactsEditor />
 
