@@ -30,40 +30,6 @@ function Ensure-Directory {
     }
 }
 
-function Write-BundleInfoFile {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$BundleDir,
-        [Parameter(Mandatory = $true)]
-        [string]$BundleName,
-        [string]$VersionLabel,
-        [string]$ConfigPath
-    )
-
-    $releaseName = if ([string]::IsNullOrWhiteSpace($VersionLabel)) {
-        $BundleName
-    } else {
-        "$BundleName-$VersionLabel"
-    }
-
-    $configLabel = if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
-        'config.example.yaml'
-    } else {
-        [System.IO.Path]::GetFileName($ConfigPath)
-    }
-
-    $lines = @(
-        'Clarix Pulse Bundle Info'
-        "Bundle Name: $BundleName"
-        "Version: $(if ([string]::IsNullOrWhiteSpace($VersionLabel)) { 'unversioned' } else { $VersionLabel })"
-        "Release Name: $releaseName"
-        "Built At (UTC): $([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))"
-        "Config Source: $configLabel"
-    )
-
-    [System.IO.File]::WriteAllLines((Join-Path $BundleDir 'BUNDLE-INFO.txt'), $lines)
-}
-
 function Download-File {
     param(
         [string]$Uri,
@@ -171,7 +137,6 @@ $requiredRepoFiles = @(
     @{ Source = (Join-Path $PSScriptRoot 'setup.bat'); Target = 'setup.bat' }
     @{ Source = (Join-Path $PSScriptRoot 'discover-node.ps1'); Target = 'discover-node.ps1' }
     @{ Source = (Join-Path $PSScriptRoot 'README.txt'); Target = 'README.txt' }
-    @{ Source = (Join-Path $PSScriptRoot 'README.md'); Target = 'README.md' }
 )
 
 $vendorFiles = @(
@@ -220,12 +185,6 @@ try {
     } else {
         Copy-Item -Path (Join-Path $PSScriptRoot 'config.example.yaml') -Destination $targetConfigPath -Force
     }
-
-    Write-BundleInfoFile `
-        -BundleDir $bundleDir `
-        -BundleName $BundleName `
-        -VersionLabel $VersionLabel `
-        -ConfigPath $ConfigPath
 
     if ($Zip) {
         $zipPath = Join-Path $OutputRoot ($effectiveBundleName + '.zip')

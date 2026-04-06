@@ -82,6 +82,8 @@ SERVICE_DISPLAY_NAME = "Pulse Agent"
 DEFAULT_HUB_URL = "https://monitor.example.com"
 LOCAL_UI_HOST = "127.0.0.1"
 LOCAL_UI_PORT = 3210
+TEMP_LOCAL_UI_PORT_START = 3211
+TEMP_LOCAL_UI_PORT_END = 3299
 DEFAULT_POLL_INTERVAL_SECONDS = 3
 HEARTBEAT_POST_TIMEOUT_SECONDS = 5
 HEARTBEAT_RETRY_DELAYS_SECONDS = (1.0, 2.0)
@@ -2216,17 +2218,10 @@ def _open_url_with_rundll32(url: str) -> None:
 def _open_url_in_browser(url: str) -> str | None:
     errors: list[str] = []
 
-    try:
-        if webbrowser.open(url, new=2):
-            return None
-        errors.append("webbrowser.open returned False")
-    except Exception as exc:
-        errors.append(f"webbrowser.open failed: {exc}")
-
     if os.name == "nt":
         for label, opener in (
-            ("os.startfile", _open_url_with_startfile),
             ("cmd.exe start", _open_url_with_cmd_start),
+            ("os.startfile", _open_url_with_startfile),
             ("rundll32", _open_url_with_rundll32),
         ):
             try:
@@ -2235,10 +2230,48 @@ def _open_url_in_browser(url: str) -> str | None:
             except Exception as exc:
                 errors.append(f"{label} failed: {exc}")
 
+    try:
+        if webbrowser.open(url, new=2):
+            return None
+        errors.append("webbrowser.open returned False")
+    except Exception as exc:
+        errors.append(f"webbrowser.open failed: {exc}")
+
     if not errors:
         return "no browser launcher succeeded"
 
     return "; ".join(errors)
+
+
+def _wait_for_local_ui(url: str, timeout_seconds: float = 5.0) -> None:
+    deadline = time.time() + timeout_seconds
+    last_error = "UI did not become available in time."
+
+    while time.time() < deadline:
+        try:
+            response = requests.get(url, timeout=0.5)
+            if response.status_code < 400:
+                return
+            last_error = f"Unexpected HTTP {response.status_code}"
+        except requests.RequestException as exc:
+            last_error = str(exc)
+        time.sleep(0.2)
+
+    raise RuntimeError(f"Local setup UI was unavailable at {url}: {last_error}")
+
+
+def _create_local_ui_server(
+    handler: type[BaseHTTPRequestHandler],
+    preferred_ports: range | list[int] | tuple[int, ...] | None = None,
+) -> ThreadingHTTPServer:
+    if preferred_ports:
+        for port in preferred_ports:
+            try:
+                return ThreadingHTTPServer((LOCAL_UI_HOST, int(port)), handler)
+            except OSError:
+                continue
+
+    return ThreadingHTTPServer((LOCAL_UI_HOST, 0), handler)
 
 
 def _player_ids_from_config(config: dict[str, Any] | None) -> list[str]:
@@ -2511,7 +2544,10 @@ def _start_persistent_local_ui_server() -> None:
         log.info(f"Persistent local UI available at {_local_ui_url()}")
 
 
-def _run_local_config_ui(existing: dict[str, Any] | None = None) -> dict[str, Any]:
+def _run_local_config_ui(
+    existing: dict[str, Any] | None = None,
+    preferred_ports: range | list[int] | tuple[int, ...] | None = None,
+) -> dict[str, Any]:
     initial_config = _config_for_local_ui(existing)
     html = _render_local_config_ui_html(initial_config)
     result: dict[str, Any] = {}
@@ -2591,15 +2627,16 @@ def _run_local_config_ui(existing: dict[str, Any] | None = None) -> dict[str, An
 
             threading.Thread(target=_shutdown, daemon=True).start()
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), ConfigUiHandler)
+    server = _create_local_ui_server(ConfigUiHandler, preferred_ports=preferred_ports)
     server.timeout = 1
-    url = f"http://127.0.0.1:{server.server_address[1]}/"
+    url = f"http://{LOCAL_UI_HOST}:{server.server_address[1]}/"
     print()
     print("Pulse local setup is opening in your browser.")
     print(f"If it does not open automatically, visit: {url}")
 
     thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
     thread.start()
+    _wait_for_local_ui(url)
 
     launch_error = _open_url_in_browser(url)
     if launch_error:
@@ -2630,6 +2667,18 @@ def _run_config_editor(existing: dict[str, Any] | None = None) -> dict[str, Any]
         return _run_config_wizard(existing)
 
 
+def _run_bundle_config_editor(existing: dict[str, Any] | None = None) -> dict[str, Any]:
+    try:
+        return _run_local_config_ui(
+            existing,
+            preferred_ports=range(TEMP_LOCAL_UI_PORT_START, TEMP_LOCAL_UI_PORT_END + 1),
+        )
+    except Exception as exc:
+        print(f"Temporary local setup UI was unavailable: {exc}")
+        print("Falling back to the console wizard.")
+        return _run_config_wizard(existing)
+
+
 def _import_local_ui_state_from_path(import_path: str, current_state: dict[str, Any] | None = None) -> tuple[dict[str, Any], str]:
     resolved_path = os.path.abspath(_as_str(import_path))
     if not resolved_path:
@@ -2653,7 +2702,7 @@ def configure_bundle_command(import_path: str | None = None) -> int:
             initial_state, message = _import_local_ui_state_from_path(import_path, existing)
             print(message)
 
-        configured = _run_config_editor(initial_state)
+        configured = _run_bundle_config_editor(initial_state)
         _write_yaml(config_path, configured)
         validated_config = load_config(config_path)
 

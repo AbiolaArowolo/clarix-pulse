@@ -32,7 +32,6 @@ function Get-PulseBundleSourcePaths {
         (Join-Path $RepoRoot 'packages\agent\build-node-bundle.ps1'),
         (Join-Path $RepoRoot 'packages\agent\setup.bat'),
         (Join-Path $RepoRoot 'packages\agent\discover-node.ps1'),
-        (Join-Path $RepoRoot 'packages\agent\README.md'),
         (Join-Path $RepoRoot 'packages\agent\README.txt')
     )) {
         [void]$candidates.Add($path)

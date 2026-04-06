@@ -31,8 +31,6 @@ Release folder:
 
 - [packages/agent/release](/D:/monitoring/packages/agent/release)
 
-Inside the extracted bundle, open `BUNDLE-INFO.txt` to confirm the exact version you are running.
-
 Every shipped bundle contains:
 
 - `clarix-agent.exe`
@@ -40,6 +38,7 @@ Every shipped bundle contains:
 - `configure.bat`
 - `uninstall.bat`
 - `discover-node.ps1`
+- `README.txt`
 - `install-from-url.ps1`
 - `config.yaml`
 - `config.example.yaml`
@@ -199,7 +198,7 @@ http://127.0.0.1:3210/
 
 Important:
 
-- on a fresh bundle, `configure.bat` can fall back to guided setup on a temporary localhost port before the persistent `127.0.0.1:3210` UI is running
+- on a fresh bundle, `configure.bat` can fall back to guided setup on the first free temporary localhost port in the `127.0.0.1:3211` through `127.0.0.1:3299` range before the persistent `127.0.0.1:3210` UI is running
 
 ### 7. Import the provisioned config into the local UI
 

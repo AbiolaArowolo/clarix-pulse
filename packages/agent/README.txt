@@ -21,21 +21,27 @@ STEP 1 - Download and extract
   4. Right-click the zip and choose  Extract All
   5. Extract to:  C:\ClarixPulse
   6. Open the extracted Clarix Pulse folder and confirm these files are there:
-       setup.bat, clarix-agent.exe, discover-node.ps1, config.yaml, BUNDLE-INFO.txt
-  7. Open BUNDLE-INFO.txt if you want to confirm the exact installer version
+       setup.bat, clarix-agent.exe, discover-node.ps1, config.yaml, README.txt
 
-STEP 2 - Scan and review local setup
+STEP 2 - Scan and review temporary local setup
   1. Double-click  setup.bat
      - If Windows asks for permission, click Yes
   2. Press  2  then Enter:
        [2]  Run discovery scan and open local setup UI
   3. The scan runs automatically (under 60 seconds)
-  4. The local Pulse setup UI opens in your browser with this computer's
+  4. The temporary local Pulse setup UI opens in your browser with this computer's
      details already filled in from the scan
   5. If your download included  pulse-account.json, the hub URL and
      enrollment key are filled in automatically
   6. Review the Node Name, Site ID, players, and paths
   7. Click  Save Local Settings
+  8. During setup, the temporary UI uses the first free localhost port
+     in this range:
+       http://127.0.0.1:3211/ through http://127.0.0.1:3299/
+     If it does not open automatically, use the exact localhost URL
+     printed in the console window
+  9. After Pulse is installed, the regular local UI stays at:
+       http://127.0.0.1:3210/
 
 STEP 3 - Install the agent
   1. Double-click  setup.bat

@@ -5,7 +5,6 @@ title Clarix Pulse | Node Setup
 set "BASE_DIR=%~dp0"
 set "EXE_PATH=%BASE_DIR%clarix-agent.exe"
 set "REPORT_PATH=%BASE_DIR%pulse-node-discovery-report.json"
-set "BUNDLE_INFO_PATH=%BASE_DIR%BUNDLE-INFO.txt"
 set "PS_EXE="
 set "BUNDLE_VERSION="
 
@@ -50,16 +49,6 @@ if "%CHOICE%"=="5" exit /b 0
 goto MENU
 
 :DETECT_VERSION
-if exist "%BUNDLE_INFO_PATH%" (
-    for /f "usebackq tokens=1,* delims=:" %%A in (`findstr /b /c:"Version:" "%BUNDLE_INFO_PATH%"`) do (
-        set "BUNDLE_VERSION=%%B"
-    )
-)
-
-if defined BUNDLE_VERSION (
-    for /f "tokens=* delims= " %%A in ("%BUNDLE_VERSION%") do set "BUNDLE_VERSION=%%A"
-)
-
 if not defined BUNDLE_VERSION (
     for %%I in ("%BASE_DIR:~0,-1%") do set "BUNDLE_VERSION=%%~nxI"
     if /i "%BUNDLE_VERSION:~0,13%"=="clarix-pulse-" set "BUNDLE_VERSION=%BUNDLE_VERSION:~13%"
@@ -96,6 +85,8 @@ call :RUN_SCAN
 call :SHOW_SUMMARY
 echo.
 echo  Opening local setup UI with the scan details pre-loaded...
+echo  Temporary setup URL will use the first free localhost port from 3211-3299.
+echo  If it does not open automatically, use the exact localhost URL printed below.
 call :OPEN_LOCAL_SETUP
 echo.
 pause

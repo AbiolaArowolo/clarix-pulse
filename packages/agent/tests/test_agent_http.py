@@ -81,7 +81,7 @@ class ConfigureBundleCommandTests(unittest.TestCase):
                 return dict(initial_state or {})
 
             with patch.object(agent, "_bundle_path", return_value=str(config_path)):
-                with patch.object(agent, "_run_config_editor", side_effect=fake_run_config_editor):
+                with patch.object(agent, "_run_bundle_config_editor", side_effect=fake_run_config_editor):
                     with patch.object(
                         agent,
                         "load_config",
@@ -99,7 +99,7 @@ class ConfigureBundleCommandTests(unittest.TestCase):
 
 
 class BrowserLaunchTests(unittest.TestCase):
-    def test_open_url_in_browser_uses_windows_fallback_when_webbrowser_returns_false(self) -> None:
+    def test_open_url_in_browser_uses_windows_cmd_start_before_webbrowser(self) -> None:
         with patch.object(agent.webbrowser, "open", return_value=False) as browser_open_mock:
             with patch.object(agent.os, "name", "nt"):
                 with patch.object(agent, "_open_url_with_startfile") as startfile_mock:
@@ -108,10 +108,10 @@ class BrowserLaunchTests(unittest.TestCase):
                             error = agent._open_url_in_browser("http://127.0.0.1:3210/")
 
         self.assertIsNone(error)
-        browser_open_mock.assert_called_once_with("http://127.0.0.1:3210/", new=2)
-        startfile_mock.assert_called_once_with("http://127.0.0.1:3210/")
-        cmd_start_mock.assert_not_called()
+        cmd_start_mock.assert_called_once_with("http://127.0.0.1:3210/")
+        startfile_mock.assert_not_called()
         rundll32_mock.assert_not_called()
+        browser_open_mock.assert_not_called()
 
     def test_open_local_ui_command_reports_manual_url_when_auto_open_fails(self) -> None:
         response = Mock(status_code=200)
@@ -121,6 +121,20 @@ class BrowserLaunchTests(unittest.TestCase):
                 exit_code = agent.open_local_ui_command()
 
         self.assertEqual(exit_code, 1)
+
+
+class TemporaryUiPortTests(unittest.TestCase):
+    def test_create_local_ui_server_uses_first_free_port_in_range(self) -> None:
+        class DummyHandler(agent.BaseHTTPRequestHandler):
+            pass
+
+        mock_server = Mock()
+        with patch.object(agent, "ThreadingHTTPServer", side_effect=[OSError("in use"), mock_server]) as server_mock:
+            server = agent._create_local_ui_server(DummyHandler, preferred_ports=range(3211, 3213))
+
+        self.assertIs(server, mock_server)
+        self.assertEqual(server_mock.call_args_list[0].args[0], (agent.LOCAL_UI_HOST, 3211))
+        self.assertEqual(server_mock.call_args_list[1].args[0], (agent.LOCAL_UI_HOST, 3212))
 
 
 class MirrorSyncTests(unittest.TestCase):

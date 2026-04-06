@@ -44,20 +44,18 @@ Work through every step in order. Do not skip any step.
    - `clarix-agent.exe`
    - `discover-node.ps1`
    - `config.yaml`
-   - `BUNDLE-INFO.txt`
+   - `README.txt`
    - `nssm.exe`
    - `ffmpeg.exe`
    - `ffprobe.exe`
 
 If you see these files, you are ready for the next step.
 
-`BUNDLE-INFO.txt` shows the exact installer version you downloaded.
-
 ---
 
 ## Step 3 - Scan and configure via setup.bat
 
-This step scans your computer for playout software and opens the local Pulse
+This step scans your computer for playout software and opens a temporary Pulse
 setup UI with the detected details pre-filled.
 
 1. Open the extracted Clarix Pulse folder.
@@ -68,13 +66,16 @@ setup UI with the detected details pre-filled.
    [2]  Run discovery scan and open local setup UI
    ```
 4. The scan runs automatically (usually under 60 seconds).
-5. Your default browser opens the local Pulse setup UI.
+5. Your default browser opens the temporary local Pulse setup UI.
 6. The local UI is already filled in with this computer's details
    (node name, detected players, paths, and any key details found from the
    downloaded bundle).
 7. Review the detected values and click **Save Local Settings**.
 
-> **Note:** If the browser does not open automatically, run `configure.bat`.
+> **Note:** During setup, the temporary discovery UI uses the first free localhost port in the range `127.0.0.1:3211` through `127.0.0.1:3299`.
+> If the browser does not open automatically, use the exact localhost URL printed in the console.
+> After Pulse is installed, the normal local UI stays at `http://127.0.0.1:3210/`.
+> You can still run `configure.bat` later to re-open the installed local UI.
 > If you prefer the remote dashboard flow, you can still run the scan manually
 > (option 3 in the menu) and upload the `pulse-node-discovery-report.json`
 > file from `C:\ClarixPulse` via the Remote Setup tab.
