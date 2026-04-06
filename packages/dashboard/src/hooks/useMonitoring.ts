@@ -169,6 +169,9 @@ function mergeUpdate(inst: InstanceState, update: any): InstanceState {
     broadcastHealth: (update.broadcastHealth ?? inst.broadcastHealth) as BroadcastHealth,
     runtimeHealth: (update.runtimeHealth ?? inst.runtimeHealth) as RuntimeHealth,
     connectivityHealth: (update.connectivityHealth ?? inst.connectivityHealth) as ConnectivityHealth,
+    connectivityIssue: hasOwn(updateRecord, 'connectivityIssue')
+      ? (update.connectivityIssue as string | null)
+      : inst.connectivityIssue,
     lastHeartbeatAt: update.lastHeartbeatAt ?? inst.lastHeartbeatAt,
     updatedAt: update.updatedAt ?? inst.updatedAt,
     hasThumbnail: update.hasThumbnail ?? (thumbnailDataUrl ? true : inst.hasThumbnail),

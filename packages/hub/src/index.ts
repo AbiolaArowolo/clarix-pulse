@@ -16,6 +16,7 @@ import { buildStatusPayload, createStatusRouter } from './routes/status';
 import { createThumbnailRouter } from './routes/thumbnail';
 import { SESSION_COOKIE_NAME, readCookie, requirePlatformAdmin, requireSession } from './serverAuth';
 import { getAlertDeliveryHealth, sendNetworkIssueAlert } from './services/alerting';
+import { describeConnectivityIssue } from './services/connectivityIssues';
 import { getSessionFromToken } from './store/auth';
 import { checkDbHealth, DATABASE_URL_DISPLAY, initDb } from './store/db';
 import { getInstanceControls, initInstanceControls, isAlertingSuppressed } from './store/instanceControls';
@@ -118,6 +119,8 @@ io.on('connection', async (socket) => {
 
 const STALE_THRESHOLD_MS = 45_000;
 const OFFLINE_THRESHOLD_MS = 90_000;
+const NETWORK_ALERT_THRESHOLD_MS = 180_000;
+const NETWORK_ALERT_REPEAT_MS = 300_000;
 
 const networkIssueSentAt = new Map<string, number>();
 
@@ -147,6 +150,12 @@ setInterval(async () => {
           broadcastHealth: 'unknown',
           runtimeHealth: updated?.runtimeHealth ?? 'unknown',
           connectivityHealth: 'offline',
+          connectivityIssue: describeConnectivityIssue({
+            connectivityHealth: 'offline',
+            lastHeartbeatAt: state.lastHeartbeatAt,
+            observations: state.lastObservations,
+            currentTime: new Date(now),
+          }),
           monitoringEnabled: controls.monitoringEnabled,
           maintenanceMode: controls.maintenanceMode,
           lastHeartbeatAt: state.lastHeartbeatAt,
@@ -155,10 +164,19 @@ setInterval(async () => {
       }
 
       const lastSent = networkIssueSentAt.get(state.instanceId) ?? 0;
-      if (now - lastSent > 300_000 && !isAlertingSuppressed(state.instanceId)) {
+      if (ageMs >= NETWORK_ALERT_THRESHOLD_MS && now - lastSent > NETWORK_ALERT_REPEAT_MS && !isAlertingSuppressed(state.instanceId)) {
         networkIssueSentAt.set(state.instanceId, now);
         if (player) {
-          sendNetworkIssueAlert(state.instanceId, player.label).catch(console.error);
+          sendNetworkIssueAlert({
+            instanceId: state.instanceId,
+            instanceLabel: player.label,
+            siteName: player.siteName,
+            nodeId: player.nodeId,
+            connectivityHealth: 'offline',
+            lastHeartbeatAt: state.lastHeartbeatAt,
+            observations: state.lastObservations,
+            currentTime: new Date(now),
+          }).catch(console.error);
         }
       }
     } else if (ageMs >= STALE_THRESHOLD_MS && state.connectivityHealth === 'online') {
@@ -176,6 +194,12 @@ setInterval(async () => {
           broadcastHealth: state.broadcastHealth,
           runtimeHealth: state.runtimeHealth,
           connectivityHealth: 'stale',
+          connectivityIssue: describeConnectivityIssue({
+            connectivityHealth: 'stale',
+            lastHeartbeatAt: state.lastHeartbeatAt,
+            observations: state.lastObservations,
+            currentTime: new Date(now),
+          }),
           monitoringEnabled: controls.monitoringEnabled,
           maintenanceMode: controls.maintenanceMode,
           lastHeartbeatAt: state.lastHeartbeatAt,

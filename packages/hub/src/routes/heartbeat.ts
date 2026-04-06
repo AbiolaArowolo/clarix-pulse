@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { Server as SocketServer } from 'socket.io';
+import { describeConnectivityIssue } from '../services/connectivityIssues';
 import { computeHealth, Observations } from '../services/stateEngine';
 import { evaluateAlert } from '../services/alerting';
 import { getInstanceControls } from '../store/instanceControls';
@@ -156,6 +157,11 @@ export function createHeartbeatRouter(io: SocketServer): Router {
         broadcastHealth,
         runtimeHealth,
         connectivityHealth,
+        connectivityIssue: describeConnectivityIssue({
+          connectivityHealth,
+          lastHeartbeatAt: current.lastHeartbeatAt,
+          observations: observations as Record<string, unknown>,
+        }),
         monitoringMode: !controls.monitoringEnabled
           ? 'disabled'
           : controls.maintenanceMode

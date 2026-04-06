@@ -1,10 +1,11 @@
 import nodemailer from 'nodemailer';
-import { BroadcastHealth, RuntimeHealth } from '../store/db';
+import { BroadcastHealth, ConnectivityHealth, RuntimeHealth } from '../store/db';
 import { getAlertSettings } from '../store/alertSettings';
 import { isAlertingSuppressed } from '../store/instanceControls';
 import { getPlayer } from '../store/registry';
 import { logEvent, wasAlertSentForCurrentIncident } from '../store/state';
 import { sendPushToTenant } from '../routes/push';
+import { describeConnectivityIssue } from './connectivityIssues';
 import { wrapEmailHtml, detailRow } from './emailTemplate';
 
 interface AlertContext {
@@ -14,8 +15,10 @@ interface AlertContext {
   nodeId?: string;
   broadcastHealth: BroadcastHealth;
   runtimeHealth: RuntimeHealth;
+  connectivityHealth?: ConnectivityHealth;
   previousBroadcast: BroadcastHealth | undefined;
   observations: Record<string, unknown>;
+  connectivityIssue?: string | null;
 }
 
 interface TelegramResolvedTarget {
@@ -282,6 +285,9 @@ function formatToken(token: string): string {
 function deriveLikelyCauses(ctx: AlertContext): string[] {
   const reasons: string[] = [];
   const observations = ctx.observations;
+  if (ctx.connectivityIssue) {
+    reasons.push(ctx.connectivityIssue);
+  }
   const runtimeRaw = asText(observations.insta_runningstatus_raw);
   const logToken = asText(observations.log_last_token);
   const udpInputCount = asNumber(observations.udp_input_count) ?? 0;
@@ -391,6 +397,7 @@ function buildAlertMessage(
     `Label: ${ctx.instanceLabel}`,
     `Broadcast health: ${ctx.broadcastHealth}`,
     `Runtime health: ${ctx.runtimeHealth}`,
+    `Connectivity health: ${ctx.connectivityHealth ?? 'unknown'}`,
   ];
   if (causes.length > 0) {
     bodyLines.push('', 'Likely cause(s):');
@@ -422,6 +429,7 @@ function buildAlertMessage(
       ${detailRow('Label', ctx.instanceLabel)}
       ${detailRow('Broadcast', ctx.broadcastHealth)}
       ${detailRow('Runtime', ctx.runtimeHealth)}
+      ${detailRow('Connectivity', ctx.connectivityHealth ?? 'unknown')}
     </table>
     <p style="margin:0 0 8px;font-size:13px;font-weight:700;color:#475569;
               text-transform:uppercase;letter-spacing:0.5px;">Likely cause(s)</p>
@@ -546,29 +554,45 @@ export async function evaluateAlert(ctx: AlertContext): Promise<void> {
   );
 }
 
-export async function sendNetworkIssueAlert(instanceId: string, instanceLabel: string): Promise<void> {
-  if (isAlertingSuppressed(instanceId)) return;
+interface NetworkIssueAlertInput {
+  instanceId: string;
+  instanceLabel: string;
+  siteName?: string;
+  nodeId?: string;
+  connectivityHealth?: ConnectivityHealth;
+  lastHeartbeatAt?: string | null;
+  observations?: Record<string, unknown> | null;
+  currentTime?: Date;
+}
 
-  const player = await getPlayer(instanceId);
+export async function sendNetworkIssueAlert(input: NetworkIssueAlertInput): Promise<void> {
+  if (isAlertingSuppressed(input.instanceId)) return;
+
+  const player = await getPlayer(input.instanceId);
+  const connectivityHealth = input.connectivityHealth ?? 'offline';
+  const observations = input.observations ?? {};
+  const connectivityIssue = describeConnectivityIssue({
+    connectivityHealth,
+    lastHeartbeatAt: input.lastHeartbeatAt ?? null,
+    observations,
+    currentTime: input.currentTime,
+  });
   const alert = buildAlertMessage('NETWORK ISSUE', {
-    instanceId,
-    instanceLabel,
-    siteName: player?.siteName,
-    nodeId: player?.nodeId,
+    instanceId: input.instanceId,
+    instanceLabel: input.instanceLabel,
+    siteName: input.siteName ?? player?.siteName,
+    nodeId: input.nodeId ?? player?.nodeId,
     broadcastHealth: 'unknown',
     runtimeHealth: 'unknown',
+    connectivityHealth,
     previousBroadcast: undefined,
-    observations: {},
+    observations,
+    connectivityIssue,
   });
 
-  console.log(`[alert] NETWORK ISSUE ${instanceId}`);
+  console.log(`[alert] NETWORK ISSUE ${input.instanceId}`);
   if (player?.tenantId) {
     await sendTenantTelegram(player.tenantId, alert.body);
-    await sendTenantEmail(
-      player.tenantId,
-      alert.subject,
-      `${alert.body}\n- Heartbeat missing, so the latest playback state is unknown.`,
-      alert.html,
-    );
+    await sendTenantEmail(player.tenantId, alert.subject, alert.body, alert.html);
   }
 }

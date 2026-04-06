@@ -232,7 +232,7 @@ export function InstanceCard({ instance }: Props) {
 
       {connectivityWarning && (
         <div className="mt-3 rounded-xl border border-yellow-700/40 bg-yellow-900/15 px-3 py-2 text-[11px] text-yellow-200">
-          ! Heartbeats are delayed or offline. Local monitoring may still be active on the node.
+          ! {instance.connectivityIssue ?? 'Heartbeats are delayed or offline. Local monitoring may still be active on the node.'}
         </div>
       )}
 

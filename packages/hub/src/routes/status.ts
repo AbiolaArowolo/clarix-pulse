@@ -1,5 +1,6 @@
 import { LEGACY_BOOTSTRAP_ENABLED, isLegacyBootstrapPlayerId } from '../config/instances';
 import { Router, Request, Response } from 'express';
+import { describeConnectivityIssue } from '../services/connectivityIssues';
 import { getInstanceControls } from '../store/instanceControls';
 import { listPlayers } from '../store/registry';
 import { getAllStates } from '../store/state';
@@ -63,6 +64,11 @@ export async function buildStatusPayload(tenantId: string) {
       broadcastHealth: state?.broadcastHealth ?? 'unknown',
       runtimeHealth: state?.runtimeHealth ?? 'unknown',
       connectivityHealth: state?.connectivityHealth ?? 'offline',
+      connectivityIssue: describeConnectivityIssue({
+        connectivityHealth: state?.connectivityHealth ?? 'offline',
+        lastHeartbeatAt: state?.lastHeartbeatAt ?? null,
+        observations: state?.lastObservations ?? null,
+      }),
       lastHeartbeatAt: state?.lastHeartbeatAt ?? null,
       updatedAt: state?.updatedAt ?? null,
       hasThumbnail: !!state?.thumbnailAt,

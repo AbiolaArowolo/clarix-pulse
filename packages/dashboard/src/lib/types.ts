@@ -23,6 +23,7 @@ export interface InstanceState {
   broadcastHealth: BroadcastHealth;
   runtimeHealth: RuntimeHealth;
   connectivityHealth: ConnectivityHealth;
+  connectivityIssue: string | null;
   lastHeartbeatAt: string | null;
   updatedAt: string | null;
   hasThumbnail: boolean;

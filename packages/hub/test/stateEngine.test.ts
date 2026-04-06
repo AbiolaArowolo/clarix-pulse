@@ -53,3 +53,19 @@ test('computeHealth classifies repeated static native position polls as paused b
   assert.equal(result.runtimeHealth, 'paused');
   assert.equal(result.broadcastHealth, 'degraded');
 });
+
+test('computeHealth keeps player health separate from a network outage reported by the node', () => {
+  const result = computeHealth(
+    {
+      playout_process_up: 1,
+      filebar_position_delta_poll: 12,
+      gateway_up: 0,
+      internet_up: 0,
+    },
+    false,
+  );
+
+  assert.equal(result.runtimeHealth, 'healthy');
+  assert.equal(result.broadcastHealth, 'healthy');
+  assert.equal(result.connectivityHealth, 'offline');
+});
