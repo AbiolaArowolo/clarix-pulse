@@ -36,6 +36,33 @@ def _as_list(value: object) -> list[str]:
     return []
 
 
+def _has_scope_selectors(selectors: dict) -> bool:
+    if not selectors:
+        return False
+
+    scoped_keys = (
+        "include_contains",
+        "exclude_contains",
+        "include_regexes",
+        "exclude_regexes",
+        "paused_regex",
+        "played_regex",
+        "skipped_regex",
+        "exited_regex",
+        "reinit_regex",
+    )
+    for key in scoped_keys:
+        if _as_list(selectors.get(key)) or str(selectors.get(key, "")).strip():
+            return True
+
+    token_patterns = selectors.get("token_patterns", {})
+    return isinstance(token_patterns, dict) and any(str(value).strip() for value in token_patterns.values())
+
+
+def has_scope_selectors(selectors: dict | None) -> bool:
+    return _has_scope_selectors(selectors or {})
+
+
 def _compile_patterns(values: Iterable[str]) -> list[re.Pattern[str]]:
     return [re.compile(value, re.IGNORECASE) for value in values if value]
 
@@ -97,7 +124,7 @@ def _latest_log_path(path_hint: str) -> str:
         return ""
 
 
-def _get_log_path_generic(paths: dict) -> str:
+def _get_log_path_generic(paths: dict, require_exists: bool = True) -> str:
     direct_hint = str(
         paths.get("log_path")
         or paths.get("activity_log")
@@ -105,13 +132,22 @@ def _get_log_path_generic(paths: dict) -> str:
         or ""
     ).strip()
     if direct_hint:
-        return _latest_log_path(direct_hint)
+        return _latest_log_path(direct_hint) if require_exists else direct_hint
 
     folder_hint = str(paths.get("log_dir") or "").strip()
     if folder_hint:
-        return _latest_log_path(folder_hint)
+        return _latest_log_path(folder_hint) if require_exists else folder_hint
 
     return ""
+
+
+def resolve_log_path(playout_type: str, paths: dict, require_exists: bool = True) -> str:
+    family = playout_family(playout_type)
+    if family == "admax":
+        return _get_log_path_admax(paths)
+    if family == "insta":
+        return _get_log_path_insta(paths.get("shared_log_dir", ""))
+    return _get_log_path_generic(paths, require_exists=require_exists)
 
 
 def _read_new_lines(path: str, instance_id: str) -> list[str]:
@@ -246,21 +282,25 @@ def _classify_generic_lines(lines: list[str], selectors: dict) -> Optional[str]:
     return token
 
 
-def check(instance_id: str, playout_type: str, paths: dict, selectors: dict | None = None) -> dict:
+def check(
+    instance_id: str,
+    playout_type: str,
+    paths: dict,
+    selectors: dict | None = None,
+    allow_unscoped_tokens: bool = True,
+) -> dict:
     selectors = selectors or {}
     family = playout_family(playout_type)
-
-    if family == "admax":
-        log_path = _get_log_path_admax(paths)
-    elif family == "insta":
-        log_path = _get_log_path_insta(paths.get("shared_log_dir", ""))
-    else:
-        log_path = _get_log_path_generic(paths)
+    log_path = resolve_log_path(playout_type, paths)
 
     log_exists = os.path.exists(log_path)
     new_lines = _select_lines(_read_new_lines(log_path, instance_id), selectors)
 
-    if family == "admax":
+    allow_token_classification = allow_unscoped_tokens or _has_scope_selectors(selectors)
+
+    if not allow_token_classification:
+        classified_token = None
+    elif family == "admax":
         classified_token = _classify_admax_lines(new_lines, selectors)
     elif family == "insta":
         classified_token = _classify_insta_lines(new_lines, selectors)

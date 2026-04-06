@@ -310,6 +310,61 @@ function Find-InstaPlayers {
 
 # Override the earlier aggregate-channel implementation so each Insta channel
 # is surfaced as its own monitored player on older and newer PowerShell builds.
+function Get-InstaSharedExecutable {
+    param([string]$IndytekRoot, [string]$ChannelPath)
+    return Get-FirstExistingFile -Candidates @(
+        (Join-Path $ChannelPath 'Insta Playout.exe'),
+        (Join-Path $ChannelPath 'Insta Helper.exe'),
+        (Join-Path $IndytekRoot 'Insta Playout.exe'),
+        (Join-Path $IndytekRoot 'Insta Helper.exe')
+    )
+}
+
+function Test-InstaChannelRuntimeEvidence {
+    param([string]$ChannelPath, [string]$InstanceRoot)
+    $candidateFiles = @(
+        (Join-Path $InstanceRoot 'runningstatus.txt'),
+        (Join-Path $InstanceRoot 'filebar.txt'),
+        (Join-Path $InstanceRoot 'Mainplaylist.xml'),
+        (Join-Path $InstanceRoot 'MainplaylistOrig.xml'),
+        (Join-Path $ChannelPath 'Mainplaylist.xml'),
+        (Join-Path $ChannelPath 'MainplaylistOrig.xml')
+    )
+
+    if (Test-Path -LiteralPath $InstanceRoot -PathType Container) { return $true }
+    foreach ($candidate in $candidateFiles) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $true }
+    }
+    return $false
+}
+
+function Get-InstaRuntimeFlags {
+    param([string]$InstanceRoot)
+    $statusPath = Join-Path $InstanceRoot 'runningstatus.txt'
+    $filebarPath = Join-Path $InstanceRoot 'filebar.txt'
+    $runningFlag = $null
+    $pauseFlag = $null
+    $rawStatus = ''
+
+    if (Test-Path -LiteralPath $statusPath -PathType Leaf) {
+        try {
+            $rawStatus = ((Get-Content -LiteralPath $statusPath -ErrorAction Stop | Select-Object -First 1) -as [string]).Trim()
+        } catch { }
+        if ($rawStatus -match '^\s*(\d+)\s*\|\s*(\d+)') {
+            $runningFlag = [int]$matches[1]
+            $pauseFlag = [int]$matches[2]
+        }
+    }
+
+    return [ordered]@{
+        has_status_file = (Test-Path -LiteralPath $statusPath -PathType Leaf)
+        has_filebar     = (Test-Path -LiteralPath $filebarPath -PathType Leaf)
+        running_flag    = $runningFlag
+        pause_flag      = $pauseFlag
+        raw_status      = $rawStatus
+    }
+}
+
 function Find-InstaPlayers {
     param([string]$NodeId)
     $programFiles    = Get-EnvPathOrFallback -Name 'ProgramFiles'    -Fallback 'C:\Program Files'
@@ -329,42 +384,56 @@ function Find-InstaPlayers {
         $channelDirs = @(Get-SafeDirectories -Path $indytekRoot -Filter 'Insta Playout*' | Sort-Object FullName)
         foreach ($channelDir in $channelDirs) {
             $channelPath = $channelDir.FullName
-            $detectedProcessNames = @(Get-ProcessNamesInDirectory -DirectoryPath $channelPath)
-
-            $hasExe = $false
-            foreach ($exeName in @('Insta Playout.exe', 'Insta Helper.exe')) {
-                $candidate = Get-SafeFiles -Path $channelPath -Filter $exeName -Recurse | Select-Object -First 1
-                if ($candidate) { $hasExe = $true; break }
-            }
-            if (-not $hasExe -and $detectedProcessNames.Count -eq 0) { continue }
-
             $instanceRoot = Get-FirstExistingDirectory -Candidates @(
                 (Join-Path $channelPath 'Settings'),
                 $channelPath
             )
+            $detectedProcessNames = @(Get-ProcessNamesInDirectory -DirectoryPath $channelPath)
+            $sharedExecutablePath = Get-InstaSharedExecutable -IndytekRoot $indytekRoot -ChannelPath $channelPath
+            $hasRuntimeEvidence = Test-InstaChannelRuntimeEvidence -ChannelPath $channelPath -InstanceRoot $instanceRoot
+            if (-not $hasRuntimeEvidence -and [string]::IsNullOrWhiteSpace($sharedExecutablePath) -and $detectedProcessNames.Count -eq 0) { continue }
+
             $sharedLogDir = Get-FirstExistingDirectory -Candidates @(
                 (Join-Path $indytekRoot 'Insta log'),
                 (Join-Path $channelPath 'Insta log'),
                 (Join-Path $channelPath 'logs')
             )
-            $fnfLog = Get-FirstExistingDirectory -Candidates @(
-                (Join-Path $sharedLogDir 'FNF'),
-                (Join-Path $sharedLogDir 'fnf')
-            )
+            $fnfCandidates = @()
+            if ($sharedLogDir) {
+                $fnfCandidates = @(
+                    (Join-Path $sharedLogDir 'FNF'),
+                    (Join-Path $sharedLogDir 'fnf')
+                )
+            }
+            $fnfLog = Get-FirstExistingDirectory -Candidates $fnfCandidates
             $playlistScanLog = Get-FirstExistingDirectory -Candidates @(
                 (Join-Path $channelPath 'logs\playlistscan'),
                 (Join-Path $channelPath 'playlistscan')
             )
+            $runtimeFlags = Get-InstaRuntimeFlags -InstanceRoot $instanceRoot
             $processNames = if ($detectedProcessNames.Count -gt 0) { $detectedProcessNames } else { @('Insta Playout.exe') }
-            $isRunning = ($detectedProcessNames.Count -gt 0)
+            $processSelectors = @{ process_names = $processNames }
+            if (-not [string]::IsNullOrWhiteSpace($sharedExecutablePath)) {
+                $processSelectors.executable_path_contains = @($sharedExecutablePath)
+            } else {
+                $processSelectors.executable_path_contains = @($channelPath)
+            }
+            $isRunning = ($detectedProcessNames.Count -gt 0) -or (
+                ($runtimeFlags.running_flag -ne $null -and [int]$runtimeFlags.running_flag -ne 0) -or
+                ($runtimeFlags.pause_flag -eq 1) -or
+                ($runtimeFlags.has_filebar -and $detectedProcessNames.Count -gt 0)
+            )
             $label = $channelDir.Name
 
             $evidence = New-Object System.Collections.Generic.List[string]
             [void]$evidence.Add("Insta channel found at $channelPath")
             if ($instanceRoot)    { [void]$evidence.Add("Instance root: $instanceRoot") }
+            if ($sharedExecutablePath) { [void]$evidence.Add("Shared executable: $sharedExecutablePath") }
             if ($sharedLogDir)    { [void]$evidence.Add("Shared log folder: $sharedLogDir") }
             if ($fnfLog)          { [void]$evidence.Add("FNF log folder: $fnfLog") }
             if ($playlistScanLog) { [void]$evidence.Add("Playlist scan log: $playlistScanLog") }
+            if ($runtimeFlags.has_status_file) { [void]$evidence.Add("runningstatus.txt detected") }
+            if ($runtimeFlags.has_filebar)     { [void]$evidence.Add("filebar.txt detected") }
             foreach ($processName in $processNames) {
                 [void]$evidence.Add("Process selector: $processName")
             }
@@ -375,7 +444,7 @@ function Find-InstaPlayers {
                 shared_log_dir   = $sharedLogDir
                 fnf_log          = $fnfLog
                 playlistscan_log = $playlistScanLog
-            } -ProcessSelectors @{ process_names = $processNames } -LogSelectors @{} -Evidence @($evidence) -Confidence 0.92 -Installed $true -Running $isRunning))
+            } -ProcessSelectors $processSelectors -LogSelectors @{} -Evidence @($evidence) -Confidence 0.92 -Installed $true -Running $isRunning))
             $playerIndex += 1
         }
     }
@@ -650,7 +719,12 @@ function Find-RegistryBroadcastPlayers {
             if ($logDir)     { [void]$evidence.Add("Log directory: $logDir") }
 
             $processSelectors = @{}
-            if ($profile.exe.Count -gt 0) { $processSelectors = @{ process_names = @($profile.exe) } }
+            if ($profile.exe.Count -gt 0) { $processSelectors.process_names = @($profile.exe) }
+            if ($exePath) {
+                $processSelectors.executable_path_contains = @($exePath)
+            } elseif ($installDir) {
+                $processSelectors.executable_path_contains = @($installDir)
+            }
 
             $confidence = if ($isRunning) { 0.93 } elseif ($installDir) { 0.87 } else { 0.78 }
             # Label multiple instances of same type: "PlayBox AirBox", "PlayBox AirBox 2", etc.
@@ -835,27 +909,43 @@ function Find-GenericProfilePlayers {
         if ($null -eq $descriptor) { continue }
         if ($descriptor.id -in @('insta','admax')) { continue }
 
-        $dedupeKey = '{0}|{1}' -f $descriptor.id, ($(if ($executablePath) { $executablePath } else { $name }))
+        $dedupeSource = if ($commandLine) { $commandLine } elseif ($executablePath) { $executablePath } else { $name }
+        $dedupeKey = '{0}|{1}' -f $descriptor.id, $dedupeSource
         if (-not $seen.Add($dedupeKey)) { continue }
 
         if ($profileCounts.ContainsKey($descriptor.id)) { $profileCounts[$descriptor.id] += 1 } else { $profileCounts[$descriptor.id] = 1 }
         $labelNumber = $profileCounts[$descriptor.id]
         $matchedLog  = Get-ProfileLogHint -Descriptor $descriptor -LogHints $logHints -ExecutablePath $executablePath
+        $commandLineSelector = ''
+        if ($commandLine) {
+            $commandLineSelector = $commandLine.Trim()
+            if ($executablePath) {
+                $quotedExecutable = ('"{0}"' -f $executablePath)
+                if ($commandLineSelector.ToLowerInvariant().StartsWith($quotedExecutable.ToLowerInvariant())) {
+                    $commandLineSelector = $commandLineSelector.Substring($quotedExecutable.Length).Trim()
+                } elseif ($commandLineSelector.ToLowerInvariant().StartsWith($executablePath.ToLowerInvariant())) {
+                    $commandLineSelector = $commandLineSelector.Substring($executablePath.Length).Trim()
+                }
+            }
+        }
 
         $evidence = New-Object System.Collections.Generic.List[string]
         if ($name)           { [void]$evidence.Add("Running process detected: $name") }
         if ($executablePath) { [void]$evidence.Add("Executable path: $executablePath") }
+        if ($commandLineSelector) { [void]$evidence.Add("Command line selector: $commandLineSelector") }
         if ($matchedLog)     { [void]$evidence.Add("Likely log folder found at $matchedLog") }
 
-        $processNames = @()
-        if ($name) { $processNames = @($name) }
+        $processSelectors = @{}
+        if ($name) { $processSelectors.process_names = @($name) }
+        if ($executablePath) { $processSelectors.executable_path_contains = @($executablePath) }
+        if ($commandLineSelector) { $processSelectors.command_line_contains = @($commandLineSelector) }
 
         $confidence = if ($matchedLog) { 0.72 } else { 0.61 }
         if ($descriptor.id -eq 'generic_windows') { $confidence = if ($matchedLog) { 0.58 } else { 0.46 } }
 
         [void]$players.Add((New-PlayerReport -NodeId $NodeId -Index $nextIndex -PlayoutType $descriptor.id -Label ('{0} {1}' -f $descriptor.label, $labelNumber) -Paths @{
             log_path = $matchedLog
-        } -ProcessSelectors @{ process_names = $processNames } -LogSelectors @{} -Evidence @($evidence) -Confidence $confidence))
+        } -ProcessSelectors $processSelectors -LogSelectors @{} -Evidence @($evidence) -Confidence $confidence))
         $nextIndex += 1
     }
 

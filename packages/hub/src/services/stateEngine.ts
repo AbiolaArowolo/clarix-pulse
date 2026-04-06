@@ -28,6 +28,8 @@ export interface Observations extends Record<string, unknown> {
   frame_delta_30s?: number;
   filebar_position_delta_60s?: number;
   frame_delta_60s?: number;
+  position_signal_present?: number;
+  position_static_polls?: number;
   // Insta runtime state
   insta_runtime_state?: string | null;
   insta_running_flag?: number;
@@ -208,6 +210,11 @@ function hasPlaybackMotion(obs: Observations): boolean {
   return pollDelta !== undefined && pollDelta > 0;
 }
 
+function hasRepeatedStaticPosition(obs: Observations): boolean {
+  return (obs.position_signal_present ?? 0) === 1
+    && (obs.position_static_polls ?? 0) >= 2;
+}
+
 function hasPlaybackCpuActivity(obs: Observations): boolean {
   return (obs.playout_cpu_usage_ratio_poll ?? 0) >= PLAYBACK_CPU_ACTIVE_RATIO;
 }
@@ -273,6 +280,7 @@ function computeRuntime(obs: Observations, context: HealthComputationContext): R
   // Insta installs it is not strong enough to clear a paused latch by itself.
   const pauseRecoveryProven = explicitMotionHealthy || freshPlaybackRecoverySignal || playlistAdvanceDetected;
   const healthyPlaybackProven = pauseRecoveryProven || playbackCpuActive;
+  const repeatedStaticPosition = hasRepeatedStaticPosition(obs);
   const keepPausedWhileStatic = context.previousRuntimeHealth === 'paused'
     && obs.playout_process_up === 1
     && !explicitStoppedInsta
@@ -302,6 +310,10 @@ function computeRuntime(obs: Observations, context: HealthComputationContext): R
   }
 
   if (explicitPausedInsta) {
+    return 'paused';
+  }
+
+  if (repeatedStaticPosition && !pauseRecoveryProven) {
     return 'paused';
   }
 

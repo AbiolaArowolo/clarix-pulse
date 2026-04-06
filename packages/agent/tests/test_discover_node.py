@@ -89,6 +89,81 @@ class DiscoverNodeScriptTests(unittest.TestCase):
         for player in insta_players:
             self.assertTrue(player["paths"]["fnf_log"].endswith("Indytek\\Insta log\\FNF"))
 
+    def test_detects_insta_channels_from_settings_folders_when_exe_is_shared(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            bundle_root = temp_root / "bundle"
+            bundle_root.mkdir()
+            program_files = temp_root / "Program Files"
+            program_files_x86 = temp_root / "Program Files (x86)"
+            program_data = temp_root / "ProgramData"
+
+            indytek_root = program_files / "Indytek"
+            shared_exe = indytek_root / "Insta Playout.exe"
+            shared_exe.parent.mkdir(parents=True, exist_ok=True)
+            shared_exe.write_text("", encoding="utf-8")
+
+            for folder_name in ("Insta Playout", "Insta Playout 2", "Insta Playout 3", "Insta Playout 4"):
+                settings_dir = indytek_root / folder_name / "Settings"
+                settings_dir.mkdir(parents=True)
+                (settings_dir / "Mainplaylist.xml").write_text("<playlist />", encoding="utf-8")
+
+            command = f"""
+& {{
+  $programFiles = '{_ps_quote(program_files)}'
+  $programFilesX86 = '{_ps_quote(program_files_x86)}'
+  $programData = '{_ps_quote(program_data)}'
+  [Environment]::SetEnvironmentVariable('ProgramFiles', $programFiles, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramFiles(x86)', $programFilesX86, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramData', $programData, 'Process')
+  function Get-CimInstance {{
+    [CmdletBinding()]
+    param([string]$ClassName)
+    if ($ClassName -ne 'Win32_Process') {{ return @() }}
+    return @(
+      [pscustomobject]@{{ Name='Insta Playout.exe'; ExecutablePath='{_ps_quote(shared_exe)}'; CommandLine='' }},
+      [pscustomobject]@{{ Name='Insta Playout.exe'; ExecutablePath='{_ps_quote(shared_exe)}'; CommandLine='' }}
+    )
+  }}
+  & '{_ps_quote(DISCOVERY_SCRIPT)}' -StdOut
+}}
+"""
+            completed = subprocess.run(
+                [
+                    POWERSHELL_EXE,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    command,
+                ],
+                cwd=bundle_root,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+        report = json.loads(completed.stdout)
+        insta_players = [player for player in report["players"] if player["playout_type"] == "insta"]
+
+        self.assertEqual(len(insta_players), 4)
+        self.assertEqual(
+            {player["label"] for player in insta_players},
+            {"Insta Playout", "Insta Playout 2", "Insta Playout 3", "Insta Playout 4"},
+        )
+        self.assertEqual(
+            {
+                player["paths"]["instance_root"]
+                for player in insta_players
+            },
+            {
+                str(indytek_root / "Insta Playout" / "Settings"),
+                str(indytek_root / "Insta Playout 2" / "Settings"),
+                str(indytek_root / "Insta Playout 3" / "Settings"),
+                str(indytek_root / "Insta Playout 4" / "Settings"),
+            },
+        )
+
     def test_uses_pulse_account_json_as_fallback_for_missing_hub_and_key(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

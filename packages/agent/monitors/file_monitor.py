@@ -20,6 +20,7 @@ _prev_position_60s: Dict[str, float] = {}
 _prev_position_60s_ts: Dict[str, datetime] = {}
 _prev_position_poll: Dict[str, float] = {}
 _prev_file_mtime: Dict[str, float] = {}
+_static_position_polls: Dict[str, int] = {}
 
 # Track last seen line count for content error logs
 _last_fnf_size: Dict[str, int] = {}
@@ -217,6 +218,19 @@ def _compute_delta(instance_id: str, current_value: float) -> Tuple[Optional[flo
     return delta_poll, delta_30s, delta_60s
 
 
+def _update_static_position_polls(instance_id: str, delta_poll: Optional[float]) -> int:
+    if delta_poll is None:
+        _static_position_polls[instance_id] = 0
+        return 0
+
+    if delta_poll == 0:
+        _static_position_polls[instance_id] = _static_position_polls.get(instance_id, 0) + 1
+    else:
+        _static_position_polls[instance_id] = 0
+
+    return _static_position_polls[instance_id]
+
+
 def check(instance_id: str, playout_type: str, paths: dict) -> dict:
     """
     Returns:
@@ -259,18 +273,30 @@ def check(instance_id: str, playout_type: str, paths: dict) -> dict:
         position = _read_filebar(instance_root)
         if position is not None:
             dpoll, d30, d60 = _compute_delta(instance_id, position)
+            result["position_signal_present"] = 1
+            result["position_static_polls"] = _update_static_position_polls(instance_id, dpoll)
             if dpoll is not None:
                 result["filebar_position_delta_poll"] = round(dpoll, 3)
             result["filebar_position_delta_30s"] = round(d30, 3)
             result["filebar_position_delta_60s"] = round(d60, 3)
+        else:
+            _static_position_polls.pop(instance_id, None)
+            result["position_signal_present"] = 0
+            result["position_static_polls"] = 0
     elif family == "admax":
         frame = _read_admax_frame(paths)
         if frame is not None:
             dpoll, d30, d60 = _compute_delta(instance_id, float(frame))
+            result["position_signal_present"] = 1
+            result["position_static_polls"] = _update_static_position_polls(instance_id, dpoll)
             if dpoll is not None:
                 result["frame_delta_poll"] = round(dpoll, 3)
             result["frame_delta_30s"] = round(d30, 3)
             result["frame_delta_60s"] = round(d60, 3)
+        else:
+            _static_position_polls.pop(instance_id, None)
+            result["position_signal_present"] = 0
+            result["position_static_polls"] = 0
 
     # Content error detection
     fnf_key = f"{instance_id}_fnf"

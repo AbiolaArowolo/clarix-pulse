@@ -57,6 +57,10 @@ PROCESS_SELECTOR_KEYS = {
     "process_names",
     "process_name_regex",
     "process_name_regexes",
+    "executable_path_contains",
+    "executable_path_regex",
+    "command_line_contains",
+    "command_line_regex",
     "window_title",
     "window_title_contains",
     "window_title_regex",
@@ -1228,14 +1232,12 @@ def _import_local_ui_state(document_text: str, current_state: Any = None) -> tup
             ),
         ),
     )
-    enrollment_key = ""
-    if not agent_token:
-        enrollment_key = _as_non_placeholder_str(
-            document.get("enrollment_key")
-            or document.get("enrollmentKey")
-            or existing_pulse_config.get("enrollment_key"),
-            _as_non_placeholder_str(current.get("enrollment_key")),
-        )
+    enrollment_key = _as_non_placeholder_str(
+        document.get("enrollment_key")
+        or document.get("enrollmentKey")
+        or existing_pulse_config.get("enrollment_key"),
+        _as_non_placeholder_str(current.get("enrollment_key")),
+    )
 
     players_key_present = "players" in document or "instances" in document
     players_raw = document.get("players")
@@ -1404,6 +1406,8 @@ def _normalize_log_selectors(player: dict[str, Any]) -> dict[str, Any]:
 PROCESS_SELECTOR_LIST_UI_KEYS = {
     "process_names",
     "process_name_regexes",
+    "executable_path_contains",
+    "command_line_contains",
     "window_title_contains",
     "window_title_regexes",
 }
@@ -1411,6 +1415,8 @@ PROCESS_SELECTOR_LIST_UI_KEYS = {
 PROCESS_SELECTOR_STRING_UI_KEYS = {
     "process_name",
     "process_name_regex",
+    "executable_path_regex",
+    "command_line_regex",
     "window_title",
     "window_title_regex",
 }
@@ -3508,12 +3514,61 @@ def _sync_node_config_mirror_to_hub(
     }
 
 
+def _normalize_log_path_key(log_path: Any) -> str:
+    path = _as_str(log_path).strip()
+    if not path:
+        return ""
+    return os.path.normcase(os.path.normpath(path))
+
+
+def _build_cycle_shared_context(players: list[dict[str, Any]]) -> dict[str, Any]:
+    shared_connectivity: dict[str, Any] = {}
+    try:
+        shared_connectivity = connectivity.check()
+    except Exception as e:
+        log.debug(f"shared connectivity check error: {e}")
+
+    log_path_counts: dict[str, int] = {}
+    for player in players:
+        playout_type = _as_str(player.get("playout_type"), DEFAULT_PLAYOUT_TYPE)
+        paths = player.get("paths", {}) if isinstance(player.get("paths"), dict) else {}
+        log_path = log_monitor.resolve_log_path(playout_type, paths, require_exists=False)
+        log_path_key = _normalize_log_path_key(log_path)
+        if log_path_key:
+            log_path_counts[log_path_key] = log_path_counts.get(log_path_key, 0) + 1
+
+    return {
+        "shared_connectivity": shared_connectivity,
+        "log_path_counts": log_path_counts,
+    }
+
+
+def _should_allow_unscoped_log_tokens(
+    player: dict[str, Any],
+    log_path_counts: dict[str, int] | None = None,
+) -> bool:
+    log_selectors = player.get("log_selectors", {}) if isinstance(player.get("log_selectors"), dict) else {}
+    if log_monitor.has_scope_selectors(log_selectors):
+        return True
+
+    playout_type = _as_str(player.get("playout_type"), DEFAULT_PLAYOUT_TYPE)
+    paths = player.get("paths", {}) if isinstance(player.get("paths"), dict) else {}
+    log_path = log_monitor.resolve_log_path(playout_type, paths, require_exists=False)
+    log_path_key = _normalize_log_path_key(log_path)
+    if not log_path_key:
+        return True
+
+    counts = log_path_counts or {}
+    return counts.get(log_path_key, 0) <= 1
+
+
 def poll_player(
     node_id: str,
     hub_url: str,
     token: str,
     player: dict[str, Any],
     node_config_mirror: dict[str, Any] | None = None,
+    cycle_context: dict[str, Any] | None = None,
 ) -> None:
     player_id = player["player_id"]
     playout_type = player.get("playout_type", "insta")
@@ -3521,6 +3576,9 @@ def poll_player(
     process_selectors = player.get("process_selectors", {})
     log_selectors = player.get("log_selectors", {})
     udp_inputs = player.get("udp_inputs", [])
+    cycle_context = cycle_context if isinstance(cycle_context, dict) else {}
+    shared_connectivity = cycle_context.get("shared_connectivity")
+    log_path_counts = cycle_context.get("log_path_counts", {})
 
     observations: dict[str, Any] = {}
 
@@ -3533,7 +3591,13 @@ def poll_player(
 
     # 2. Deep log monitoring
     try:
-        obs = log_monitor.check(player_id, playout_type, paths, log_selectors)
+        obs = log_monitor.check(
+            player_id,
+            playout_type,
+            paths,
+            log_selectors,
+            allow_unscoped_tokens=_should_allow_unscoped_log_tokens(player, log_path_counts),
+        )
         observations.update(obs)
     except Exception as e:
         log.debug(f"[{player_id}] log monitor error: {e}")
@@ -3547,8 +3611,11 @@ def poll_player(
 
     # 4. Connectivity
     try:
-        obs = connectivity.check()
-        observations.update(obs)
+        if isinstance(shared_connectivity, dict) and shared_connectivity:
+            observations.update(shared_connectivity)
+        else:
+            obs = connectivity.check()
+            observations.update(obs)
     except Exception as e:
         log.debug(f"[{player_id}] connectivity check error: {e}")
 
@@ -3631,13 +3698,21 @@ def run_agent_loop() -> int:
             last_config_signature = config_signature
 
         cycle_start = time.time()
+        cycle_context = _build_cycle_shared_context(players)
 
         for player in players:
             player_id = _as_str(player.get("player_id"))
             if player_id and _player_is_runtime_suppressed(player_id):
                 continue
             try:
-                poll_player(node_id, hub_url, token, player, node_config_mirror=node_config_mirror)
+                poll_player(
+                    node_id,
+                    hub_url,
+                    token,
+                    player,
+                    node_config_mirror=node_config_mirror,
+                    cycle_context=cycle_context,
+                )
             except Exception:
                 log.error(f"Unhandled error polling {player.get('player_id', '?')}:\n{traceback.format_exc()}")
 

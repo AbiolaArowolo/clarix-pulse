@@ -107,6 +107,91 @@ class ConfigureBundleCommandTests(unittest.TestCase):
         self.assertEqual(config["hub_url"], "https://pulse.clarixtech.com")
         self.assertEqual(message, "Discovery report imported. Review the hub URL if needed, then save local settings.")
 
+    def test_import_local_ui_state_keeps_enrollment_key_with_existing_agent_token(self) -> None:
+        config, _ = agent._import_local_ui_state(
+            '{"node_id":"existing-node","node_name":"Existing Node","site_id":"existing-node","players":[]}',
+            {
+                "node_id": "existing-node",
+                "node_name": "Existing Node",
+                "site_id": "existing-node",
+                "agent_token": "AGENT-TOKEN-123",
+                "enrollment_key": "ENROLL-123",
+                "players": [],
+            },
+        )
+
+        self.assertEqual(config["agent_token"], "AGENT-TOKEN-123")
+        self.assertEqual(config["enrollment_key"], "ENROLL-123")
+
+
+class CycleContextTests(unittest.TestCase):
+    def test_build_cycle_shared_context_collects_connectivity_once_and_counts_log_paths(self) -> None:
+        players = [
+            {
+                "player_id": "one",
+                "playout_type": "generic_windows",
+                "paths": {"log_path": r"C:\Logs\shared\player.log"},
+                "log_selectors": {},
+            },
+            {
+                "player_id": "two",
+                "playout_type": "generic_windows",
+                "paths": {"log_path": r"C:\Logs\shared\player.log"},
+                "log_selectors": {},
+            },
+            {
+                "player_id": "three",
+                "playout_type": "generic_windows",
+                "paths": {"log_path": r"C:\Logs\solo\player.log"},
+                "log_selectors": {"include_contains": ["Channel 3"]},
+            },
+        ]
+
+        with patch.object(agent.connectivity, "check", return_value={"gateway_up": 1, "internet_up": 1}) as connectivity_mock:
+            context = agent._build_cycle_shared_context(players)
+
+        self.assertEqual(connectivity_mock.call_count, 1)
+        self.assertEqual(context["shared_connectivity"], {"gateway_up": 1, "internet_up": 1})
+        self.assertEqual(context["log_path_counts"][r"c:\logs\shared\player.log"], 2)
+        self.assertEqual(context["log_path_counts"][r"c:\logs\solo\player.log"], 1)
+
+    def test_should_allow_unscoped_log_tokens_only_for_unique_or_scoped_logs(self) -> None:
+        log_path_counts = {
+            r"c:\logs\shared\player.log": 2,
+            r"c:\logs\solo\player.log": 1,
+        }
+
+        self.assertFalse(
+            agent._should_allow_unscoped_log_tokens(
+                {
+                    "playout_type": "generic_windows",
+                    "paths": {"log_path": r"C:\Logs\shared\player.log"},
+                    "log_selectors": {},
+                },
+                log_path_counts,
+            )
+        )
+        self.assertTrue(
+            agent._should_allow_unscoped_log_tokens(
+                {
+                    "playout_type": "generic_windows",
+                    "paths": {"log_path": r"C:\Logs\shared\player.log"},
+                    "log_selectors": {"include_contains": ["Channel 2"]},
+                },
+                log_path_counts,
+            )
+        )
+        self.assertTrue(
+            agent._should_allow_unscoped_log_tokens(
+                {
+                    "playout_type": "generic_windows",
+                    "paths": {"log_path": r"C:\Logs\solo\player.log"},
+                    "log_selectors": {},
+                },
+                log_path_counts,
+            )
+        )
+
 
 class BrowserLaunchTests(unittest.TestCase):
     def test_open_url_in_browser_uses_windows_cmd_start_before_webbrowser(self) -> None:

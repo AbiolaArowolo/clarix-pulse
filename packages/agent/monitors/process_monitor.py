@@ -52,6 +52,14 @@ def _default_process_names(playout_type: str) -> set[str]:
     return set()
 
 
+def _as_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        return " ".join(str(item) for item in value if item)
+    return str(value)
+
+
 def _matches_process(name: str, selectors: dict, playout_type: str) -> bool:
     process_names = {value.lower() for value in _as_list(selectors.get("process_names"))}
     process_name = str(selectors.get("process_name", "")).strip().lower()
@@ -74,11 +82,43 @@ def _matches_process(name: str, selectors: dict, playout_type: str) -> bool:
     return True
 
 
+def _matches_process_metadata(metadata: dict, selectors: dict, playout_type: str) -> bool:
+    name = _as_text(metadata.get("name")).strip().lower()
+    if not name or not _matches_process(name, selectors, playout_type):
+        return False
+
+    executable_path = _as_text(metadata.get("executable_path")).strip()
+    executable_path_lower = executable_path.lower()
+    executable_contains = [value.lower() for value in _as_list(selectors.get("executable_path_contains"))]
+    if executable_contains and not any(value in executable_path_lower for value in executable_contains):
+        return False
+
+    executable_regex = str(selectors.get("executable_path_regex", "")).strip()
+    if executable_regex and not re.search(executable_regex, executable_path, re.IGNORECASE):
+        return False
+
+    command_line = _as_text(metadata.get("command_line")).strip()
+    command_line_lower = command_line.lower()
+    command_contains = [value.lower() for value in _as_list(selectors.get("command_line_contains"))]
+    if command_contains and not any(value in command_line_lower for value in command_contains):
+        return False
+
+    command_regex = str(selectors.get("command_line_regex", "")).strip()
+    if command_regex and not re.search(command_regex, command_line, re.IGNORECASE):
+        return False
+
+    return True
+
+
 def _iter_matching_processes(playout_type: str, selectors: dict) -> Iterable[psutil.Process]:
-    for proc in psutil.process_iter(["name", "pid"]):
+    for proc in psutil.process_iter(["name", "pid", "exe", "cmdline"]):
         try:
-            name = str(proc.info["name"] or "").lower()
-            if name and _matches_process(name, selectors, playout_type):
+            metadata = {
+                "name": proc.info.get("name"),
+                "executable_path": proc.info.get("exe"),
+                "command_line": proc.info.get("cmdline"),
+            }
+            if _matches_process_metadata(metadata, selectors, playout_type):
                 yield proc
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
