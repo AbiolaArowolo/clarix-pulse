@@ -2199,6 +2199,48 @@ def _local_ui_url() -> str:
     return f"http://{LOCAL_UI_HOST}:{LOCAL_UI_PORT}/"
 
 
+def _open_url_with_startfile(url: str) -> None:
+    if not hasattr(os, "startfile"):
+        raise OSError("os.startfile is unavailable")
+    os.startfile(url)
+
+
+def _open_url_with_cmd_start(url: str) -> None:
+    subprocess.Popen(["cmd.exe", "/c", "start", "", url], close_fds=True)
+
+
+def _open_url_with_rundll32(url: str) -> None:
+    subprocess.Popen(["rundll32.exe", "url.dll,FileProtocolHandler", url], close_fds=True)
+
+
+def _open_url_in_browser(url: str) -> str | None:
+    errors: list[str] = []
+
+    try:
+        if webbrowser.open(url, new=2):
+            return None
+        errors.append("webbrowser.open returned False")
+    except Exception as exc:
+        errors.append(f"webbrowser.open failed: {exc}")
+
+    if os.name == "nt":
+        for label, opener in (
+            ("os.startfile", _open_url_with_startfile),
+            ("cmd.exe start", _open_url_with_cmd_start),
+            ("rundll32", _open_url_with_rundll32),
+        ):
+            try:
+                opener(url)
+                return None
+            except Exception as exc:
+                errors.append(f"{label} failed: {exc}")
+
+    if not errors:
+        return "no browser launcher succeeded"
+
+    return "; ".join(errors)
+
+
 def _player_ids_from_config(config: dict[str, Any] | None) -> list[str]:
     if not isinstance(config, dict):
         return []
@@ -2559,10 +2601,10 @@ def _run_local_config_ui(existing: dict[str, Any] | None = None) -> dict[str, An
     thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
     thread.start()
 
-    try:
-        webbrowser.open(url)
-    except Exception:
-        pass
+    launch_error = _open_url_in_browser(url)
+    if launch_error:
+        print(f"Unable to open your browser automatically: {launch_error}")
+        print(f"Open this URL manually: {url}")
 
     try:
         while thread.is_alive() and not saved.is_set():
@@ -2636,10 +2678,9 @@ def open_local_ui_command() -> int:
         print(f"Persistent local UI is not running at {url}")
         return 2
 
-    try:
-        webbrowser.open(url)
-    except Exception as exc:
-        print(f"Unable to open your browser automatically: {exc}")
+    launch_error = _open_url_in_browser(url)
+    if launch_error:
+        print(f"Unable to open your browser automatically: {launch_error}")
         print(f"Open this URL manually: {url}")
         return 1
 

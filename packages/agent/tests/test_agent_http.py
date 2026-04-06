@@ -98,6 +98,31 @@ class ConfigureBundleCommandTests(unittest.TestCase):
         self.assertEqual(captured_state["enrollment_key"], "ENROLL-123")
 
 
+class BrowserLaunchTests(unittest.TestCase):
+    def test_open_url_in_browser_uses_windows_fallback_when_webbrowser_returns_false(self) -> None:
+        with patch.object(agent.webbrowser, "open", return_value=False) as browser_open_mock:
+            with patch.object(agent.os, "name", "nt"):
+                with patch.object(agent, "_open_url_with_startfile") as startfile_mock:
+                    with patch.object(agent, "_open_url_with_cmd_start") as cmd_start_mock:
+                        with patch.object(agent, "_open_url_with_rundll32") as rundll32_mock:
+                            error = agent._open_url_in_browser("http://127.0.0.1:3210/")
+
+        self.assertIsNone(error)
+        browser_open_mock.assert_called_once_with("http://127.0.0.1:3210/", new=2)
+        startfile_mock.assert_called_once_with("http://127.0.0.1:3210/")
+        cmd_start_mock.assert_not_called()
+        rundll32_mock.assert_not_called()
+
+    def test_open_local_ui_command_reports_manual_url_when_auto_open_fails(self) -> None:
+        response = Mock(status_code=200)
+
+        with patch.object(agent.requests, "get", return_value=response):
+            with patch.object(agent, "_open_url_in_browser", return_value="webbrowser.open returned False"):
+                exit_code = agent.open_local_ui_command()
+
+        self.assertEqual(exit_code, 1)
+
+
 class MirrorSyncTests(unittest.TestCase):
     def test_sync_node_config_mirror_to_hub_posts_payload_and_returns_removed_players(self) -> None:
         response = Mock(status_code=200)
