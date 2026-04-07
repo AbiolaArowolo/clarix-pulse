@@ -23,12 +23,28 @@ interface SessionShape {
   };
 }
 
+function formatDateLabel(value: string | null | undefined): string | null {
+  if (!value) return null;
+
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
 export function AccountPage({
   session,
 }: {
   session: SessionShape;
 }) {
-  const accessLabel = session.tenant.enabled ? 'Enabled' : 'Pending activation';
+  const accessLabel = session.tenant.enabled ? 'Access active' : 'Pending activation';
+  const defaultAlertTarget = session.tenant.defaultAlertEmail ?? session.user.email;
+  const accessWindowLabel = formatDateLabel(session.tenant.accessKeyExpiresAt) ?? 'Not set';
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -96,55 +112,72 @@ export function AccountPage({
     }
   };
 
+  const identityCards = [
+    {
+      label: 'Company',
+      value: session.tenant.name,
+      detail: session.tenant.slug,
+    },
+    {
+      label: 'Signed-in user',
+      value: session.user.displayName,
+      detail: session.user.email,
+    },
+  ] as const;
+
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.8fr)]">
-      <section className="space-y-5">
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/58 p-5 shadow-[0_20px_60px_rgba(2,6,23,0.28)] backdrop-blur">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-100">Account details</h3>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <div className="rounded-3xl border border-slate-800 bg-slate-950/55 p-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Company</p>
-              <p className="mt-2 text-lg font-semibold text-white">{session.tenant.name}</p>
-              <p className="mt-1 text-sm text-slate-400">{session.tenant.slug}</p>
+    <div className="space-y-5">
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+        <div className="ui-hero-panel overflow-hidden px-5 py-5 sm:px-6 sm:py-6">
+          <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+            <div className="max-w-3xl">
+              <p className="ui-kicker-muted">Downloads and access</p>
+              <h3 className="mt-3 text-3xl font-semibold leading-tight text-slate-50 sm:text-4xl">
+                Keep installer access, recovery, and device handoff in one calmer workspace.
+              </h3>
+              <p className="mt-3 max-w-2xl text-base leading-7 text-slate-300">
+                Pull the current Windows installer, create short-lived handoff links for remote operators, and keep recovery details nearby without turning this page into another wall of equal-weight cards.
+              </p>
             </div>
-            <div className="rounded-3xl border border-slate-800 bg-slate-950/55 p-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Signed-in user</p>
-              <p className="mt-2 text-lg font-semibold text-white">{session.user.displayName}</p>
-              <p className="mt-1 text-sm text-slate-400">{session.user.email}</p>
+
+            <div className="rounded-[var(--radius-panel)] border border-white/[0.08] bg-white/[0.04] px-4 py-4 text-sm text-slate-300 xl:max-w-xs">
+              <span className={`ui-status-pill ${session.tenant.enabled ? 'status-green' : 'status-orange'}`}>
+                {accessLabel}
+              </span>
+              <p className="mt-4 text-sm text-slate-300">Default alerts route to</p>
+              <p className="mt-1 text-lg font-semibold text-slate-50">{defaultAlertTarget}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                Access key window: <span className="font-semibold text-slate-200">{accessWindowLabel}</span>
+              </p>
             </div>
           </div>
-        </div>
 
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/58 p-5 shadow-[0_20px_60px_rgba(2,6,23,0.28)] backdrop-blur">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-100">Installer access</h3>
-          <p className="mt-3 text-sm leading-6 text-slate-300">
-            The Windows installer bundle is available only after sign-in.
-          </p>
           {(downloadError || linkError || copyNotice) && (
-            <>
+            <div className="mt-6 space-y-3">
               {downloadError && (
-                <div className="mt-4 rounded-2xl border border-red-700/40 bg-red-900/20 px-4 py-3 text-sm text-red-100">
+                <div className="rounded-[var(--radius-control)] border border-red-700/40 bg-red-900/20 px-4 py-3 text-sm text-red-100">
                   {downloadError}
                 </div>
               )}
               {linkError && (
-                <div className="mt-4 rounded-2xl border border-red-700/40 bg-red-900/20 px-4 py-3 text-sm text-red-100">
+                <div className="rounded-[var(--radius-control)] border border-red-700/40 bg-red-900/20 px-4 py-3 text-sm text-red-100">
                   {linkError}
                 </div>
               )}
               {copyNotice && (
-                <div className="mt-4 rounded-2xl border border-emerald-700/40 bg-emerald-900/20 px-4 py-3 text-sm text-emerald-100">
+                <div className="rounded-[var(--radius-control)] border border-emerald-700/40 bg-emerald-900/20 px-4 py-3 text-sm text-emerald-100">
                   {copyNotice}
                 </div>
               )}
-            </>
+            </div>
           )}
-          <div className="mt-4 flex flex-wrap gap-3">
+
+          <div className="mt-6 flex flex-wrap gap-3">
             <button
               type="button"
               onClick={() => void downloadInstaller()}
               disabled={downloading}
-              className="rounded-full border border-cyan-400/35 bg-cyan-400/12 px-4 py-2 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-[var(--radius-control)] border border-indigo-400/35 bg-indigo-400/14 px-4 py-2.5 text-sm font-semibold text-indigo-50 transition-colors hover:border-indigo-300 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {downloading ? 'Preparing download...' : 'Download Clarix Pulse for Windows'}
             </button>
@@ -152,25 +185,26 @@ export function AccountPage({
               type="button"
               onClick={() => void generateInstallerLink()}
               disabled={creatingLink}
-              className="rounded-full border border-slate-700 bg-slate-900/80 px-4 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-[var(--radius-control)] border border-slate-700 bg-slate-900/75 px-4 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
               {creatingLink ? 'Creating secure link...' : 'Create secure install link'}
             </button>
           </div>
+
           {secureLink && (
-            <div className="mt-4 rounded-3xl border border-slate-800 bg-slate-950/60 p-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Direct pull link</p>
+            <div className="mt-6 rounded-[var(--radius-panel)] border border-slate-800/80 bg-slate-950/55 p-4">
+              <p className="ui-kicker-muted">Secure installer handoff</p>
               <p className="mt-2 text-sm leading-6 text-slate-300">
-                Use this expiring link with <code>install-from-url.ps1</code> or any HTTPS download tool.
+                Use this expiring installer URL with <code>install-from-url.ps1</code> or send it directly to a remote technician finishing setup on the node.
               </p>
-              <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 font-mono text-xs text-cyan-100">
+              <div className="mt-4 overflow-x-auto rounded-[var(--radius-control)] border border-slate-800 bg-slate-950 px-4 py-3 font-mono text-xs text-indigo-100">
                 {secureLink.url}
               </div>
-              <div className="mt-3 flex flex-wrap items-center gap-3">
+              <div className="mt-4 flex flex-wrap items-center gap-3">
                 <button
                   type="button"
                   onClick={() => void copyLink()}
-                  className="rounded-full border border-cyan-400/35 bg-cyan-400/12 px-4 py-2 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300"
+                  className="rounded-[var(--radius-control)] border border-indigo-400/35 bg-indigo-400/14 px-4 py-2.5 text-sm font-semibold text-indigo-50 transition-colors hover:border-indigo-300"
                 >
                   Copy secure link
                 </button>
@@ -178,73 +212,101 @@ export function AccountPage({
               </div>
             </div>
           )}
-        </div>
 
-        <InstallWorkspacePanel />
-      </section>
-
-      <aside className="space-y-5">
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/58 p-5 shadow-[0_20px_60px_rgba(2,6,23,0.28)] backdrop-blur">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-100">Access status</h3>
-          <p className="mt-3 text-sm leading-6 text-slate-300">
-            Status: <span className="font-semibold text-white">{accessLabel}</span>
-          </p>
-          {session.tenant.disabledReason && (
-            <p className="mt-2 text-sm leading-6 text-slate-400">{session.tenant.disabledReason}</p>
-          )}
-          <p className="mt-3 text-sm leading-6 text-slate-300">
-            Access key hint: <span className="font-semibold text-white">{session.tenant.accessKeyHint ?? 'Not available'}</span>
-          </p>
-          <p className="mt-2 text-sm leading-6 text-slate-300">
-            Access key expires: <span className="font-semibold text-white">{session.tenant.accessKeyExpiresAt ?? 'Not set'}</span>
-          </p>
-        </div>
-
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/58 p-5 shadow-[0_20px_60px_rgba(2,6,23,0.28)] backdrop-blur">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-100">Access key recovery</h3>
-          <p className="mt-3 text-sm leading-6 text-slate-300">
-            Lost or forgotten your access key? Request a new one - it will be emailed to <span className="font-semibold text-white">{session.user.email}</span>. This replaces any existing key.
-          </p>
-          {keyRequestNotice && (
-            <div className="mt-3 rounded-2xl border border-emerald-700/40 bg-emerald-900/20 px-4 py-3 text-sm text-emerald-100">
-              {keyRequestNotice}
-            </div>
-          )}
-          {keyRequestError && (
-            <div className="mt-3 rounded-2xl border border-red-700/40 bg-red-900/20 px-4 py-3 text-sm text-red-100">
-              {keyRequestError}
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={() => void requestAccessKey()}
-            disabled={keyRequestBusy}
-            className="mt-4 rounded-full border border-cyan-400/35 bg-cyan-400/12 px-4 py-2 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {keyRequestBusy ? 'Sending...' : 'Email me a new access key'}
-          </button>
-        </div>
-
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/58 p-5 shadow-[0_20px_60px_rgba(2,6,23,0.28)] backdrop-blur">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-100">Alert default</h3>
-          <p className="mt-3 text-sm leading-6 text-slate-300">
-            Registration seeded <span className="font-semibold text-white">{session.tenant.defaultAlertEmail ?? session.user.email}</span> as the default incident alert recipient.
-          </p>
-          <p className="mt-2 text-sm leading-6 text-slate-400">
-            You can change recipients at any time from Alert Contacts on the dashboard.
-          </p>
-        </div>
-
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/58 p-5 shadow-[0_20px_60px_rgba(2,6,23,0.28)] backdrop-blur">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-100">Enrollment key fallback</h3>
-          <p className="mt-3 text-sm leading-6 text-slate-300">
-            Keep this as a fallback for local self-enrollment when you cannot use a provisioned config.
-          </p>
-          <div className="mt-3 rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 font-mono text-sm text-cyan-100">
-            {session.tenant.enrollmentKey}
+          <div className="mt-8 grid gap-4 md:grid-cols-2">
+            {identityCards.map((card) => (
+              <div
+                key={card.label}
+                className="rounded-[var(--radius-panel)] border border-slate-800/70 bg-slate-900/50 px-5 py-5 shadow-[0_18px_45px_rgba(2,6,23,0.22)]"
+              >
+                <p className="ui-kicker-muted">{card.label}</p>
+                <p className="mt-3 text-lg font-semibold text-slate-50">{card.value}</p>
+                <p className="mt-2 text-sm leading-6 text-slate-400">{card.detail}</p>
+              </div>
+            ))}
           </div>
         </div>
-      </aside>
+
+        <aside className="space-y-5">
+          <div className="ui-accent-card rounded-[var(--radius-panel)] px-5 py-5">
+            <p className="ui-kicker-muted text-indigo-100">Access status</p>
+            <div className="mt-4 space-y-4">
+              <div>
+                <p className="text-sm text-slate-300">Current state</p>
+                <p className="mt-2 text-lg font-semibold text-slate-50">{accessLabel}</p>
+                {session.tenant.disabledReason && (
+                  <p className="mt-2 text-sm leading-6 text-slate-300">{session.tenant.disabledReason}</p>
+                )}
+              </div>
+
+              <div className="ui-quiet-rule h-px" />
+
+              <div>
+                <p className="text-sm text-slate-300">Access key hint</p>
+                <p className="mt-2 text-base font-semibold text-slate-100">{session.tenant.accessKeyHint ?? 'Not available'}</p>
+              </div>
+
+              <div className="ui-quiet-rule h-px" />
+
+              <div>
+                <p className="text-sm text-slate-300">Access key window</p>
+                <p className="mt-2 text-base font-semibold text-slate-100">{accessWindowLabel}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="ui-shell-panel rounded-[var(--radius-panel)] px-5 py-5">
+            <p className="ui-kicker-muted">Access key recovery</p>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              Lost or forgotten your access key? Request a new one and Clarix Pulse will email it to <span className="font-semibold text-slate-100">{session.user.email}</span>. This replaces any existing key.
+            </p>
+            {keyRequestNotice && (
+              <div className="mt-4 rounded-[var(--radius-control)] border border-emerald-700/40 bg-emerald-900/20 px-4 py-3 text-sm text-emerald-100">
+                {keyRequestNotice}
+              </div>
+            )}
+            {keyRequestError && (
+              <div className="mt-4 rounded-[var(--radius-control)] border border-red-700/40 bg-red-900/20 px-4 py-3 text-sm text-red-100">
+                {keyRequestError}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => void requestAccessKey()}
+              disabled={keyRequestBusy}
+              className="mt-4 rounded-[var(--radius-control)] border border-indigo-400/35 bg-indigo-400/14 px-4 py-2.5 text-sm font-semibold text-indigo-50 transition-colors hover:border-indigo-300 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {keyRequestBusy ? 'Sending...' : 'Email me a new access key'}
+            </button>
+          </div>
+
+          <div className="ui-shell-panel rounded-[var(--radius-panel)] px-5 py-5">
+            <p className="ui-kicker-muted">Fallback details</p>
+            <div className="mt-4 space-y-4">
+              <div>
+                <p className="text-sm text-slate-300">Alert default</p>
+                <p className="mt-2 text-sm leading-6 text-slate-300">
+                  Registration seeded <span className="font-semibold text-slate-100">{defaultAlertTarget}</span> as the default incident alert recipient.
+                </p>
+              </div>
+
+              <div className="ui-quiet-rule h-px" />
+
+              <div>
+                <p className="text-sm text-slate-300">Enrollment key fallback</p>
+                <p className="mt-2 text-sm leading-6 text-slate-300">
+                  Keep this as the contingency path for local self-enrollment when a provisioned config is not available yet.
+                </p>
+                <div className="mt-3 overflow-x-auto rounded-[var(--radius-control)] border border-slate-700 bg-slate-950/70 px-4 py-3 font-mono text-sm text-indigo-100">
+                  {session.tenant.enrollmentKey}
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <InstallWorkspacePanel />
     </div>
   );
 }

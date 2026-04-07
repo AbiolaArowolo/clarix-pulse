@@ -608,46 +608,22 @@ export function RemoteSetupPanel() {
     <CollapsibleSection
       id="remote-setup"
       label="Remote Setup"
-      badge="SETUP"
       summary={`Provision nodes from the remote dashboard | ${stats.players} player${stats.players === 1 ? '' : 's'}`}
       defaultOpen={false}
       forceOpen={discoveryAutoLoaded}
     >
-      <div className="theme-dark-gradient-card overflow-hidden rounded-2xl border border-cyan-500/20 bg-[linear-gradient(135deg,rgba(3,15,29,0.96),rgba(8,24,44,0.94)_45%,rgba(21,39,63,0.92))] shadow-[0_12px_40px_rgba(2,12,27,0.32)]">
-      <div className="border-b border-cyan-500/15 px-4 py-5 sm:px-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <div className="ui-hero-panel overflow-hidden">
+      <div className="border-b border-white/[0.08] px-4 py-5 sm:px-6 sm:py-6">
+        <div className="grid gap-5 2xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
           <div className="max-w-3xl">
-            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-100">
-              Remote Setup
-            </div>
-            <h2 className="mt-3 text-xl font-semibold text-white sm:text-2xl">Provision nodes from the remote dashboard</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-              Upload a discovery report, keep advanced selector fields folded until you need them, and generate a ready-to-download node config with a fresh agent token.
+            <p className="ui-kicker-muted">Remote setup flow</p>
+            <h2 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">Provision nodes from the remote dashboard</h2>
+            <p className="mt-3 max-w-2xl text-base leading-7 text-slate-300">
+              Pull discovery in first, keep advanced fields folded until you need them, and generate a ready-to-download node config with a fresh agent token when the draft looks right.
             </p>
-          </div>
 
-          <div className="grid gap-2 sm:grid-cols-3">
-            <div className="rounded-2xl border border-slate-700/70 bg-slate-950/50 px-4 py-3">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Players</p>
-              <p className="mt-1 text-lg font-semibold text-white">{stats.players}</p>
-            </div>
-            <div className="rounded-2xl border border-slate-700/70 bg-slate-950/50 px-4 py-3">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Monitoring Off</p>
-              <p className="mt-1 text-lg font-semibold text-white">{stats.monitoringOff}</p>
-            </div>
-            <div className="rounded-2xl border border-slate-700/70 bg-slate-950/50 px-4 py-3">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Advanced Open</p>
-              <p className="mt-1 text-lg font-semibold text-white">{stats.advancedOpen}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid gap-5 px-4 py-5 sm:px-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.8fr)]">
-        <div className="space-y-5">
-          <div className="rounded-3xl border border-slate-800/80 bg-slate-950/40 p-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="inline-flex cursor-pointer items-center gap-3 rounded-2xl border border-dashed border-slate-700 bg-slate-950/65 px-4 py-3 text-sm text-slate-300 transition-colors hover:border-cyan-400/50">
+            <div className="mt-5 flex flex-wrap items-center gap-3">
+              <label className="inline-flex cursor-pointer items-center gap-3 rounded-2xl border border-dashed border-cyan-400/35 bg-cyan-400/12 px-4 py-3 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300">
                 <input
                   type="file"
                   accept=".json,.yaml,.yml,.txt"
@@ -668,17 +644,51 @@ export function RemoteSetupPanel() {
               <button
                 type="button"
                 onClick={clearForm}
-                className="rounded-2xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-sm font-semibold text-slate-100 transition-colors hover:border-slate-500 hover:text-white"
+                className="rounded-2xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white"
               >
                 Clear form
               </button>
             </div>
           </div>
 
-          <div className="rounded-3xl border border-slate-800/80 bg-slate-950/40 p-4">
+          <div className="grid gap-3">
+            <div className="rounded-2xl border border-white/[0.08] bg-white/[0.04] px-4 py-4">
+              <p className="ui-kicker-muted">Draft health</p>
+              <p className="mt-2 text-lg font-semibold text-white">
+                {stats.players === 0
+                  ? 'Discovery or a first player draft gets this flow moving.'
+                  : 'Provision when the node identity and player cards look clean.'}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-300">
+                Monitoring-off players, advanced selector edits, and UDP stream changes stay visible before you mint the final config.
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-3">
+                <p className="ui-kicker-muted">Players</p>
+                <p className="mt-2 text-2xl font-semibold text-white">{stats.players}</p>
+              </div>
+              <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-3">
+                <p className="ui-kicker-muted">Monitoring off</p>
+                <p className="mt-2 text-2xl font-semibold text-white">{stats.monitoringOff}</p>
+              </div>
+              <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-3">
+                <p className="ui-kicker-muted">Advanced open</p>
+                <p className="mt-2 text-2xl font-semibold text-white">{stats.advancedOpen}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-5 px-4 py-5 sm:px-6 2xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.8fr)]">
+        <div className="space-y-5">
+          <div className="rounded-2xl border border-white/[0.08] bg-slate-950/28 p-5 shadow-[0_18px_48px_rgba(2,12,27,0.14)]">
             <div className="mb-4">
-              <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-200">Node Identity</h3>
-              <p className="mt-1 text-sm text-slate-400">Uploaded reports can fill these automatically, but you can edit them before provisioning.</p>
+              <p className="ui-kicker-muted">Node identity</p>
+              <h3 className="mt-2 text-xl font-semibold text-slate-50">Confirm the node before you mint config</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-400">Uploaded reports can fill these automatically, but you can edit them before provisioning.</p>
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
@@ -734,7 +744,7 @@ export function RemoteSetupPanel() {
 
           <div className="space-y-4">
             {form.players.length === 0 && (
-              <div className="rounded-3xl border border-dashed border-slate-700 bg-slate-950/35 px-5 py-8 text-center">
+              <div className="rounded-2xl border border-dashed border-slate-700/80 bg-slate-950/22 px-5 py-8 text-center">
                 <p className="text-base font-medium text-slate-200">No players added yet.</p>
                 <p className="mt-2 text-sm text-slate-400">
                   Upload a discovery report or start with <span className="font-medium text-slate-200">Add player</span>.
@@ -752,12 +762,12 @@ export function RemoteSetupPanel() {
               return (
                 <article
                   key={`${player.playerId}-${index}`}
-                  className="theme-dark-gradient-card rounded-3xl border border-slate-800/80 bg-[linear-gradient(180deg,rgba(12,22,38,0.92),rgba(9,18,31,0.88))] p-4 shadow-[0_16px_50px_rgba(2,12,27,0.18)]"
+                  className="rounded-3xl border border-white/[0.08] bg-slate-950/28 p-4 shadow-[0_16px_42px_rgba(2,12,27,0.14)]"
                 >
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
+                        <span className="rounded-xl border border-slate-700 bg-slate-900/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300">
                           Player {index + 1}
                         </span>
                         <span className={`rounded-full border px-3 py-1 text-[11px] font-semibold ${
@@ -804,7 +814,7 @@ export function RemoteSetupPanel() {
                             clipRule="evenodd"
                           />
                         </svg>
-                        <span className="text-xs font-mono uppercase tracking-wider">Advanced</span>
+                        <span className="text-xs font-semibold tracking-[0.14em]">Advanced fields</span>
                       </button>
                       <button
                         type="button"
@@ -850,8 +860,8 @@ export function RemoteSetupPanel() {
                         ))}
                       </select>
                     </label>
-                    <div className="rounded-2xl border border-slate-800 bg-slate-950/65 px-4 py-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Remote Summary</p>
+                    <div className="rounded-2xl border border-white/[0.08] bg-slate-950/24 px-4 py-3">
+                      <p className="ui-kicker-muted">Remote summary</p>
                       <p className="mt-2 text-sm text-slate-300">
                         {player.monitoringEnabled ? 'Alarms and health will be active for this player.' : 'This player is created on the hub with monitoring disabled.'}
                       </p>
@@ -896,10 +906,10 @@ export function RemoteSetupPanel() {
                     </label>
                   </div>
 
-                  <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/55 p-4">
+                  <div className="mt-4 rounded-2xl border border-white/[0.08] bg-slate-950/24 p-4">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">UDP Inputs</p>
+                        <p className="ui-kicker-muted">UDP inputs</p>
                         <p className="mt-2 text-sm text-slate-300">
                           Add up to 5 optional stream probes for this player and turn each one on or off here.
                         </p>
@@ -919,7 +929,7 @@ export function RemoteSetupPanel() {
                         {udpEditor.error}
                       </div>
                     ) : udpEditor.inputs.length === 0 ? (
-                      <div className="mt-3 rounded-2xl border border-dashed border-slate-700 bg-slate-950/35 px-4 py-5 text-sm text-slate-400">
+                      <div className="mt-3 rounded-2xl border border-dashed border-slate-700 bg-slate-950/24 px-4 py-5 text-sm text-slate-400">
                         No UDP streams added for this player yet.
                       </div>
                     ) : (
@@ -1006,8 +1016,8 @@ export function RemoteSetupPanel() {
                   <div className={`grid transition-all duration-200 ease-in-out ${player.advancedOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
                   <div className="overflow-hidden">
                   {player.advancedOpen && (
-                    <div className="mt-4 grid gap-3 xl:grid-cols-3">
-                      <label className="xl:col-span-1">
+                    <div className="mt-4 grid gap-3 2xl:grid-cols-3">
+                      <label className="2xl:col-span-1">
                         <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Playlist / Secondary Log</span>
                         <input
                           type="text"
@@ -1017,7 +1027,7 @@ export function RemoteSetupPanel() {
                         />
                       </label>
 
-                      <label className="xl:col-span-1">
+                      <label className="2xl:col-span-1">
                         <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Process Selectors JSON</span>
                         <textarea
                           value={player.processSelectorsText}
@@ -1026,7 +1036,7 @@ export function RemoteSetupPanel() {
                         />
                       </label>
 
-                      <label className="xl:col-span-1">
+                      <label className="2xl:col-span-1">
                         <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Log Selectors JSON</span>
                         <textarea
                           value={player.logSelectorsText}
@@ -1035,7 +1045,7 @@ export function RemoteSetupPanel() {
                         />
                       </label>
 
-                      <label className="xl:col-span-3">
+                      <label className="2xl:col-span-3">
                         <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">UDP Inputs JSON (Advanced)</span>
                         <textarea
                           value={player.udpInputsText}
@@ -1056,15 +1066,15 @@ export function RemoteSetupPanel() {
             type="button"
             onClick={() => void provision()}
             disabled={provisioning}
-            className="w-full rounded-3xl border border-amber-400/35 bg-amber-400/12 px-5 py-4 text-base font-semibold text-amber-50 transition-colors hover:border-amber-300 hover:bg-amber-400/18 disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full rounded-3xl border border-cyan-400/35 bg-cyan-400/12 px-5 py-4 text-base font-semibold text-cyan-50 transition-colors hover:border-cyan-300 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {provisioning ? 'Provisioning node...' : 'Provision node and download config'}
           </button>
         </div>
 
         <aside className="space-y-5">
-          <div className="rounded-3xl border border-slate-800/80 bg-slate-950/40 p-4">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-200">How this flow works</h3>
+          <div className="rounded-2xl border border-white/[0.08] bg-slate-950/24 p-5 shadow-[0_18px_48px_rgba(2,12,27,0.12)]">
+            <p className="ui-kicker-muted">How this flow works</p>
             <div className="mt-3 space-y-3 text-sm leading-6 text-slate-300">
               <p>1. Upload a discovery report from a Windows node, or build the node draft manually.</p>
               <p>2. Keep advanced selectors hidden unless the player needs custom matching. UDP inputs stay visible in each player card.</p>
@@ -1073,8 +1083,8 @@ export function RemoteSetupPanel() {
           </div>
 
           {lastProvision && (
-            <div className="rounded-3xl border border-emerald-500/25 bg-emerald-500/10 p-4">
-              <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-50">Last Provision</h3>
+            <div className="rounded-3xl border border-emerald-500/25 bg-emerald-500/10 p-5">
+              <p className="ui-kicker-muted !text-emerald-100">Last provision</p>
               <div className="mt-3 space-y-2 text-sm text-emerald-100">
                 <p>Node: {lastProvision.nodeId}</p>
                 <p>Site: {lastProvision.siteId}</p>
@@ -1094,7 +1104,7 @@ export function RemoteSetupPanel() {
                     <button
                       type="button"
                       onClick={() => void copyConfigPullLink()}
-                      className="rounded-full border border-emerald-400/35 bg-emerald-400/12 px-4 py-2 text-sm font-semibold text-emerald-50 transition-colors hover:border-emerald-300"
+                      className="rounded-2xl border border-emerald-400/35 bg-emerald-400/12 px-4 py-2 text-sm font-semibold text-emerald-50 transition-colors hover:border-emerald-300"
                     >
                       Copy secure config link
                     </button>
@@ -1114,7 +1124,7 @@ export function RemoteSetupPanel() {
                     type="button"
                     onClick={() => void createInstallHandoffLink()}
                     disabled={creatingHandoffLink}
-                    className="rounded-full border border-cyan-400/35 bg-cyan-400/12 px-4 py-2 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="rounded-2xl border border-cyan-400/35 bg-cyan-400/12 px-4 py-2 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {creatingHandoffLink ? 'Creating handoff page...' : 'Create install handoff page'}
                   </button>
@@ -1131,7 +1141,7 @@ export function RemoteSetupPanel() {
                       <button
                         type="button"
                         onClick={() => void copyInstallHandoffLink()}
-                        className="rounded-full border border-cyan-400/35 bg-cyan-400/12 px-4 py-2 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300"
+                        className="rounded-2xl border border-cyan-400/35 bg-cyan-400/12 px-4 py-2 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300"
                       >
                         Copy handoff link
                       </button>

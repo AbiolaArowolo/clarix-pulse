@@ -12,6 +12,40 @@ interface SessionShape {
   };
 }
 
+const onboardingSteps = [
+  {
+    id: '01',
+    title: 'Stage the signed installer',
+    detail: 'Pull the latest Windows bundle from this workspace so the target node starts with the current Pulse build.',
+  },
+  {
+    id: '02',
+    title: 'Import discovery into remote setup',
+    detail: 'Upload the discovery report, confirm the inferred paths and player hints, and provision the node-scoped config.',
+  },
+  {
+    id: '03',
+    title: 'Finish the node locally',
+    detail: 'Use the provisioned config in the local UI, save the node settings, and install the service so it appears in the dashboard.',
+  },
+] as const;
+
+const localInstallChecklist = [
+  'Download the signed installer bundle for the Windows node.',
+  'Keep the monitored application or process running if possible before discovery.',
+  'Run discover-node.ps1 so Pulse can infer paths, logs, and player hints.',
+  'Upload the discovery report in the dashboard remote setup panel.',
+  'Provision the node to generate the tenant-scoped config.yaml.',
+  'Pull that config into the local Pulse UI and save the local settings.',
+  'Run install.bat to install the service and confirm the node appears on the dashboard.',
+] as const;
+
+const preparationNotes = [
+  'Use the signed-in download when you are the operator finishing setup yourself.',
+  'Create a secure installer link when a remote technician needs a short-lived handoff.',
+  'Open the dashboard as soon as discovery is ready so provisioning and import stay in the same session.',
+] as const;
+
 export function OnboardingPage({
   session,
   onNavigate,
@@ -21,7 +55,7 @@ export function OnboardingPage({
 }) {
   const alertEmail = session.tenant.defaultAlertEmail ?? session.user.email;
 
-  // Auto-redirect to Remote Setup panel when setup.bat opens the onboarding URL
+  // Auto-redirect to Remote Setup when setup.bat opens the onboarding URL
   // with a #discovery=<base64> hash. React Router strips the hash on navigate,
   // so we bridge it via sessionStorage before calling onNavigate.
   useEffect(() => {
@@ -29,8 +63,8 @@ export function OnboardingPage({
     if (!match) return;
     sessionStorage.setItem('_pulse_discovery_b64', match[1]);
     onNavigate('/app');
-  // onNavigate is stable — safe to omit from deps
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // onNavigate is stable, so omitting it from deps keeps this bridge one-shot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -81,120 +115,203 @@ export function OnboardingPage({
 
   return (
     <div className="space-y-5">
-      <section className="rounded-3xl border border-slate-800 bg-slate-900/58 p-5 shadow-[0_20px_60px_rgba(2,6,23,0.28)] backdrop-blur">
-        <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-100">Recommended onboarding flow</h3>
-        <div className="mt-4 grid gap-4 lg:grid-cols-3">
-          <div className="rounded-3xl border border-slate-800 bg-slate-950/55 p-4">
-            <p className="text-sm font-semibold text-white">1. Get the installer</p>
-            <p className="mt-2 text-sm leading-6 text-slate-400">
-              Download the latest Clarix Pulse bundle from this signed-in account, move it to the Windows node, and start the player if possible before discovery.
-            </p>
-            {downloadError && (
-              <div className="mt-4 rounded-2xl border border-red-700/40 bg-red-900/20 px-4 py-3 text-sm text-red-100">
-                {downloadError}
-              </div>
-            )}
-            {linkError && (
-              <div className="mt-4 rounded-2xl border border-red-700/40 bg-red-900/20 px-4 py-3 text-sm text-red-100">
-                {linkError}
-              </div>
-            )}
-            {copyNotice && (
-              <div className="mt-4 rounded-2xl border border-emerald-700/40 bg-emerald-900/20 px-4 py-3 text-sm text-emerald-100">
-                {copyNotice}
-              </div>
-            )}
-            <div className="mt-4 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={() => void downloadInstaller()}
-                disabled={downloading}
-                className="inline-flex rounded-full border border-cyan-400/35 bg-cyan-400/12 px-4 py-2 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {downloading ? 'Preparing download...' : 'Download installer'}
-              </button>
-              <button
-                type="button"
-                onClick={() => void generateInstallerLink()}
-                disabled={creatingLink}
-                className="inline-flex rounded-full border border-slate-700 bg-slate-900/80 px-4 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {creatingLink ? 'Creating secure link...' : 'Create secure link'}
-              </button>
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.7fr)]">
+        <div className="ui-hero-panel overflow-hidden px-5 py-5 sm:px-6 sm:py-6">
+          <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+            <div className="max-w-3xl">
+              <p className="ui-kicker-muted">Recommended first pass</p>
+              <h3 className="mt-3 text-3xl font-semibold leading-tight text-slate-50 sm:text-4xl">
+                Bring a Windows node online with one clean sequence instead of three competing panels.
+              </h3>
+              <p className="mt-3 max-w-2xl text-base leading-7 text-slate-300">
+                Start with the signed installer, move discovery straight into remote setup, and finish the node locally with the provisioned config so the first run lands cleanly in the dashboard.
+              </p>
             </div>
-            {installerLink && (
-              <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
-                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Direct pull link</p>
-                <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 font-mono text-xs text-cyan-100">
-                  {installerLink.url}
+
+            <div className="rounded-[var(--radius-panel)] border border-white/[0.08] bg-white/[0.04] px-4 py-4 text-sm text-slate-300 xl:max-w-xs">
+              <p className="ui-kicker-muted">Alert routing</p>
+              <p className="mt-2 text-lg font-semibold text-slate-50">{alertEmail}</p>
+              <p className="mt-2 leading-6 text-slate-400">
+                New incident alerts start here until you change the contact list from the dashboard.
+              </p>
+            </div>
+          </div>
+
+          {(downloadError || linkError || copyNotice) && (
+            <div className="mt-6 space-y-3">
+              {downloadError && (
+                <div className="rounded-[var(--radius-control)] border border-red-700/40 bg-red-900/20 px-4 py-3 text-sm text-red-100">
+                  {downloadError}
                 </div>
-                <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => void copyInstallerLink()}
-                    className="rounded-full border border-cyan-400/35 bg-cyan-400/12 px-4 py-2 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300"
+              )}
+              {linkError && (
+                <div className="rounded-[var(--radius-control)] border border-red-700/40 bg-red-900/20 px-4 py-3 text-sm text-red-100">
+                  {linkError}
+                </div>
+              )}
+              {copyNotice && (
+                <div className="rounded-[var(--radius-control)] border border-emerald-700/40 bg-emerald-900/20 px-4 py-3 text-sm text-emerald-100">
+                  {copyNotice}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => void downloadInstaller()}
+              disabled={downloading}
+              className="rounded-[var(--radius-control)] border border-indigo-400/35 bg-indigo-400/14 px-4 py-2.5 text-sm font-semibold text-indigo-50 transition-colors hover:border-indigo-300 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {downloading ? 'Preparing download...' : 'Download installer'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void generateInstallerLink()}
+              disabled={creatingLink}
+              className="rounded-[var(--radius-control)] border border-slate-700 bg-slate-900/75 px-4 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {creatingLink ? 'Creating secure link...' : 'Create secure link'}
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('/app')}
+              className="rounded-[var(--radius-control)] border border-slate-700 bg-slate-900/75 px-4 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white"
+            >
+              Open dashboard and import discovery
+            </button>
+          </div>
+
+          {installerLink && (
+            <div className="mt-6 rounded-[var(--radius-panel)] border border-slate-800/80 bg-slate-950/55 p-4">
+              <p className="ui-kicker-muted">Secure installer handoff</p>
+              <p className="mt-2 text-sm leading-6 text-slate-300">
+                Share this short-lived installer URL with a remote operator when they need to pull the bundle without signing into the dashboard.
+              </p>
+              <div className="mt-4 overflow-x-auto rounded-[var(--radius-control)] border border-slate-800 bg-slate-950 px-4 py-3 font-mono text-xs text-indigo-100">
+                {installerLink.url}
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void copyInstallerLink()}
+                  className="rounded-[var(--radius-control)] border border-indigo-400/35 bg-indigo-400/14 px-4 py-2.5 text-sm font-semibold text-indigo-50 transition-colors hover:border-indigo-300"
+                >
+                  Copy secure link
+                </button>
+                <span className="text-xs text-slate-500">Expires: {installerLink.expiresAt}</span>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-8 grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
+            <div className="rounded-[var(--radius-panel)] border border-slate-800/70 bg-slate-900/50 px-5 py-5 shadow-[0_18px_45px_rgba(2,6,23,0.22)]">
+              <p className="ui-kicker-muted">Operator flow</p>
+              <div className="mt-4 space-y-3">
+                {onboardingSteps.map((step) => (
+                  <div
+                    key={step.id}
+                    className="flex gap-4 rounded-[var(--radius-panel)] border border-slate-800/70 bg-slate-950/50 px-4 py-4"
                   >
-                    Copy secure link
-                  </button>
-                  <span className="text-xs text-slate-500">Expires: {installerLink.expiresAt}</span>
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-indigo-400/30 bg-indigo-400/12 text-sm font-semibold text-indigo-100">
+                      {step.id}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-base font-semibold text-slate-50">{step.title}</p>
+                      <p className="mt-1 text-sm leading-6 text-slate-400">{step.detail}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="ui-accent-card rounded-[var(--radius-panel)] px-5 py-5">
+              <p className="ui-kicker-muted text-indigo-100">Fallback access</p>
+              <div className="mt-4 space-y-4">
+                <div>
+                  <p className="text-sm text-slate-300">Enrollment key</p>
+                  <div className="mt-3 overflow-x-auto rounded-[var(--radius-control)] border border-indigo-300/18 bg-slate-950/55 px-4 py-3 font-mono text-sm text-indigo-100">
+                    {session.tenant.enrollmentKey}
+                  </div>
+                </div>
+
+                <div className="ui-quiet-rule h-px" />
+
+                <div>
+                  <p className="text-sm text-slate-300">When to use it</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-300">
+                    Keep enrollment-key setup as the contingency path when the node cannot pull a provisioned config yet.
+                  </p>
                 </div>
               </div>
-            )}
+            </div>
           </div>
-          <div className="rounded-3xl border border-slate-800 bg-slate-950/55 p-4">
-            <p className="text-sm font-semibold text-white">2. Import the discovery report</p>
-            <p className="mt-2 text-sm leading-6 text-slate-400">
-              Open the dashboard, upload the report, review the auto-filled paths and log matches, then provision the node to mint its final config.
-            </p>
-          </div>
-          <div className="rounded-3xl border border-slate-800 bg-slate-950/55 p-4">
-            <p className="text-sm font-semibold text-white">3. Finish local install</p>
-            <p className="mt-2 text-sm leading-6 text-slate-400">
-              Import the provisioned <code>config.yaml</code> into the local UI, save settings, and install the agent service so the node starts mirroring into this hub.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
-        <div className="theme-dark-gradient-card rounded-3xl border border-cyan-500/20 bg-[linear-gradient(135deg,rgba(3,15,29,0.96),rgba(8,24,44,0.94)_45%,rgba(21,39,63,0.92))] p-5 shadow-[0_28px_90px_rgba(2,12,27,0.42)]">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-cyan-100">Install checklist</h3>
-          <div className="mt-4 space-y-3 text-sm leading-6 text-slate-300">
-            <p>1. Download the signed-in installer bundle for the Windows node.</p>
-            <p>2. Keep the monitored application or process running if possible.</p>
-            <p>3. Run <code>discover-node.ps1</code> so Clarix Pulse can infer paths, logs, and player hints.</p>
-            <p>4. Upload the discovery report in the dashboard&apos;s remote setup panel.</p>
-            <p>5. Provision the node to generate a tenant-scoped <code>config.yaml</code>.</p>
-            <p>6. Import that config into the local UI and save local settings.</p>
-            <p>7. Install the service and confirm the node appears on the dashboard.</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => onNavigate('/app')}
-            className="mt-5 rounded-full border border-cyan-400/35 bg-cyan-400/12 px-4 py-2 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300"
-          >
-            Open remote provisioning
-          </button>
         </div>
 
         <aside className="space-y-5">
-          <div className="rounded-3xl border border-slate-800 bg-slate-900/58 p-5 shadow-[0_20px_60px_rgba(2,6,23,0.28)] backdrop-blur">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-100">Default alert recipient</h3>
-            <p className="mt-3 text-sm leading-6 text-slate-300">
-              Alert emails start with <span className="font-semibold text-white">{alertEmail}</span>. You can change that later from Alert Contacts.
-            </p>
-          </div>
-
-          <div className="rounded-3xl border border-slate-800 bg-slate-900/58 p-5 shadow-[0_20px_60px_rgba(2,6,23,0.28)] backdrop-blur">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-100">Enrollment key fallback</h3>
-            <p className="mt-3 text-sm leading-6 text-slate-300">
-              Use the provisioned config flow first. If you still need enrollment-key setup from the local UI, this account&apos;s current key is:
-            </p>
-            <div className="mt-3 rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 font-mono text-sm text-cyan-100">
-              {session.tenant.enrollmentKey}
+          <div className="ui-shell-panel rounded-[var(--radius-panel)] px-5 py-5">
+            <p className="ui-kicker-muted">Before you start</p>
+            <div className="mt-4 space-y-3">
+              {preparationNotes.map((note) => (
+                <div
+                  key={note}
+                  className="rounded-[var(--radius-control)] border border-slate-800/70 bg-slate-950/45 px-4 py-3 text-sm leading-6 text-slate-300"
+                >
+                  {note}
+                </div>
+              ))}
             </div>
           </div>
+
+          <div className="ui-shell-panel rounded-[var(--radius-panel)] px-5 py-5">
+            <p className="ui-kicker-muted">Discovery handoff</p>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              If <code>setup.bat</code> opens this page with a discovery hash, Clarix Pulse forwards you into the dashboard and stages the payload for remote import automatically.
+            </p>
+            <button
+              type="button"
+              onClick={() => onNavigate('/app')}
+              className="mt-4 w-full rounded-[var(--radius-control)] border border-slate-700 bg-slate-900/75 px-4 py-3 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white"
+            >
+              Open remote setup workspace
+            </button>
+          </div>
         </aside>
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+        <div className="ui-shell-panel rounded-[var(--radius-panel)] px-5 py-5">
+          <p className="ui-kicker-muted">Local install checklist</p>
+          <div className="mt-4 space-y-3">
+            {localInstallChecklist.map((item, index) => (
+              <div
+                key={item}
+                className="flex gap-4 rounded-[var(--radius-control)] border border-slate-800/70 bg-slate-950/42 px-4 py-4"
+              >
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-slate-700 bg-slate-900/80 text-sm font-semibold text-slate-200">
+                  {index + 1}
+                </div>
+                <p className="text-sm leading-6 text-slate-300">{item}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="ui-shell-panel rounded-[var(--radius-panel)] px-5 py-5">
+          <p className="ui-kicker-muted">What success looks like</p>
+          <div className="mt-4 space-y-4 text-sm leading-6 text-slate-300">
+            <div className="rounded-[var(--radius-control)] border border-slate-800/70 bg-slate-950/42 px-4 py-4">
+              The discovery report imports without manual path hunting, and the remote setup draft is mostly filled in before you touch the form.
+            </div>
+            <div className="rounded-[var(--radius-control)] border border-slate-800/70 bg-slate-950/42 px-4 py-4">
+              The provisioned <code>config.yaml</code> becomes the source of truth for the node instead of a fallback enrollment-key-only setup.
+            </div>
+            <div className="rounded-[var(--radius-control)] border border-slate-800/70 bg-slate-950/42 px-4 py-4">
+              After the local install completes, the new node appears in the dashboard and starts following the same alerting rules as the rest of the workspace.
+            </div>
+          </div>
+        </div>
       </section>
     </div>
   );

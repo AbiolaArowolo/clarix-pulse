@@ -36,6 +36,20 @@ function isActivePath(currentPath: string, navPath: string): boolean {
   return currentPath === navPath || (navPath !== '/app' && currentPath.startsWith(`${navPath}/`));
 }
 
+function formatDateLabel(value: string | null | undefined): string | null {
+  if (!value) return null;
+
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
 function SunIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -74,7 +88,6 @@ export function AppFrame({
   children,
 }: Props) {
   const { colorMode, theme, themeLabel, cycleTheme } = useTheme();
-  const isDark = colorMode === 'dark';
 
   const navItems = [
     { id: '/app/onboarding', label: 'Onboarding' },
@@ -82,54 +95,23 @@ export function AppFrame({
     { id: '/app/account', label: 'Account' },
     ...(session.user.isPlatformAdmin ? [{ id: '/app/admin', label: 'Admin' }] : []),
   ];
+
   const accessState = session.tenant.enabled ? 'Access active' : 'Access pending';
-
-  const headerBg = isDark
-    ? 'border-slate-800/80 bg-slate-950/82 backdrop-blur-xl'
-    : 'border-slate-200 bg-white/90 backdrop-blur-xl shadow-sm';
-
-  const navInactive = isDark
-    ? 'border-slate-700 bg-slate-900/70 text-slate-300 hover:border-slate-500 hover:text-white'
-    : 'border-slate-200 bg-white text-slate-600 hover:border-teal-400/50 hover:text-slate-900 shadow-sm';
-
-  const navActive = isDark
-    ? 'border-cyan-400/50 bg-cyan-400/14 text-cyan-50'
-    : 'border-teal-500/60 bg-teal-50 text-teal-800';
-
-  const signOutBtn = isDark
-    ? 'border-slate-700 bg-slate-900/70 text-slate-300 hover:border-red-400/40 hover:text-white'
-    : 'border-slate-200 bg-white text-slate-600 hover:border-red-300 hover:text-red-700 shadow-sm';
-
-  const themeBtn = isDark
-    ? 'border-slate-700 bg-slate-900/70 text-slate-300 hover:border-slate-500 hover:text-white'
-    : 'border-slate-200 bg-white text-slate-500 hover:border-teal-400/60 hover:text-slate-900 shadow-sm';
-
-  const infoCard = isDark
-    ? 'border-slate-800 bg-slate-900/70 text-slate-300 shadow-[0_18px_45px_rgba(2,6,23,0.32)]'
-    : 'border-slate-200 bg-white text-slate-500 shadow-sm';
-
+  const defaultAlertTarget = session.tenant.defaultAlertEmail ?? session.user.email;
+  const accessExpiryLabel = formatDateLabel(session.tenant.accessKeyExpiresAt);
   const themeIcon = theme === 'system' ? <MonitorIcon /> : colorMode === 'light' ? <SunIcon /> : <MoonIcon />;
 
   return (
-    <div className={`relative min-h-dvh overflow-hidden ${isDark ? 'bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'}`}>
+    <div className="relative min-h-dvh overflow-hidden bg-slate-950 text-white">
+      <div className="ui-shell-backdrop pointer-events-none absolute inset-0" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-[linear-gradient(180deg,rgba(99,102,241,0.14),transparent)]" />
 
-      {/* Background gradients */}
-      {isDark ? (
-        <>
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(20,184,166,0.12),transparent_26%),radial-gradient(circle_at_top_right,rgba(14,165,233,0.1),transparent_22%),linear-gradient(180deg,#020617_0%,#0f172a_58%,#111827_100%)]" />
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-[linear-gradient(180deg,rgba(6,182,212,0.12),transparent)]" />
-        </>
-      ) : (
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-96 bg-[radial-gradient(ellipse_at_top,rgba(13,148,136,0.07),transparent_60%)]" />
-      )}
-
-      {/* Header */}
-      <header className={`relative z-20 border-b ${headerBg}`}>
+      <header className="ui-shell-header relative z-20 border-b backdrop-blur-xl">
         <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6">
           {session.impersonation?.active && (
-            <div className="mb-4 flex flex-col gap-3 rounded-3xl border border-amber-400/30 bg-amber-400/10 px-4 py-4 text-sm text-amber-50 lg:flex-row lg:items-center lg:justify-between">
+            <div className="mb-5 flex flex-col gap-3 rounded-3xl border border-amber-400/30 bg-amber-400/10 px-4 py-4 text-sm text-amber-50 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <p className="font-semibold">Support workspace view</p>
+                <p className="ui-kicker !text-amber-200">Support view</p>
                 <p className="mt-1 text-amber-100/85">
                   You are viewing this tenant as an administrator.
                   {session.impersonation.impersonatorEmail ? ` Original admin account: ${session.impersonation.impersonatorEmail}.` : ''}
@@ -138,36 +120,35 @@ export function AppFrame({
               <button
                 type="button"
                 onClick={onStopImpersonation}
-                className="rounded-full border border-amber-200/35 bg-amber-200/10 px-4 py-2 text-sm font-semibold text-amber-50 transition-colors hover:border-amber-100"
+                className="ui-secondary-button px-4 py-2 text-sm font-semibold !border-amber-200/35 !bg-amber-200/10 !text-amber-50 hover:!border-amber-100"
               >
                 Return to admin
               </button>
             </div>
           )}
 
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
             <div className="flex min-w-0 items-center gap-4">
               <button
                 type="button"
                 onClick={() => onNavigate('/')}
-                className="flex h-12 w-12 items-center justify-center rounded-2xl transition-transform hover:scale-[1.02]"
+                className="flex h-12 w-12 items-center justify-center rounded-[1.15rem] bg-white/[0.03] transition-transform hover:scale-[1.02]"
               >
                 <img src="/pulse.svg" alt="Pulse logo" className="pulse-logo h-full w-full object-contain" />
               </button>
+
               <div className="min-w-0">
-                <p className={`text-[11px] uppercase tracking-[0.24em] ${isDark ? 'text-cyan-200' : 'text-teal-600'}`}>
-                  {session.tenant.slug}
-                </p>
-                <h1 className={`truncate text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                <p className="ui-kicker">{session.tenant.slug}</p>
+                <h1 className="mt-2 truncate text-xl font-semibold text-slate-50">
                   {session.tenant.name}
                 </h1>
-                <p className={`truncate text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                <p className="mt-1 truncate text-sm text-slate-400">
                   {session.user.displayName} | {session.user.email}
                 </p>
               </div>
             </div>
 
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-end">
               <nav className="flex flex-wrap gap-2" aria-label="Main navigation">
                 {navItems.map((item) => {
                   const active = isActivePath(currentPath, item.id);
@@ -176,7 +157,8 @@ export function AppFrame({
                       key={item.id}
                       type="button"
                       onClick={() => onNavigate(item.id)}
-                      className={`rounded-full border px-4 py-2 text-sm font-medium transition-colors ${active ? navActive : navInactive}`}
+                      data-active={active}
+                      className="ui-nav-link px-4 py-2.5 text-sm font-medium"
                     >
                       {item.label}
                     </button>
@@ -185,13 +167,12 @@ export function AppFrame({
               </nav>
 
               <div className="flex items-center gap-2">
-                {/* Theme toggle */}
                 <button
                   type="button"
                   onClick={cycleTheme}
                   title={`Theme: ${themeLabel} - click to cycle`}
                   aria-label={`Current theme: ${themeLabel}. Click to change.`}
-                  className={`flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${themeBtn}`}
+                  className="ui-icon-button flex h-10 w-10 items-center justify-center"
                 >
                   {themeIcon}
                 </button>
@@ -199,7 +180,7 @@ export function AppFrame({
                 <button
                   type="button"
                   onClick={onLogout}
-                  className={`rounded-full border px-4 py-2 text-sm font-medium transition-colors ${signOutBtn}`}
+                  className="ui-danger-button px-4 py-2.5 text-sm font-medium"
                 >
                   Sign out
                 </button>
@@ -207,27 +188,53 @@ export function AppFrame({
             </div>
           </div>
 
-          <div className="mt-6 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-3xl">
-              <p className={`text-[11px] uppercase tracking-[0.24em] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                Clarix Pulse
-              </p>
-              <h2 className={`mt-2 text-2xl font-semibold sm:text-3xl ${isDark ? 'text-white' : 'text-slate-900'}`}>
+          <div className="mt-7 grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+            <section className="ui-hero-panel px-5 py-5 sm:px-6 sm:py-6">
+              <p className="ui-kicker-muted">Clarix Pulse workspace</p>
+              <h2 className="mt-3 max-w-3xl text-3xl font-semibold leading-tight text-slate-50 sm:text-4xl">
                 {title}
               </h2>
-              <p className={`mt-2 max-w-2xl text-sm leading-6 ${isDark ? 'text-slate-300' : 'text-slate-500'}`}>
+              <p className="mt-3 max-w-2xl text-base leading-7 text-slate-300">
                 {description}
               </p>
-            </div>
 
-            <div className={`rounded-2xl border px-4 py-3 text-sm ${infoCard}`}>
-              <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>{accessState}</span>
-              {' '}| Alerts default to{' '}
-              <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                {session.tenant.defaultAlertEmail ?? session.user.email}
-              </span>
-              {' '}until you change them.
-            </div>
+              <div className="mt-6 flex flex-wrap items-center gap-3 text-sm text-slate-300">
+                <span className={`ui-status-pill ${session.tenant.enabled ? 'status-green' : 'status-orange'}`}>
+                  {accessState}
+                </span>
+                <span className="rounded-2xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-sm text-slate-300">
+                  Alerts route to <span className="font-semibold text-slate-100">{defaultAlertTarget}</span>
+                </span>
+              </div>
+            </section>
+
+            <aside className="ui-accent-card rounded-[var(--radius-hero)] px-5 py-5 sm:px-6 sm:py-6">
+              <p className="ui-kicker-muted text-indigo-100">Workspace status</p>
+
+              <div className="mt-4 space-y-4">
+                <div>
+                  <p className="text-sm text-slate-300">Default alert contact</p>
+                  <p className="mt-1 text-lg font-semibold text-slate-50">{defaultAlertTarget}</p>
+                </div>
+
+                <div className="ui-quiet-rule h-px" />
+
+                <div>
+                  <p className="text-sm text-slate-300">Tenant slug</p>
+                  <p className="mt-1 text-base font-semibold text-slate-100">{session.tenant.slug}</p>
+                </div>
+
+                {accessExpiryLabel && (
+                  <>
+                    <div className="ui-quiet-rule h-px" />
+                    <div>
+                      <p className="text-sm text-slate-300">Access key window</p>
+                      <p className="mt-1 text-base font-semibold text-slate-100">Valid through {accessExpiryLabel}</p>
+                    </div>
+                  </>
+                )}
+              </div>
+            </aside>
           </div>
         </div>
       </header>
