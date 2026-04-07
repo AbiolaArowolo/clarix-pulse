@@ -32,6 +32,7 @@ export function useAlarm(sites: SiteState[]) {
   const gainRef = useRef<GainNode | null>(null);
   const freqIntervalRef = useRef<number | null>(null);
   const vibrationTimerRef = useRef<number | null>(null);
+  const interactionUnlockedRef = useRef(false);
 
   const hasAlarm = sites.some((site) => site.instances.some(isAlarmState));
 
@@ -136,6 +137,7 @@ export function useAlarm(sites: SiteState[]) {
   const startVibration = useCallback(() => {
     if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
     if (vibrationTimerRef.current !== null) return;
+    if (!interactionUnlockedRef.current) return;
 
     const pulse = () => navigator.vibrate([250, 150, 250, 700]);
     pulse();
@@ -148,7 +150,11 @@ export function useAlarm(sites: SiteState[]) {
       vibrationTimerRef.current = null;
     }
 
-    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+    if (
+      interactionUnlockedRef.current &&
+      typeof navigator !== 'undefined' &&
+      typeof navigator.vibrate === 'function'
+    ) {
       navigator.vibrate(0);
     }
   }, []);
@@ -157,7 +163,11 @@ export function useAlarm(sites: SiteState[]) {
     if (typeof window === 'undefined') return;
 
     const primeAudio = () => {
+      interactionUnlockedRef.current = true;
       void unlockAudio();
+      if (alarmActive && !muted) {
+        startVibration();
+      }
     };
 
     for (const eventName of AUDIO_UNLOCK_EVENTS) {
@@ -169,7 +179,7 @@ export function useAlarm(sites: SiteState[]) {
         window.removeEventListener(eventName, primeAudio);
       }
     };
-  }, [unlockAudio]);
+  }, [alarmActive, muted, startVibration, unlockAudio]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
