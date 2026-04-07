@@ -281,7 +281,7 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
               </p>
             </div>
 
-            <InstallWorkspacePanel />
+            <InstallWorkspacePanel layout="rail" />
             <AlertContactsEditor />
             <RemoteSetupPanel />
           </aside>

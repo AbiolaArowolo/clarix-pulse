@@ -117,24 +117,14 @@ export function OnboardingPage({
     <div className="space-y-5">
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.7fr)]">
         <div className="ui-hero-panel overflow-hidden px-5 py-5 sm:px-6 sm:py-6">
-          <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
-            <div className="max-w-3xl">
-              <p className="ui-kicker-muted">Recommended first pass</p>
-              <h3 className="mt-3 text-3xl font-semibold leading-tight text-slate-50 sm:text-4xl">
-                Bring a Windows node online with one clean sequence instead of three competing panels.
-              </h3>
-              <p className="mt-3 max-w-2xl text-base leading-7 text-slate-300">
-                Start with the signed installer, move discovery straight into remote setup, and finish the node locally with the provisioned config so the first run lands cleanly in the dashboard.
-              </p>
-            </div>
-
-            <div className="rounded-[var(--radius-panel)] border border-white/[0.08] bg-white/[0.04] px-4 py-4 text-sm text-slate-300 xl:max-w-xs">
-              <p className="ui-kicker-muted">Alert routing</p>
-              <p className="mt-2 text-lg font-semibold text-slate-50">{alertEmail}</p>
-              <p className="mt-2 leading-6 text-slate-400">
-                New incident alerts start here until you change the contact list from the dashboard.
-              </p>
-            </div>
+          <div className="max-w-3xl">
+            <p className="ui-kicker-muted">Recommended first pass</p>
+            <h3 className="mt-3 text-3xl font-semibold leading-tight text-slate-50 sm:text-4xl">
+              Bring a Windows node online with one clean sequence instead of three competing panels.
+            </h3>
+            <p className="mt-3 max-w-2xl text-base leading-7 text-slate-300">
+              Start with the signed installer, move discovery straight into remote setup, and finish the node locally with the provisioned config so the first run lands cleanly in the dashboard.
+            </p>
           </div>
 
           {(downloadError || linkError || copyNotice) && (
@@ -205,7 +195,22 @@ export function OnboardingPage({
             </div>
           )}
 
-          <div className="mt-8 grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
+          <div className="mt-6 rounded-[var(--radius-panel)] border border-slate-800/70 bg-slate-950/42 px-4 py-4 shadow-[0_18px_40px_rgba(2,6,23,0.18)]">
+            <p className="ui-kicker-muted">Initial alert route</p>
+            <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className="text-lg font-semibold text-slate-50">{alertEmail}</p>
+                <p className="mt-2 text-sm leading-6 text-slate-400">
+                  New incident alerts start here until you change the contact list from the dashboard.
+                </p>
+              </div>
+              <div className="rounded-[var(--radius-control)] border border-slate-800/70 bg-slate-900/70 px-3 py-2 text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                Dashboard controls become the source of truth after first setup.
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-8 grid gap-4 2xl:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
             <div className="rounded-[var(--radius-panel)] border border-slate-800/70 bg-slate-900/50 px-5 py-5 shadow-[0_18px_45px_rgba(2,6,23,0.22)]">
               <p className="ui-kicker-muted">Operator flow</p>
               <div className="mt-4 space-y-3">
