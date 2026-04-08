@@ -172,12 +172,12 @@ export function AccountPage({
             </div>
           )}
 
-          <div className="mt-6 flex flex-wrap gap-3">
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
             <button
               type="button"
               onClick={() => void downloadInstaller()}
               disabled={downloading}
-              className="rounded-[var(--radius-control)] border border-indigo-400/35 bg-indigo-400/14 px-4 py-2.5 text-sm font-semibold text-indigo-50 transition-colors hover:border-indigo-300 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full rounded-[var(--radius-control)] border border-indigo-400/35 bg-indigo-400/14 px-4 py-2.5 text-sm font-semibold text-indigo-50 transition-colors hover:border-indigo-300 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
               {downloading ? 'Preparing download...' : 'Download Clarix Pulse for Windows'}
             </button>
@@ -185,7 +185,7 @@ export function AccountPage({
               type="button"
               onClick={() => void generateInstallerLink()}
               disabled={creatingLink}
-              className="rounded-[var(--radius-control)] border border-slate-700 bg-slate-900/75 px-4 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full rounded-[var(--radius-control)] border border-slate-700 bg-slate-900/75 px-4 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
               {creatingLink ? 'Creating secure link...' : 'Create secure install link'}
             </button>

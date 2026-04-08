@@ -147,18 +147,18 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
               <button
                 type="button"
                 onClick={() => onNavigate('/app/onboarding')}
-                className="rounded-2xl border border-cyan-400/35 bg-cyan-400/12 px-4 py-2.5 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300"
+                className="w-full rounded-2xl border border-cyan-400/35 bg-cyan-400/12 px-4 py-2.5 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300 sm:w-auto"
               >
                 Open onboarding
               </button>
               <button
                 type="button"
                 onClick={focusRemoteSetup}
-                className="rounded-2xl border border-slate-700 bg-slate-900/75 px-4 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white"
+                className="w-full rounded-2xl border border-slate-700 bg-slate-900/75 px-4 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white sm:w-auto"
               >
                 Jump to remote setup
               </button>
@@ -166,7 +166,7 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
                 <button
                   type="button"
                   onClick={() => setShowInactive((value) => !value)}
-                  className="rounded-2xl border border-slate-700 bg-slate-900/75 px-4 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white"
+                  className="w-full rounded-2xl border border-slate-700 bg-slate-900/75 px-4 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white sm:w-auto"
                 >
                   {showInactive ? 'Hide inactive' : `Show inactive (${inactiveInstanceCount})`}
                 </button>

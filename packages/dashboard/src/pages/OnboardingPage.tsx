@@ -147,12 +147,12 @@ export function OnboardingPage({
             </div>
           )}
 
-          <div className="mt-6 flex flex-wrap gap-3">
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
             <button
               type="button"
               onClick={() => void downloadInstaller()}
               disabled={downloading}
-              className="rounded-[var(--radius-control)] border border-indigo-400/35 bg-indigo-400/14 px-4 py-2.5 text-sm font-semibold text-indigo-50 transition-colors hover:border-indigo-300 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full rounded-[var(--radius-control)] border border-indigo-400/35 bg-indigo-400/14 px-4 py-2.5 text-sm font-semibold text-indigo-50 transition-colors hover:border-indigo-300 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
               {downloading ? 'Preparing download...' : 'Download installer'}
             </button>
@@ -160,14 +160,14 @@ export function OnboardingPage({
               type="button"
               onClick={() => void generateInstallerLink()}
               disabled={creatingLink}
-              className="rounded-[var(--radius-control)] border border-slate-700 bg-slate-900/75 px-4 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full rounded-[var(--radius-control)] border border-slate-700 bg-slate-900/75 px-4 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
               {creatingLink ? 'Creating secure link...' : 'Create secure link'}
             </button>
             <button
               type="button"
               onClick={() => onNavigate('/app')}
-              className="rounded-[var(--radius-control)] border border-slate-700 bg-slate-900/75 px-4 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white"
+              className="w-full rounded-[var(--radius-control)] border border-slate-700 bg-slate-900/75 px-4 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white sm:w-auto"
             >
               Open dashboard and import discovery
             </button>

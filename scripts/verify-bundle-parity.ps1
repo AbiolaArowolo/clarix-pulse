@@ -63,6 +63,59 @@ function Get-ReleaseName {
     return "$BundleName-$Version"
 }
 
+function Resolve-AgentBinaryPath {
+    $candidates = @(
+        (Join-Path $RepoRoot 'packages\agent\dist\clarix-agent.exe'),
+        (Join-Path $RepoRoot 'dist\clarix-agent.exe')
+    ) | Where-Object { Test-Path $_ }
+
+    if (-not $candidates) {
+        return $null
+    }
+
+    return $candidates |
+        Sort-Object { (Get-Item $_).LastWriteTimeUtc } -Descending |
+        Select-Object -First 1
+}
+
+function Get-CanonicalBundleSourceFiles {
+    $agentRoot = Join-Path $RepoRoot 'packages\agent'
+    $agentBinaryPath = Resolve-AgentBinaryPath
+    $files = @()
+
+    foreach ($item in @(
+        @{ RelativePath = 'setup.bat'; SourcePath = (Join-Path $agentRoot 'setup.bat') },
+        @{ RelativePath = 'configure.bat'; SourcePath = (Join-Path $agentRoot 'configure.bat') },
+        @{ RelativePath = 'install.bat'; SourcePath = (Join-Path $agentRoot 'install.bat') },
+        @{ RelativePath = 'uninstall.bat'; SourcePath = (Join-Path $agentRoot 'uninstall.bat') },
+        @{ RelativePath = 'discover-node.ps1'; SourcePath = (Join-Path $agentRoot 'discover-node.ps1') },
+        @{ RelativePath = 'show-discovery-summary.ps1'; SourcePath = (Join-Path $agentRoot 'show-discovery-summary.ps1') },
+        @{ RelativePath = 'README.txt'; SourcePath = (Join-Path $agentRoot 'README.txt') }
+    )) {
+        if (-not (Test-Path $item.SourcePath)) {
+            throw "Canonical bundle source file missing: $($item.SourcePath)"
+        }
+
+        $files += [pscustomobject]@{
+            RelativePath = $item.RelativePath
+            SourcePath = $item.SourcePath
+            Hash = (Get-FileHash -Path $item.SourcePath -Algorithm SHA256).Hash
+        }
+    }
+
+    if (-not $agentBinaryPath) {
+        throw 'Unable to locate clarix-agent.exe in packages/agent/dist or dist.'
+    }
+
+    $files += [pscustomobject]@{
+        RelativePath = 'clarix-agent.exe'
+        SourcePath = $agentBinaryPath
+        Hash = (Get-FileHash -Path $agentBinaryPath -Algorithm SHA256).Hash
+    }
+
+    return @($files)
+}
+
 function Get-RelativeFileMap {
     param(
         [Parameter(Mandatory = $true)]
@@ -252,6 +305,33 @@ if (Test-Path $TokenizedConfigRoot) {
 $bundleMaps = @{}
 foreach ($descriptor in $bundleDescriptors) {
     $bundleMaps[$descriptor.ReleaseName] = Get-RelativeFileMap -BundlePath $descriptor.BundlePath -IgnoredPaths $IgnoredRelativePaths
+}
+
+$canonicalSourceFiles = @(Get-CanonicalBundleSourceFiles)
+
+foreach ($descriptor in $bundleDescriptors) {
+    $bundleMap = $bundleMaps[$descriptor.ReleaseName]
+    foreach ($sourceFile in $canonicalSourceFiles) {
+        if (-not $bundleMap.ContainsKey($sourceFile.RelativePath)) {
+            $issues.Add([pscustomobject]@{
+                Type = 'Missing'
+                Bundle = $descriptor.ReleaseName
+                File = $sourceFile.RelativePath
+                Detail = "Missing canonical runtime file from $($sourceFile.SourcePath)"
+            })
+            continue
+        }
+
+        $bundleHash = $bundleMap[$sourceFile.RelativePath].Hash
+        if ($bundleHash -ne $sourceFile.Hash) {
+            $issues.Add([pscustomobject]@{
+                Type = 'SourceMismatch'
+                Bundle = $descriptor.ReleaseName
+                File = $sourceFile.RelativePath
+                Detail = "bundle SHA256=$bundleHash source SHA256=$($sourceFile.Hash)"
+            })
+        }
+    }
 }
 
 $allRelativePaths = $bundleMaps.Values |

@@ -412,6 +412,7 @@
 
 /* Backgrounds -- opacity variants (slate-900) */
 [data-theme="light"] .bg-slate-900\/40,
+[data-theme="light"] .bg-slate-900\/50,
 [data-theme="light"] .bg-slate-900\/55,
 [data-theme="light"] .bg-slate-900\/58,
 [data-theme="light"] .bg-slate-900\/62,
@@ -436,6 +437,13 @@
 [data-theme="light"] .bg-cyan-400\/14  { background-color: rgba(224, 231, 255, 0.82); }
 [data-theme="light"] .bg-cyan-500\/8,
 [data-theme="light"] .bg-cyan-500\/10  { background-color: rgba(224, 231, 255, 0.74); }
+
+/* Indigo primary buttons/cards */
+[data-theme="light"] .bg-indigo-400\/14 { background-color: rgba(224, 231, 255, 0.92); }
+[data-theme="light"] .border-indigo-400\/35 { border-color: rgba(79, 70, 229, 0.3); }
+[data-theme="light"] .hover\:border-indigo-300:hover { border-color: rgba(79, 70, 229, 0.46); }
+[data-theme="light"] .text-indigo-50,
+[data-theme="light"] .text-indigo-100 { color: #3730a3; }
 
 /* Emerald accent backgrounds (monitoring-enabled button, UDP enabled state) */
 [data-theme="light"] .bg-emerald-500\/8  { background-color: rgba(209, 250, 229, 0.7); }
