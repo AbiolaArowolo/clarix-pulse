@@ -4,7 +4,7 @@ title Clarix Pulse ^| Node Setup
 
 set "BASE_DIR=%~dp0"
 set "EXE_PATH=%BASE_DIR%clarix-agent.exe"
-set "REPORT_PATH=%BASE_DIR%pulse-node-discovery-report.json"
+set "REPORT_PATH=%TEMP%\pulse-node-discovery-report.json"
 set "PS_EXE="
 set "BUNDLE_VERSION="
 
