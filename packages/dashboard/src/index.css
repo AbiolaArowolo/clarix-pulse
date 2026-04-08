@@ -471,9 +471,29 @@
 
 /* Borders -- opacity variants */
 [data-theme="light"] .border-slate-800\/80,
+[data-theme="light"] .border-slate-800\/70,
 [data-theme="light"] .border-slate-800\/60 { border-color: rgba(226, 232, 240, 0.9); }
 [data-theme="light"] .border-slate-700\/50,
 [data-theme="light"] .border-slate-700\/60 { border-color: rgba(203, 213, 225, 0.7); }
+
+/* Near-transparent white surfaces (bg-white/[0.04], border-white/[0.08]) are
+   invisible on a light background — remap to a visible light-mode surface. */
+[data-theme="light"] .bg-white\/\[0\.04\],
+[data-theme="light"] .bg-white\/\[0\.06\],
+[data-theme="light"] .bg-white\/\[0\.08\] { background-color: rgba(241, 245, 249, 0.8); }
+[data-theme="light"] .border-white\/\[0\.08\],
+[data-theme="light"] .border-white\/\[0\.1\],
+[data-theme="light"] .border-white\/\[0\.12\] { border-color: rgba(203, 213, 225, 0.7); }
+
+/* Card box-shadows: replace dark rgba shadows with softer light-mode equivalents */
+[data-theme="light"] .rounded-3xl {
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 4px 16px rgba(15, 23, 42, 0.06);
+}
+[data-theme="light"] .shadow-\[0_18px_45px_rgba\(2\,6\,23\,0\.22\)\],
+[data-theme="light"] .shadow-\[0_24px_80px_rgba\(2\,6\,23\,0\.35\)\],
+[data-theme="light"] .shadow-\[0_26px_80px_rgba\(2\,6\,23\,0\.22\)\] {
+  box-shadow: 0 4px 24px rgba(15, 23, 42, 0.08);
+}
 
 /* Hover state overrides */
 [data-theme="light"] .hover\:border-slate-500:hover { border-color: #94a3b8; }

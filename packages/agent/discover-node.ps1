@@ -221,7 +221,24 @@ function New-PlayerReport {
 # PROCESS DETECTION
 # ============================================================================
 
-$_broadcastRuntimePatterns = '((^|[^a-z0-9])insta([^a-z0-9]|$)|(^|[^a-z0-9])admax([^a-z0-9]|$)|cinegy|airbox|itx|versio|broadstream|oasys|marina|evertz|xplayout|xtvsuit|youplay|mosart|florical|airboss|wideorbit|woplayout|bitcentral|inception|chyron|streampro|etere|aveco|astra|gallium|casparcg|enco|dad\.exe|zetta|dalet|galaxy|morpheus|vsn|myriad|playout|playoutone|radiodj|playit|zarastudio|zararadio|proppfrexx|sambroad|sam4|spl|mairlist|radioboss|jazler|dinesat|nextkast|nexgen|obs64|obs\.exe|mixxx)'
+$_broadcastRuntimePatterns = '((^|[^a-z0-9])insta([^a-z0-9]|$)|(^|[^a-z0-9])admax([^a-z0-9]|$)|cinegy|airbox|itx|versio|broadstream|oasys|marina|evertz|xplayout|xtvsuit|youplay|mosart|florical|airboss|wideorbit|woplayout|bitcentral|inception|chyron|streampro|etere|aveco|astra|gallium|casparcg|enco|dad\.exe|zetta|dalet|galaxy|morpheus|vsn|myriad|playout|playoutone|radiodj|playit|zarastudio|zararadio|proppfrexx|sambroad|sam4|spl|mairlist|radioboss|jazler|dinesat|nextkast|nexgen|obs64|obs\.exe|mixxx|(^|[^a-z0-9])broadcast([^a-z0-9]|$)|(^|[^a-z0-9])onair([^a-z0-9]|$)|encoder\.exe|transcod|wirecast|vmix|xsplit|streamlabs|livestreamer|streamlink|vMix)'
+
+# Broad folder-name patterns used by Find-GenericBroadcastFromFolders.
+# These are intentionally wider than $_broadcastRuntimePatterns and are only
+# applied after verifying a running process or service exists in that folder.
+$_broadcastFolderPatterns = @(
+    '*broadcast*',
+    '*automation*',
+    '*streaming*',
+    '*encoder*',
+    '*transmiss*',
+    '*on-air*',
+    '*onair*',
+    '*playout*',
+    '*radio*',
+    '*media-server*',
+    '*mediaserver*'
+)
 
 # Returns names of any running processes whose exe lives inside a given directory
 function Get-ProcessNamesInDirectory {
@@ -1114,7 +1131,7 @@ function Get-GenericLogHints {
     $programFiles    = Get-EnvPathOrFallback -Name 'ProgramFiles'    -Fallback 'C:\Program Files'
     $programFilesX86 = Get-EnvPathOrFallback -Name 'ProgramFiles(x86)' -Fallback 'C:\Program Files (x86)'
     $programData     = Get-EnvPathOrFallback -Name 'ProgramData'     -Fallback 'C:\ProgramData'
-    $vendorNames = @('Cinegy','PlayBox*','Grass Valley','Imagine*','BroadStream*','Pebble*','Evertz*')
+    $vendorNames = @('Cinegy','PlayBox*','Grass Valley','Imagine*','BroadStream*','Pebble*','Evertz*','WideOrbit*','Bitcentral*','Harmonic*','Etere*','Aveco*','CasparCG*','Dalet*','VSN*','Myriad*','Station Playlist*','mAirList*','RadioBOSS*','Jazler*','Hardata*')
     $logHints = New-Object System.Collections.Generic.List[string]
 
     foreach ($baseDir in @($programFiles, $programFilesX86, $programData)) {
@@ -1558,6 +1575,143 @@ function Find-GenericProfilePlayers {
 }
 
 # ============================================================================
+# FOLDER-BASED GENERIC BROADCAST DISCOVERY
+# ============================================================================
+# Scans C:\Program Files* for directories whose names match $_broadcastFolderPatterns.
+# A candidate is accepted only when at least two independent evidence signals are present:
+#   - Broadcast-related folder exists (baseline - always true)
+#   - A running process whose executable lives inside that folder
+#   - A Windows service whose PathName points inside that folder
+# This catches unknown broadcast/automation/encoding software that does not match
+# any named profile in $_broadcastVendorPatterns or Get-PlayoutProfileDescriptor.
+
+function Find-GenericBroadcastFromFolders {
+    param(
+        [string]$NodeId,
+        [int]$StartIndex = 0,
+        [string[]]$KnownInstallDirs = @()
+    )
+    $programFiles    = Get-EnvPathOrFallback -Name 'ProgramFiles'       -Fallback 'C:\Program Files'
+    $programFilesX86 = Get-EnvPathOrFallback -Name 'ProgramFiles(x86)'  -Fallback 'C:\Program Files (x86)'
+    $players  = New-Object System.Collections.Generic.List[object]
+    $seen     = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $nextIndex = $StartIndex
+
+    # Build a fast lookup for paths already claimed by named scanners so we do
+    # not emit a duplicate generic_windows entry for (e.g.) Admax or PlayBox.
+    $knownLower = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($kp in ($KnownInstallDirs | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+        [void]$knownLower.Add($kp.TrimEnd('\').ToLowerInvariant())
+    }
+
+    # Snapshot of running processes and services to avoid repeated CIM queries
+    $allProcesses = @()
+    try { $allProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { -not [string]::IsNullOrWhiteSpace($_.ExecutablePath) }) } catch { }
+    $allServices = @()
+    try { $allServices = @(Get-CimInstance Win32_Service -ErrorAction SilentlyContinue | Where-Object { -not [string]::IsNullOrWhiteSpace($_.PathName) }) } catch { }
+
+    foreach ($baseDir in @($programFiles, $programFilesX86)) {
+        if (-not (Test-Path -LiteralPath $baseDir -PathType Container)) { continue }
+        $vendorDirs = @(Get-SafeDirectories -Path $baseDir)
+
+        foreach ($vendorDir in $vendorDirs) {
+            # Test vendor dir itself and one level of subdirectories
+            $candidates = New-Object System.Collections.Generic.List[string]
+            [void]$candidates.Add($vendorDir.FullName)
+            foreach ($sub in (Get-SafeDirectories -Path $vendorDir.FullName)) {
+                [void]$candidates.Add($sub.FullName)
+            }
+
+            foreach ($dirPath in $candidates) {
+                $dirLeaf  = (Split-Path -Path $dirPath -Leaf).ToLowerInvariant()
+                $dirLower = $dirPath.TrimEnd('\').ToLowerInvariant()
+
+                # Check if the leaf directory name matches a broadcast folder pattern
+                $isMatch = $false
+                foreach ($pattern in $_broadcastFolderPatterns) {
+                    if ($dirLeaf -like $pattern) { $isMatch = $true; break }
+                }
+                if (-not $isMatch) { continue }
+
+                # Skip Windows/system paths
+                if ($dirPath -match '\\Windows\\|\\System32\\|\\SysWOW64\\|\\WindowsPowerShell\\|Microsoft\.NET|Windows Defender|Windows Security') { continue }
+
+                # Skip paths already claimed by a specific named scanner
+                $isKnown = $false
+                foreach ($kp in $knownLower) {
+                    if ($dirLower.StartsWith($kp) -or $kp.StartsWith($dirLower)) {
+                        $isKnown = $true; break
+                    }
+                }
+                if ($isKnown) { continue }
+
+                # SIGNAL 1: running process whose exe is inside this folder
+                $runningNames = New-Object System.Collections.Generic.List[string]
+                foreach ($proc in $allProcesses) {
+                    $exePath = [string]$proc.ExecutablePath
+                    if ($exePath.ToLowerInvariant().StartsWith($dirLower + '\')) {
+                        if (-not [string]::IsNullOrWhiteSpace($proc.Name)) {
+                            [void]$runningNames.Add($proc.Name)
+                        }
+                    }
+                }
+                $hasProcess = $runningNames.Count -gt 0
+
+                # SIGNAL 2: Windows service whose PathName points into this folder
+                $matchedService = $null
+                foreach ($svc in $allServices) {
+                    $pn = [string]$svc.PathName
+                    $exeFromPath = Get-ExecutablePathFromCommand -CommandText $pn
+                    if ([string]::IsNullOrWhiteSpace($exeFromPath)) { continue }
+                    if ($exeFromPath.ToLowerInvariant().StartsWith($dirLower + '\')) {
+                        $matchedService = $svc; break
+                    }
+                }
+                $hasService = $null -ne $matchedService
+
+                # Require at least 2 signals (folder + process OR folder + service)
+                if (-not $hasProcess -and -not $hasService) { continue }
+
+                $dedupeKey = $dirLower
+                if (-not $seen.Add($dedupeKey)) { continue }
+
+                $evidence = New-Object System.Collections.Generic.List[string]
+                [void]$evidence.Add("Broadcast-related folder detected: $dirPath")
+                foreach ($pn in (Get-UniqueStrings -Values @($runningNames))) {
+                    [void]$evidence.Add("Running process in folder: $pn")
+                }
+                if ($hasService) {
+                    [void]$evidence.Add("Windows service in folder: $([string]$matchedService.Name) ($([string]$matchedService.DisplayName))")
+                }
+
+                $processSelectors = @{
+                    executable_path_contains = @($dirPath)
+                }
+                $uniqueNames = @(Get-UniqueStrings -Values @($runningNames))
+                if ($uniqueNames.Count -gt 0) { $processSelectors.process_names = $uniqueNames }
+                if ($hasService) { $processSelectors.service_names = @([string]$matchedService.Name) }
+
+                $confidence = if ($hasProcess -and $hasService) { 0.68 } elseif ($hasProcess) { 0.58 } else { 0.52 }
+                [void]$players.Add((New-PlayerReport `
+                    -NodeId $NodeId `
+                    -Index $nextIndex `
+                    -PlayoutType 'generic_windows' `
+                    -Label ('Broadcast Software {0}' -f ($nextIndex + 1)) `
+                    -Paths @{ install_dir = $dirPath } `
+                    -ProcessSelectors $processSelectors `
+                    -LogSelectors @{} `
+                    -Evidence @($evidence) `
+                    -Confidence $confidence `
+                    -Running $hasProcess))
+                $nextIndex += 1
+            }
+        }
+    }
+
+    return @($players | ForEach-Object { $_ })
+}
+
+# ============================================================================
 # CONFIG / KEY DISCOVERY
 # ============================================================================
 
@@ -1753,7 +1907,25 @@ try {
             -ScheduledTaskHints $scheduledTaskHints `
             -LogHints $genericLogHints
     )
-    $players = @(Get-DedupedPlayers -Players @($instaPlayers + $admaxPlayers + $registryPlayers + $genericPlayers))
+    # Collect all install dirs claimed by specific named scanners to prevent
+    # the folder-based generic scan from re-detecting the same software.
+    $namedInstallDirs = New-Object System.Collections.Generic.List[string]
+    foreach ($p in @($instaPlayers + $admaxPlayers + $registryPlayers + $genericPlayers)) {
+        $rawInstallDir = $p.paths['install_dir']
+        $installDir = if ($null -ne $rawInstallDir) { [string]$rawInstallDir } else { '' }
+        if (-not [string]::IsNullOrWhiteSpace($installDir)) { [void]$namedInstallDirs.Add($installDir) }
+        foreach ($pathVal in @($p.paths.Values | Where-Object { $_ -is [string] -and -not [string]::IsNullOrWhiteSpace($_) })) {
+            [void]$namedInstallDirs.Add([string]$pathVal)
+        }
+    }
+    $folderPlayers = @(
+        Find-GenericBroadcastFromFolders `
+            -NodeId $nodeId `
+            -StartIndex ($instaPlayers.Count + $admaxPlayers.Count + $registryPlayers.Count + $genericPlayers.Count) `
+            -KnownInstallDirs @($namedInstallDirs)
+    )
+
+    $players = @(Get-DedupedPlayers -Players @($instaPlayers + $admaxPlayers + $registryPlayers + $genericPlayers + $folderPlayers))
 
     Write-DiscoveryPhase -Step 8 -Message 'Writing discovery report'
     $localTimeZone = [TimeZoneInfo]::Local

@@ -245,7 +245,7 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
             </div>
 
             {visibleSites.length === 0 ? (
-              <div className="rounded-3xl border border-slate-800 bg-slate-900/55 px-8 py-16 text-center shadow-[0_24px_80px_rgba(2,6,23,0.35)] backdrop-blur">
+              <div className="rounded-3xl border border-slate-800 bg-slate-900/55 px-8 py-10 text-center shadow-[0_24px_80px_rgba(2,6,23,0.35)] backdrop-blur">
                 <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-800 bg-slate-950/80">
                   <img src="/pulse.svg" alt="Clarix Pulse logo" className="pulse-logo h-9 w-9 object-contain" />
                 </div>
@@ -272,7 +272,7 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
             )}
           </section>
 
-          <aside className="space-y-4 xl:pt-1">
+          <aside className="space-y-4">
             <div className="px-1">
               <p className="ui-kicker-muted">Operator tools</p>
               <h3 className="mt-2 text-2xl font-semibold text-slate-50">Setup, alerts, and install handoff</h3>

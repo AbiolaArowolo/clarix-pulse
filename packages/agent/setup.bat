@@ -35,7 +35,7 @@ echo  =====================================================
 echo.
 echo    [1]  Install Pulse as a Windows service
 echo    [2]  Run discovery scan and open local setup UI
-echo    [3]  Scan this computer for playout players
+echo    [3]  Scan this computer and auto-load local setup UI
 echo    [4]  Uninstall and remove Pulse service
 echo    [5]  Exit
 echo.
@@ -113,9 +113,10 @@ if errorlevel 1 (
 )
 call :SHOW_SUMMARY
 echo.
-echo  You can auto-load pulse-node-discovery-report.json into the
-echo  local Pulse setup UI with option [2],
-echo  OR upload it to the Remote Setup tab on your dashboard manually.
+echo  Scan complete. Launching setup UI with discovery results pre-loaded...
+echo  Temporary setup URL will use the first free localhost port from 3211-3299.
+echo  If it does not open automatically, use the exact localhost URL printed below.
+call :OPEN_LOCAL_SETUP
 echo.
 pause
 goto MENU

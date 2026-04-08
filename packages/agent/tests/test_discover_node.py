@@ -689,5 +689,126 @@ class DiscoverNodeScriptTests(unittest.TestCase):
         self.assertIn("Startup command", " ".join(players[0]["discovery"]["evidence"]))
 
 
+    def test_folder_based_discovery_detects_broadcast_folder_with_running_process(self) -> None:
+        """Find-GenericBroadcastFromFolders must detect an unknown broadcast-named folder
+        when a process is running from inside it (folder + process = 2 evidence signals)."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            bundle_root = temp_root / "bundle"
+            bundle_root.mkdir()
+            program_files = temp_root / "Program Files"
+            program_files_x86 = temp_root / "Program Files (x86)"
+            program_data = temp_root / "ProgramData"
+
+            # Unknown broadcast software installed under a broadcast-named folder
+            vendor_root = program_files / "AcmeCorp"
+            broadcast_dir = vendor_root / "BroadcastServer"
+            broadcast_dir.mkdir(parents=True)
+            executable_path = broadcast_dir / "BroadcastServer.exe"
+            executable_path.write_text("", encoding="utf-8")
+
+            command = f"""
+& {{
+  $programFiles = '{_ps_quote(program_files)}'
+  $programFilesX86 = '{_ps_quote(program_files_x86)}'
+  $programData = '{_ps_quote(program_data)}'
+  [Environment]::SetEnvironmentVariable('ProgramFiles', $programFiles, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramFiles(x86)', $programFilesX86, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramData', $programData, 'Process')
+  function Get-CimInstance {{
+    [CmdletBinding()]
+    param([string]$ClassName)
+    if ($ClassName -eq 'Win32_Process') {{
+      return @(
+        [pscustomobject]@{{
+          Name='BroadcastServer.exe';
+          ExecutablePath='{_ps_quote(executable_path)}';
+          CommandLine='"{_ps_quote(executable_path)}"'
+        }}
+      )
+    }}
+    return @()
+  }}
+  & '{_ps_quote(DISCOVERY_SCRIPT)}' -StdOut
+}}
+"""
+            completed = subprocess.run(
+                [
+                    POWERSHELL_EXE,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    command,
+                ],
+                cwd=bundle_root,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+        report = json.loads(completed.stdout)
+        generic_players = [p for p in report["players"] if p["playout_type"] == "generic_windows"]
+
+        self.assertGreaterEqual(len(generic_players), 1)
+        evidence_texts = " ".join(
+            ev for p in generic_players for ev in p["discovery"]["evidence"]
+        )
+        self.assertIn("BroadcastServer", evidence_texts)
+
+    def test_folder_based_discovery_requires_two_signals_not_folder_alone(self) -> None:
+        """Find-GenericBroadcastFromFolders must NOT emit a candidate when only
+        the folder exists with no running process or service (single signal)."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            bundle_root = temp_root / "bundle"
+            bundle_root.mkdir()
+            program_files = temp_root / "Program Files"
+            program_files_x86 = temp_root / "Program Files (x86)"
+            program_data = temp_root / "ProgramData"
+
+            # Broadcast-named folder exists but nothing is running from it
+            broadcast_dir = program_files / "SomeVendor" / "BroadcastEncoder"
+            broadcast_dir.mkdir(parents=True)
+            (broadcast_dir / "BroadcastEncoder.exe").write_text("", encoding="utf-8")
+
+            command = f"""
+& {{
+  $programFiles = '{_ps_quote(program_files)}'
+  $programFilesX86 = '{_ps_quote(program_files_x86)}'
+  $programData = '{_ps_quote(program_data)}'
+  [Environment]::SetEnvironmentVariable('ProgramFiles', $programFiles, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramFiles(x86)', $programFilesX86, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramData', $programData, 'Process')
+  function Get-CimInstance {{
+    [CmdletBinding()]
+    param([string]$ClassName)
+    return @()
+  }}
+  & '{_ps_quote(DISCOVERY_SCRIPT)}' -StdOut
+}}
+"""
+            completed = subprocess.run(
+                [
+                    POWERSHELL_EXE,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    command,
+                ],
+                cwd=bundle_root,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+        report = json.loads(completed.stdout)
+        generic_players = [p for p in report["players"] if p["playout_type"] == "generic_windows"]
+
+        # Folder alone (no process, no service) must NOT create a candidate
+        self.assertEqual(len(generic_players), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
