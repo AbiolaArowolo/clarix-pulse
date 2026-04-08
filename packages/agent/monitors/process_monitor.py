@@ -16,10 +16,16 @@ import win32process
 from playout_profiles import playout_family
 
 ADMAX_PROCESS_ALLOWLIST = {
+    "admax.exe",
     "admax-one playout2.0.exe",
     "admax-one playout2.0.2.exe",
+    "admaxplayout.exe",
+    "admaxservice.exe",
+    "admaxone.exe",
+    "admax_service.exe",
     "noiretv_box_office_backup.exe",
     "noiretv_network_backup.exe",
+    "unistreamer.exe",
 }
 
 INSTA_PROCESS_ALLOWLIST = {
@@ -78,16 +84,17 @@ def _matches_process(name: str, selectors: dict, playout_type: str) -> bool:
     if process_name:
         process_names.add(process_name)
 
-    if process_names:
-        if name not in process_names:
-            return False
-    elif name not in _default_process_names(playout_type):
-        return False
-
     regexes = [re.compile(pattern, re.IGNORECASE) for pattern in _as_list(selectors.get("process_name_regexes"))]
     single_regex = str(selectors.get("process_name_regex", "")).strip()
     if single_regex:
         regexes.append(re.compile(single_regex, re.IGNORECASE))
+
+    if process_names:
+        if name not in process_names:
+            return False
+    elif not regexes and name not in _default_process_names(playout_type):
+        return False
+
     if regexes and not any(regex.search(name) for regex in regexes):
         return False
 

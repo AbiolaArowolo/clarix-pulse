@@ -79,6 +79,14 @@ goto MENU
 :CONFIGURE
 echo.
 call :RUN_SCAN
+if errorlevel 1 (
+    echo.
+    echo  Discovery scan failed. The temporary setup UI was not opened.
+    echo  Review the messages above, then run option [2] again.
+    echo.
+    pause
+    goto MENU
+)
 call :SHOW_SUMMARY
 echo.
 echo  Opening local setup UI with the scan details pre-loaded...
@@ -95,6 +103,14 @@ echo  Scanning this computer for playout players and services...
 echo  Output: %REPORT_PATH%
 echo.
 call :RUN_SCAN
+if errorlevel 1 (
+    echo.
+    echo  Discovery scan failed. No report is available to import yet.
+    echo  Review the messages above, then run option [3] again.
+    echo.
+    pause
+    goto MENU
+)
 call :SHOW_SUMMARY
 echo.
 echo  You can auto-load pulse-node-discovery-report.json into the
@@ -125,13 +141,23 @@ pause
 goto MENU
 
 :RUN_SCAN
-echo  Running discovery scan (this may take 30-60 seconds)...
+echo  Running discovery scan (this may take 30-90 seconds on busy PCs)...
+echo  Discovery progress will appear below while Pulse checks config, processes, services, registry, and logs.
 del /f /q "%REPORT_PATH%" 2>nul
 "%PS_EXE%" -ExecutionPolicy Bypass -NoProfile -File "%BASE_DIR%discover-node.ps1" -OutputPath "%REPORT_PATH%"
+set "SCAN_EC=%ERRORLEVEL%"
+if not "%SCAN_EC%"=="0" (
+    echo   Scan failed with exit code %SCAN_EC%.
+    if exist "%REPORT_PATH%" (
+        echo   A partial report was found at %REPORT_PATH%, but setup will not continue automatically.
+    )
+    exit /b %SCAN_EC%
+)
 if exist "%REPORT_PATH%" (
     echo   Scan complete.
 ) else (
     echo   WARNING: Scan did not produce a report.
+    exit /b 1
 )
 exit /b 0
 

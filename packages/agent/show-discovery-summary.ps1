@@ -20,6 +20,7 @@ try {
     Write-Host ('  Computer : ' + $report.node_name)
     Write-Host ('  Node ID  : ' + $report.node_id)
     Write-Host ('  Hub URL  : ' + $(if ($report.hub_url) { $report.hub_url } else { '(none found)' }))
+    Write-Host ('  Key      : ' + $(if ($report.enrollment_key) { 'found' } else { '(none found)' }))
     Write-Host ('  Players  : ' + $players.Count + ' detected')
     Write-Host '  -------------------------------------------------'
 

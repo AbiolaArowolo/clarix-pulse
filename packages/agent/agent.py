@@ -2038,6 +2038,7 @@ def _config_for_local_ui(existing: dict[str, Any] | None = None) -> dict[str, An
         for index, player in enumerate(existing_players)
     ]
     agent_token = _as_non_placeholder_str(existing.get("agent_token"))
+    enrollment_key = _as_non_placeholder_str(existing.get("enrollment_key"))
 
     return {
         "node_id": node_id,
@@ -2045,7 +2046,7 @@ def _config_for_local_ui(existing: dict[str, Any] | None = None) -> dict[str, An
         "site_id": _as_str(existing.get("site_id"), _default_site_id(node_id)),
         "hub_url": _as_str(existing.get("hub_url"), DEFAULT_HUB_URL),
         "agent_token": agent_token,
-        "enrollment_key": "",
+        "enrollment_key": enrollment_key,
         "import_setup_url": "",
         "imported_sensitive_override": False,
         "identity_locked": bool(agent_token),

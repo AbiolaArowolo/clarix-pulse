@@ -69,6 +69,24 @@ class ProcessSelectorTests(unittest.TestCase):
             )
         )
 
+    def test_matches_regex_only_process_selectors_without_default_name_allowlist(self) -> None:
+        metadata = {
+            "name": "Admax-One Playout2.0.exe",
+            "executable_path": r"C:\Program Files (x86)\Unimedia\Admax One 2.0\Admax-One Playout2.0.exe",
+            "command_line": r"\"C:\Program Files (x86)\Unimedia\Admax One 2.0\Admax-One Playout2.0.exe\"",
+        }
+
+        self.assertTrue(
+            process_monitor._matches_process_metadata(
+                metadata,
+                {
+                    "process_name_regex": r"admax|unistreamer",
+                    "executable_path_contains": [r"Unimedia\Admax One 2.0"],
+                },
+                "admax",
+            )
+        )
+
     def test_check_treats_matching_running_service_as_up(self) -> None:
         fake_service = Mock()
         fake_service.as_dict.return_value = {

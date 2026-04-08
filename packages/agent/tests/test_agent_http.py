@@ -123,6 +123,20 @@ class ConfigureBundleCommandTests(unittest.TestCase):
         self.assertEqual(config["agent_token"], "AGENT-TOKEN-123")
         self.assertEqual(config["enrollment_key"], "ENROLL-123")
 
+    def test_config_for_local_ui_preserves_existing_enrollment_key_for_preloaded_bundle_ui(self) -> None:
+        config = agent._config_for_local_ui(
+            {
+                "node_id": "studio-a",
+                "node_name": "Studio A",
+                "site_id": "studio-a",
+                "hub_url": "https://pulse.example.com",
+                "enrollment_key": "ENROLL-ABC-123",
+                "players": [],
+            }
+        )
+
+        self.assertEqual(config["enrollment_key"], "ENROLL-ABC-123")
+
     def test_import_local_ui_state_preloads_enrollment_key_from_uploaded_discovery_data(self) -> None:
         config, message = agent._import_local_ui_state(
             "\n".join(
@@ -362,8 +376,8 @@ class WindowsBatchLauncherTests(unittest.TestCase):
     def test_setup_bat_scan_option_runs_report_and_summary_scripts(self) -> None:
         source_setup = AGENT_DIR / "setup.bat"
         setup_text = source_setup.read_text(encoding="utf-8").replace(
-            "echo.\npause\ngoto MENU\n\n:UNINSTALL",
-            "echo.\nexit /b 0\n\n:UNINSTALL",
+            "echo  OR upload it to the Remote Setup tab on your dashboard manually.\necho.\npause\ngoto MENU\n\n:UNINSTALL",
+            "echo  OR upload it to the Remote Setup tab on your dashboard manually.\necho.\nexit /b 0\n\n:UNINSTALL",
             1,
         )
 

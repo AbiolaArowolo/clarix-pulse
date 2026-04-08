@@ -89,6 +89,123 @@ class DiscoverNodeScriptTests(unittest.TestCase):
         for player in insta_players:
             self.assertTrue(player["paths"]["fnf_log"].endswith("Indytek\\Insta log\\FNF"))
 
+    def test_detects_admax_from_running_process_when_install_uses_newer_playout_exe_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            bundle_root = temp_root / "bundle"
+            bundle_root.mkdir()
+            program_files = temp_root / "Program Files"
+            program_files_x86 = temp_root / "Program Files (x86)"
+            program_data = temp_root / "ProgramData"
+
+            admax_root = program_files_x86 / "Unimedia" / "Admax One 2.0"
+            executable_path = admax_root / "bin" / "64bit" / "Admax-One Playout2.0.exe"
+            executable_path.parent.mkdir(parents=True)
+            executable_path.write_text("", encoding="utf-8")
+            (admax_root / "bin" / "64bit" / "Settings.ini").write_text("", encoding="utf-8")
+            (admax_root / "bin" / "64bit" / "logs" / "Playout").mkdir(parents=True)
+
+            command = f"""
+& {{
+  $programFiles = '{_ps_quote(program_files)}'
+  $programFilesX86 = '{_ps_quote(program_files_x86)}'
+  $programData = '{_ps_quote(program_data)}'
+  [Environment]::SetEnvironmentVariable('ProgramFiles', $programFiles, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramFiles(x86)', $programFilesX86, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramData', $programData, 'Process')
+  function Get-CimInstance {{
+    [CmdletBinding()]
+    param([string]$ClassName)
+    if ($ClassName -ne 'Win32_Process') {{ return @() }}
+    return @(
+      [pscustomobject]@{{
+        Name='Admax-One Playout2.0.exe';
+        ExecutablePath='{_ps_quote(executable_path)}';
+        CommandLine='"{_ps_quote(executable_path)}"'
+      }}
+    )
+  }}
+  & '{_ps_quote(DISCOVERY_SCRIPT)}' -StdOut
+}}
+"""
+            completed = subprocess.run(
+                [
+                    POWERSHELL_EXE,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    command,
+                ],
+                cwd=bundle_root,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+        report = json.loads(completed.stdout)
+        admax_players = [player for player in report["players"] if player["playout_type"] == "admax"]
+
+        self.assertEqual(len(admax_players), 1)
+        self.assertEqual(admax_players[0]["paths"]["admax_root_candidates"], [str(admax_root)])
+        self.assertIn("Admax-One Playout2.0.exe", admax_players[0]["process_selectors"]["process_names"])
+
+    def test_detects_admax_from_wrapper_executable_and_nested_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            bundle_root = temp_root / "bundle"
+            bundle_root.mkdir()
+            program_files = temp_root / "Program Files"
+            program_files_x86 = temp_root / "Program Files (x86)"
+            program_data = temp_root / "ProgramData"
+
+            product_root = program_files_x86 / "Unimedia" / "Admax One 2.0"
+            admax_root = product_root / "admax"
+            product_root.mkdir(parents=True)
+            (product_root / "unistreamer.exe").write_text("", encoding="utf-8")
+            (admax_root / "bin" / "64bit" / "logs" / "FNF").mkdir(parents=True)
+            (admax_root / "bin" / "64bit" / "logs" / "logs" / "Playout").mkdir(parents=True)
+
+            command = f"""
+& {{
+  $programFiles = '{_ps_quote(program_files)}'
+  $programFilesX86 = '{_ps_quote(program_files_x86)}'
+  $programData = '{_ps_quote(program_data)}'
+  [Environment]::SetEnvironmentVariable('ProgramFiles', $programFiles, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramFiles(x86)', $programFilesX86, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramData', $programData, 'Process')
+  function Get-CimInstance {{
+    [CmdletBinding()]
+    param([string]$ClassName)
+    return @()
+  }}
+  & '{_ps_quote(DISCOVERY_SCRIPT)}' -StdOut
+}}
+"""
+            completed = subprocess.run(
+                [
+                    POWERSHELL_EXE,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    command,
+                ],
+                cwd=bundle_root,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+        report = json.loads(completed.stdout)
+        admax_players = [player for player in report["players"] if player["playout_type"] == "admax"]
+
+        self.assertEqual(len(admax_players), 1)
+        self.assertEqual(admax_players[0]["paths"]["admax_root_candidates"], [str(product_root), str(admax_root)])
+        self.assertEqual(admax_players[0]["paths"]["install_dir"], str(product_root))
+        self.assertIn("unistreamer.exe", admax_players[0]["process_selectors"]["process_names"])
+        self.assertIn(str(admax_root / "bin" / "64bit" / "logs" / "logs" / "Playout"), admax_players[0]["paths"]["playout_log_dir"])
+
     def test_detects_insta_channels_from_settings_folders_when_exe_is_shared(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -163,6 +280,62 @@ class DiscoverNodeScriptTests(unittest.TestCase):
                 str(indytek_root / "Insta Playout 4" / "Settings"),
             },
         )
+
+    def test_detects_admax_from_product_root_launcher_when_logs_live_in_nested_admax_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            bundle_root = temp_root / "bundle"
+            bundle_root.mkdir()
+            program_files = temp_root / "Program Files"
+            program_files_x86 = temp_root / "Program Files (x86)"
+            program_data = temp_root / "ProgramData"
+
+            admax_product_root = program_files_x86 / "Unimedia" / "Admax One 2.0"
+            admax_data_root = admax_product_root / "admax"
+            admax_data_root.mkdir(parents=True)
+            (admax_product_root / "unistreamer.exe").write_text("", encoding="utf-8")
+            (admax_data_root / "bin" / "64bit" / "logs" / "Playout").mkdir(parents=True)
+            (admax_data_root / "bin" / "64bit" / "logs" / "FNF").mkdir(parents=True)
+            (admax_data_root / "Settings.ini").write_text("", encoding="utf-8")
+
+            command = f"""
+& {{
+  $programFiles = '{_ps_quote(program_files)}'
+  $programFilesX86 = '{_ps_quote(program_files_x86)}'
+  $programData = '{_ps_quote(program_data)}'
+  [Environment]::SetEnvironmentVariable('ProgramFiles', $programFiles, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramFiles(x86)', $programFilesX86, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramData', $programData, 'Process')
+  function Get-CimInstance {{
+    [CmdletBinding()]
+    param([string]$ClassName)
+    return @()
+  }}
+  & '{_ps_quote(DISCOVERY_SCRIPT)}' -StdOut
+}}
+"""
+            completed = subprocess.run(
+                [
+                    POWERSHELL_EXE,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    command,
+                ],
+                cwd=bundle_root,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+        report = json.loads(completed.stdout)
+        admax_players = [player for player in report["players"] if player["playout_type"] == "admax"]
+
+        self.assertEqual(len(admax_players), 1)
+        self.assertIn(str(admax_product_root), admax_players[0]["paths"]["admax_root_candidates"])
+        self.assertTrue(admax_players[0]["paths"]["playout_log_dir"].endswith("admax\\bin\\64bit\\logs\\Playout"))
+        self.assertTrue(admax_players[0]["paths"]["fnf_log"].endswith("admax\\bin\\64bit\\logs\\FNF"))
 
     def test_uses_pulse_account_json_as_fallback_for_missing_hub_and_key(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

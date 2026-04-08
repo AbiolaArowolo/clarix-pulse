@@ -64,6 +64,39 @@ if (Test-Path -LiteralPath $_accountJsonPath -PathType Leaf) {
     }
 }
 
+$script:DiscoveryScanStartedAt = Get-Date
+
+function Write-DiscoveryStage {
+    param([string]$Message)
+    if ($StdOut) { return }
+    $elapsedSeconds = [Math]::Max(0, [int]((Get-Date) - $script:DiscoveryScanStartedAt).TotalSeconds)
+    Write-Host ("[Pulse Scan +{0}s] {1}" -f $elapsedSeconds, $Message)
+}
+
+$_discoveryStartedAt = Get-Date
+$script:_discoveryPhaseTotal = 8
+
+function Write-DiscoveryPhase {
+    param([int]$Step, [string]$Message)
+    if ($StdOut) { return }
+
+    $phaseTotal = [Math]::Max(1, [int]$script:_discoveryPhaseTotal)
+    $normalizedStep = [Math]::Min($phaseTotal, [Math]::Max(1, [int]$Step))
+    $percent = [Math]::Min(100, [Math]::Max(0, [int](($normalizedStep - 1) * 100 / $phaseTotal)))
+
+    Write-Progress -Activity 'Clarix Pulse discovery scan' -Status $Message -PercentComplete $percent
+    Write-Host ('[{0}/{1}] {2}' -f $normalizedStep, $phaseTotal, $Message)
+}
+
+function Complete-DiscoveryPhase {
+    param([string]$Message = 'Discovery scan complete')
+    if ($StdOut) { return }
+
+    $elapsedSeconds = [Math]::Max(0, [int]((Get-Date) - $_discoveryStartedAt).TotalSeconds)
+    Write-Progress -Activity 'Clarix Pulse discovery scan' -Completed
+    Write-Host ('[{0}/{0}] {1} ({2}s)' -f ([int]$script:_discoveryPhaseTotal), $Message, $elapsedSeconds)
+}
+
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
@@ -599,7 +632,77 @@ function Find-InstaPlayers {
 # ADMAX PLAYER DISCOVERY
 # ============================================================================
 
+function Get-AdmaxExecutableFilters {
+    return @(
+        'admax.exe',
+        'AdmaxPlayout.exe',
+        'AdmaxService.exe',
+        'admax_service.exe',
+        'AdmaxOne.exe',
+        'unistreamer.exe',
+        'Admax-One Playout2.0.exe',
+        'Admax-One Playout2.0.2.exe',
+        'Admax-One*.exe',
+        'Admax*.exe'
+    )
+}
+
+function Resolve-AdmaxRootCandidate {
+    param([string]$ExecutablePath)
+    if ([string]::IsNullOrWhiteSpace($ExecutablePath)) { return '' }
+
+    $parentCandidates = New-Object System.Collections.Generic.List[string]
+    $current = Split-Path -Path $ExecutablePath -Parent
+    for ($depth = 0; $depth -lt 4 -and -not [string]::IsNullOrWhiteSpace($current); $depth++) {
+        [void]$parentCandidates.Add($current)
+        $next = Split-Path -Path $current -Parent
+        if ([string]::IsNullOrWhiteSpace($next) -or $next -eq $current) { break }
+        $current = $next
+    }
+
+    $bestCandidate = ''
+    $bestScore = -1
+    foreach ($candidate in (Get-UniqueStrings -Values @($parentCandidates))) {
+        if (-not (Test-Path -LiteralPath $candidate -PathType Container)) { continue }
+        $leaf = (Split-Path -Path $candidate -Leaf)
+        $settingsIni = Get-FirstExistingFile -Candidates @(
+            (Join-Path $candidate 'Settings.ini'),
+            (Join-Path $candidate 'bin\Settings.ini'),
+            (Join-Path $candidate 'bin\64bit\Settings.ini')
+        )
+        $logDir = Get-FirstExistingDirectory -Candidates @(
+            (Join-Path $candidate 'logs'),
+            (Join-Path $candidate 'logs\Playout'),
+            (Join-Path $candidate 'logs\logs\Playout'),
+            (Join-Path $candidate 'bin\64bit\logs'),
+            (Join-Path $candidate 'bin\64bit\logs\Playout'),
+            (Join-Path $candidate 'bin\64bit\logs\logs\Playout')
+        )
+        $score = -1
+        if ($leaf -match 'admax') {
+            $score = 4
+        } elseif ($settingsIni -or $logDir) {
+            $score = 3
+        } elseif ($leaf -match 'unimedia') {
+            $score = 2
+        }
+        if ($score -gt $bestScore) {
+            $bestScore = $score
+            $bestCandidate = (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+
+    return $bestCandidate
+}
+
 function Find-AdmaxRootCandidates {
+    param(
+        [object[]]$RunningProcesses = @(),
+        [object[]]$ServiceHints = @(),
+        [object[]]$StartupHints = @(),
+        [object[]]$ScheduledTaskHints = @(),
+        [object[]]$UninstallEntries = @()
+    )
     $programFiles    = Get-EnvPathOrFallback -Name 'ProgramFiles'    -Fallback 'C:\Program Files'
     $programFilesX86 = Get-EnvPathOrFallback -Name 'ProgramFiles(x86)' -Fallback 'C:\Program Files (x86)'
     $roots = New-Object System.Collections.Generic.List[string]
@@ -612,85 +715,192 @@ function Find-AdmaxRootCandidates {
         foreach ($productDir in (Get-SafeDirectories -Path $unimediaRoot -Filter 'Admax*')) {
             $normalizedName = ($productDir.Name -replace '\s','').ToLowerInvariant()
             if (-not $seenNormalized.Add($normalizedName)) { continue }
+            [void]$roots.Add($productDir.FullName)
             foreach ($admaxDir in (Get-SafeDirectories -Path $productDir.FullName -Filter 'admax*')) {
                 [void]$roots.Add($admaxDir.FullName)
             }
         }
     }
 
-    return @(Get-UniqueStrings -Values @($roots))
+    foreach ($hint in @($RunningProcesses + $ServiceHints + $StartupHints + $ScheduledTaskHints)) {
+        $executablePath = [string]$hint.executable_path
+        $identity = @(
+            [string]$hint.name,
+            [string]$hint.display_name,
+            [string]$hint.path_name,
+            [string]$hint.command,
+            [string]$hint.task_name,
+            [string]$hint.task_path,
+            $executablePath
+        ) -join ' '
+        if ($identity -notmatch 'admax|unimedia') { continue }
+
+        $rootCandidate = Resolve-AdmaxRootCandidate -ExecutablePath $executablePath
+        if ($rootCandidate) { [void]$roots.Add($rootCandidate) }
+    }
+
+    foreach ($entry in @($UninstallEntries)) {
+        $displayName = [string]$entry.name
+        $publisher = [string]$entry.publisher
+        if (($displayName + ' ' + $publisher) -notmatch 'admax|unimedia') { continue }
+
+        $installLocation = [string]$entry.install_loc
+        if ([string]::IsNullOrWhiteSpace($installLocation) -or -not (Test-Path -LiteralPath $installLocation -PathType Container)) {
+            continue
+        }
+
+        [void]$roots.Add((Resolve-Path -LiteralPath $installLocation).Path)
+        foreach ($admaxDir in (Get-SafeDirectories -Path $installLocation -Filter 'admax*' -Recurse | Select-Object -First 20)) {
+            [void]$roots.Add($admaxDir.FullName)
+        }
+    }
+
+    $orderedRoots = @(Get-UniqueStrings -Values @($roots))
+    $filteredRoots = New-Object System.Collections.Generic.List[string]
+    foreach ($rootPath in $orderedRoots) {
+        $normalizedRoot = $rootPath.TrimEnd('\')
+        $parentRoot = (Split-Path -Path $normalizedRoot -Parent).TrimEnd('\')
+        $isNestedAdmaxRoot = $normalizedRoot -match '[\\/]admax[^\\/]*$'
+        $parentAlreadyTracked = $false
+        if ($isNestedAdmaxRoot -and -not [string]::IsNullOrWhiteSpace($parentRoot)) {
+            $parentAlreadyTracked = @($orderedRoots | Where-Object { $_.TrimEnd('\') -eq $parentRoot }).Count -gt 0
+        }
+        if ($isNestedAdmaxRoot -and $parentAlreadyTracked) { continue }
+        [void]$filteredRoots.Add($rootPath)
+    }
+
+    return @($filteredRoots | ForEach-Object { $_ })
 }
 
 function Find-AdmaxPlayers {
-    param([string]$NodeId)
+    param(
+        [string]$NodeId,
+        [object[]]$RunningProcesses = @(),
+        [object[]]$ServiceHints = @(),
+        [object[]]$StartupHints = @(),
+        [object[]]$ScheduledTaskHints = @(),
+        [object[]]$UninstallEntries = @()
+    )
     $players = New-Object System.Collections.Generic.List[object]
-    $roots   = @(Find-AdmaxRootCandidates)
+    $roots   = @(Find-AdmaxRootCandidates -RunningProcesses $RunningProcesses -ServiceHints $ServiceHints -StartupHints $StartupHints -ScheduledTaskHints $ScheduledTaskHints -UninstallEntries $UninstallEntries)
+    $knownExeNames = @(Get-AdmaxExecutableFilters)
 
     for ($offset = 0; $offset -lt $roots.Count; $offset++) {
         $admaxRoot = $roots[$offset]
+        $rootLeaf = (Split-Path -Path $admaxRoot -Leaf)
+        if ($rootLeaf -match '^admax') {
+            $parentRoot = Split-Path -Path $admaxRoot -Parent
+            if (-not [string]::IsNullOrWhiteSpace($parentRoot) -and (Get-UniqueStrings -Values @($roots)) -contains $parentRoot) {
+                continue
+            }
+        }
+        $dataRootCandidates = New-Object System.Collections.Generic.List[string]
+        [void]$dataRootCandidates.Add($admaxRoot)
+        foreach ($nestedAdmaxDir in (Get-SafeDirectories -Path $admaxRoot -Filter 'admax*')) {
+            [void]$dataRootCandidates.Add($nestedAdmaxDir.FullName)
+        }
+        $dataRoots = @(Get-UniqueStrings -Values @($dataRootCandidates))
+        $playoutCandidates = New-Object System.Collections.Generic.List[string]
+        $fnfCandidates = New-Object System.Collections.Generic.List[string]
+        $playlistCandidates = New-Object System.Collections.Generic.List[string]
+        $settingsCandidates = New-Object System.Collections.Generic.List[string]
+        foreach ($dataRoot in $dataRoots) {
+            [void]$playoutCandidates.Add((Join-Path $dataRoot 'logs\logs\Playout'))
+            [void]$playoutCandidates.Add((Join-Path $dataRoot 'logs\Playout'))
+            [void]$playoutCandidates.Add((Join-Path $dataRoot 'bin\64bit\logs\logs\Playout'))
+            [void]$playoutCandidates.Add((Join-Path $dataRoot 'bin\64bit\logs\Playout'))
+            [void]$fnfCandidates.Add((Join-Path $dataRoot 'logs\FNF'))
+            [void]$fnfCandidates.Add((Join-Path $dataRoot 'bin\64bit\logs\FNF'))
+            [void]$playlistCandidates.Add((Join-Path $dataRoot 'logs\playlistscan'))
+            [void]$playlistCandidates.Add((Join-Path $dataRoot 'bin\64bit\logs\playlistscan'))
+            [void]$settingsCandidates.Add((Join-Path $dataRoot 'Settings.ini'))
+            [void]$settingsCandidates.Add((Join-Path $dataRoot 'bin\Settings.ini'))
+            [void]$settingsCandidates.Add((Join-Path $dataRoot 'bin\64bit\Settings.ini'))
+        }
 
         # Require at least one known executable to exist — folders alone are stale leftovers
-        $knownExeNames = @('admax.exe','AdmaxPlayout.exe','AdmaxService.exe','admax_service.exe','AdmaxOne.exe')
         $hasExe = $false
-        foreach ($exeName in $knownExeNames) {
-            $candidate = Get-SafeFiles -Path $admaxRoot -Filter $exeName -Recurse | Select-Object -First 1
-            if ($candidate) { $hasExe = $true; break }
+        $matchedExecutableNames = New-Object System.Collections.Generic.List[string]
+        foreach ($searchRoot in $dataRoots) {
+            foreach ($exeName in $knownExeNames) {
+                $candidate = Get-SafeFiles -Path $searchRoot -Filter $exeName -Recurse | Select-Object -First 1
+                if ($candidate) {
+                    $hasExe = $true
+                    [void]$matchedExecutableNames.Add($candidate.Name)
+                    break
+                }
+            }
+            if ($hasExe) { break }
         }
+        $runningRoots = @($dataRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
         # Also count as installed if a process is running from this dir or registry confirms it
         $isRunningNow = $false
         try {
             $proc = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-                Where-Object { $_.ExecutablePath -and $_.ExecutablePath.ToLowerInvariant().StartsWith($admaxRoot.ToLowerInvariant()) } |
+                Where-Object {
+                    $exePath = [string]$_.ExecutablePath
+                    if ([string]::IsNullOrWhiteSpace($exePath)) { return $false }
+                    foreach ($rootPath in $runningRoots) {
+                        if ($exePath.ToLowerInvariant().StartsWith($rootPath.ToLowerInvariant())) {
+                            return $true
+                        }
+                    }
+                    return $false
+                } |
                 Select-Object -First 1
             if ($proc) { $isRunningNow = $true }
         } catch { }
-        if (-not $hasExe -and -not $isRunningNow) { continue }
 
-        $playoutLogDir = Get-FirstExistingDirectory -Candidates @(
-            (Join-Path $admaxRoot 'logs\logs\Playout'),
-            (Join-Path $admaxRoot 'logs\Playout'),
-            (Join-Path $admaxRoot 'bin\64bit\logs\logs\Playout'),
-            (Join-Path $admaxRoot 'bin\64bit\logs\Playout')
-        )
-        $fnfLog = Get-FirstExistingDirectory -Candidates @(
-            (Join-Path $admaxRoot 'logs\FNF'),
-            (Join-Path $admaxRoot 'bin\64bit\logs\FNF')
-        )
-        $playlistScanLog = Get-FirstExistingDirectory -Candidates @(
-            (Join-Path $admaxRoot 'logs\playlistscan'),
-            (Join-Path $admaxRoot 'bin\64bit\logs\playlistscan')
-        )
-        $settingsIni = Get-FirstExistingFile -Candidates @(
-            (Join-Path $admaxRoot 'Settings.ini'),
-            (Join-Path $admaxRoot 'bin\Settings.ini'),
-            (Join-Path $admaxRoot 'bin\64bit\Settings.ini')
-        )
+        $playoutLogDir = Get-FirstExistingDirectory -Candidates @($playoutCandidates)
+        $fnfLog = Get-FirstExistingDirectory -Candidates @($fnfCandidates)
+        $playlistScanLog = Get-FirstExistingDirectory -Candidates @($playlistCandidates)
+        $settingsIni = Get-FirstExistingFile -Candidates @($settingsCandidates)
+        $hasInstallEvidence = $hasExe -or $isRunningNow -or $playoutLogDir -or $fnfLog -or $playlistScanLog -or $settingsIni
+        if (-not $hasInstallEvidence) { continue }
 
-        # Auto-detect running processes whose exe lives inside this admax root
-        $detectedProcessNames = @(Get-ProcessNamesInDirectory -DirectoryPath $admaxRoot)
+        # Auto-detect running processes whose exe lives inside this Admax product tree.
+        $detectedProcessNames = @(
+            Get-UniqueStrings -Values @(
+                @($matchedExecutableNames)
+                foreach ($dataRoot in $dataRoots) {
+                    @(Get-ProcessNamesInDirectory -DirectoryPath $dataRoot)
+                }
+            )
+        )
 
         $evidence = New-Object System.Collections.Generic.List[string]
         [void]$evidence.Add("Admax root found at $admaxRoot")
+        foreach ($dataRoot in ($dataRoots | Where-Object { $_ -ne $admaxRoot })) {
+            [void]$evidence.Add("Admax data root found at $dataRoot")
+        }
         if ($playoutLogDir)    { [void]$evidence.Add("Playout log folder found at $playoutLogDir") }
         if ($fnfLog)           { [void]$evidence.Add("FNF log folder found at $fnfLog") }
         if ($playlistScanLog)  { [void]$evidence.Add("Playlist scan log found at $playlistScanLog") }
         if ($settingsIni)      { [void]$evidence.Add("Settings.ini found at $settingsIni") }
+        foreach ($exeName in (Get-UniqueStrings -Values @($matchedExecutableNames))) {
+            [void]$evidence.Add("Executable found: $exeName")
+        }
         foreach ($pn in $detectedProcessNames) { [void]$evidence.Add("Running process detected: $pn") }
 
-        # Only populate process_selectors when a process was actually found
-        $processSelectors = @{}
+        $processSelectors = @{
+            executable_path_contains = @($runningRoots)
+        }
         if ($detectedProcessNames.Count -gt 0) {
-            $processSelectors = @{ process_names = $detectedProcessNames }
+            $processSelectors.process_names = $detectedProcessNames
+        } else {
+            $processSelectors.process_name_regex = '(?i)admax|unistreamer'
         }
 
         $label = 'Admax {0}' -f ($offset + 1)
+        $confidence = if ($hasExe -or $isRunningNow) { 0.94 } elseif ($settingsIni -or $playoutLogDir -or $fnfLog -or $playlistScanLog) { 0.86 } else { 0.78 }
         [void]$players.Add((New-PlayerReport -NodeId $NodeId -Index $offset -PlayoutType 'admax' -Label $label -Paths @{
-            admax_root_candidates = @($admaxRoot)
+            admax_root_candidates = $dataRoots
+            install_dir           = $admaxRoot
             admax_state_path      = $settingsIni
             playout_log_dir       = $playoutLogDir
             fnf_log               = $fnfLog
             playlistscan_log      = $playlistScanLog
-        } -ProcessSelectors $processSelectors -LogSelectors @{} -Evidence @($evidence) -Confidence 0.94))
+        } -ProcessSelectors $processSelectors -LogSelectors @{} -Evidence @($evidence) -Confidence $confidence))
     }
 
     return @($players | ForEach-Object { $_ })
@@ -776,9 +986,13 @@ function Get-UninstallEntries {
 }
 
 function Find-RegistryBroadcastPlayers {
-    param([string]$NodeId, [int]$StartIndex = 0)
+    param(
+        [string]$NodeId,
+        [int]$StartIndex = 0,
+        [object[]]$UninstallEntries = @()
+    )
     $players  = New-Object System.Collections.Generic.List[object]
-    $entries  = @(Get-UninstallEntries)
+    $entries  = if ($PSBoundParameters.ContainsKey('UninstallEntries')) { @($UninstallEntries) } else { @(Get-UninstallEntries) }
     $seen     = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     $pf       = Get-EnvPathOrFallback -Name 'ProgramFiles'       -Fallback 'C:\Program Files'
     $pfx86    = Get-EnvPathOrFallback -Name 'ProgramFiles(x86)'  -Fallback 'C:\Program Files (x86)'
@@ -792,7 +1006,14 @@ function Find-RegistryBroadcastPlayers {
             $nameMatch = $nameLower -match ($profile.publisher -replace '\|','|')
 
             if (-not ($pubMatch -or $nameMatch)) { continue }
-            if (-not ($nameLower -match 'air|playout|automation|cinegy|versio|marina|mosart|oasys|xplayout|inception|prime|wideorbit|bitcentral|spectrum|streampro|airboss')) { continue }
+            $keywordGuard = if ($profile.id -eq 'admax') {
+                'admax|unimedia|playout|streamer|playlist'
+            } elseif ($profile.id -eq 'insta') {
+                'insta|indytek|playout'
+            } else {
+                'air|playout|automation|cinegy|versio|marina|mosart|oasys|xplayout|inception|prime|wideorbit|bitcentral|spectrum|streampro|airboss'
+            }
+            if (-not ($nameLower -match $keywordGuard)) { continue }
 
             # Allow multiple instances of the same software type (e.g. AirBox Ch1/Ch2)
             # Dedupe on type + install location so different install dirs = separate entries
@@ -1108,13 +1329,22 @@ function Get-DedupedPlayers {
 }
 
 function Find-GenericProfilePlayers {
-    param([string]$NodeId, [int]$StartIndex = 0, [string]$PlayoutHint = 'auto')
+    param(
+        [string]$NodeId,
+        [int]$StartIndex = 0,
+        [string]$PlayoutHint = 'auto',
+        [object[]]$RunningProcesses = @(),
+        [object[]]$ServiceHints = @(),
+        [object[]]$StartupHints = @(),
+        [object[]]$ScheduledTaskHints = @(),
+        [string[]]$LogHints = @()
+    )
     $players            = New-Object System.Collections.Generic.List[object]
-    $runningProcesses   = @(Get-RunningProcessHints)
-    $serviceHints       = @(Get-ServiceHints)
-    $startupHints       = @(Get-StartupCommandHints)
-    $scheduledTaskHints = @(Get-ScheduledTaskHints)
-    $logHints           = @(Get-GenericLogHints)
+    $runningProcesses   = if ($PSBoundParameters.ContainsKey('RunningProcesses')) { @($RunningProcesses) } else { @(Get-RunningProcessHints) }
+    $serviceHints       = if ($PSBoundParameters.ContainsKey('ServiceHints')) { @($ServiceHints) } else { @(Get-ServiceHints) }
+    $startupHints       = if ($PSBoundParameters.ContainsKey('StartupHints')) { @($StartupHints) } else { @(Get-StartupCommandHints) }
+    $scheduledTaskHints = if ($PSBoundParameters.ContainsKey('ScheduledTaskHints')) { @($ScheduledTaskHints) } else { @(Get-ScheduledTaskHints) }
+    $logHints           = if ($PSBoundParameters.ContainsKey('LogHints')) { @($LogHints) } else { @(Get-GenericLogHints) }
     $seen               = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     $profileCounts      = @{}
     $nextIndex          = $StartIndex
@@ -1464,57 +1694,115 @@ function Get-PulseConfigHints {
 # MAIN
 # ============================================================================
 
-$hostname            = $env:COMPUTERNAME
-$existingPulseConfig = Get-PulseConfigHints
-$nodeSeed            = if ($existingPulseConfig.node_id) { $existingPulseConfig.node_id } else { $hostname }
-$nodeId              = if ($existingPulseConfig.node_id) { [string]$existingPulseConfig.node_id } else { Convert-ToNodeSlug -Value $nodeSeed }
-$instaPlayers        = @(Find-InstaPlayers   -NodeId $nodeId)
-$admaxPlayers        = @(Find-AdmaxPlayers   -NodeId $nodeId)
-$registryPlayers     = @(Find-RegistryBroadcastPlayers -NodeId $nodeId -StartIndex ($instaPlayers.Count + $admaxPlayers.Count))
-# Exclude registry-detected duplicates of insta/admax (already handled by dedicated scanners)
-$registryPlayers     = @($registryPlayers | Where-Object { $_.playout_type -notin @('insta','admax') })
-$knownCount          = $instaPlayers.Count + $admaxPlayers.Count + $registryPlayers.Count
-$genericPlayers      = @(Find-GenericProfilePlayers -NodeId $nodeId -StartIndex $knownCount -PlayoutHint $PlayoutHint)
-$players             = @(Get-DedupedPlayers -Players @($instaPlayers + $admaxPlayers + $registryPlayers + $genericPlayers))
-$localTimeZone       = [TimeZoneInfo]::Local
-$utcOffsetMinutes    = [int]$localTimeZone.GetUtcOffset((Get-Date)).TotalMinutes
+try {
+    $hostname = $env:COMPUTERNAME
 
-$report = [ordered]@{
-    report_version = 1
-    generated_at   = (Get-Date).ToUniversalTime().ToString('o')
-    machine        = [ordered]@{
-        hostname           = $hostname
-        username           = $env:USERNAME
-        timezone_id        = $localTimeZone.Id
-        utc_offset_minutes = $utcOffsetMinutes
+    Write-DiscoveryPhase -Step 1 -Message 'Loading existing Pulse configuration hints'
+    $existingPulseConfig = Get-PulseConfigHints
+    $nodeSeed = if ($existingPulseConfig.node_id) { $existingPulseConfig.node_id } else { $hostname }
+    $nodeId = if ($existingPulseConfig.node_id) { [string]$existingPulseConfig.node_id } else { Convert-ToNodeSlug -Value $nodeSeed }
+
+    Write-DiscoveryPhase -Step 2 -Message 'Inspecting running broadcast processes'
+    $runningProcessHints = @(Get-RunningProcessHints)
+
+    Write-DiscoveryPhase -Step 3 -Message 'Inspecting Windows services'
+    $serviceHints = @(Get-ServiceHints)
+
+    Write-DiscoveryPhase -Step 4 -Message 'Inspecting startup commands and scheduled tasks'
+    $startupHints = @(Get-StartupCommandHints)
+    $scheduledTaskHints = @(Get-ScheduledTaskHints)
+
+    Write-DiscoveryPhase -Step 5 -Message 'Collecting registry and log hints'
+    $uninstallEntries = @(Get-UninstallEntries)
+    $genericLogHints = @(Get-GenericLogHints)
+
+    Write-DiscoveryPhase -Step 6 -Message 'Scanning dedicated Insta and Admax installations'
+    $instaPlayers = @(Find-InstaPlayers -NodeId $nodeId)
+    $admaxPlayers = @(
+        Find-AdmaxPlayers `
+            -NodeId $nodeId `
+            -RunningProcesses $runningProcessHints `
+            -ServiceHints $serviceHints `
+            -StartupHints $startupHints `
+            -ScheduledTaskHints $scheduledTaskHints `
+            -UninstallEntries $uninstallEntries
+    )
+
+    Write-DiscoveryPhase -Step 7 -Message 'Matching registry and generic playout profiles'
+    $registryPlayers = @(
+        Find-RegistryBroadcastPlayers `
+            -NodeId $nodeId `
+            -StartIndex ($instaPlayers.Count + $admaxPlayers.Count) `
+            -UninstallEntries $uninstallEntries
+    )
+    # Exclude registry-detected Insta duplicates (the dedicated scanner is stronger there).
+    # Keep Admax as a registry fallback only when the dedicated scan did not find it.
+    $registryPlayers = @($registryPlayers | Where-Object { $_.playout_type -ne 'insta' })
+    if ($admaxPlayers.Count -gt 0) {
+        $registryPlayers = @($registryPlayers | Where-Object { $_.playout_type -ne 'admax' })
     }
-    node_id        = $nodeId
-    node_name      = if ($existingPulseConfig.node_name)      { $existingPulseConfig.node_name }      else { $hostname }
-    site_id        = if ($existingPulseConfig.site_id)        { $existingPulseConfig.site_id }        else { $nodeId }
-    hub_url        = if ($existingPulseConfig.hub_url)        { $existingPulseConfig.hub_url }        else { '' }
-    agent_token    = if ($existingPulseConfig.agent_token)    { $existingPulseConfig.agent_token }    else { '' }
-    enrollment_key = if ($existingPulseConfig.enrollment_key) { $existingPulseConfig.enrollment_key } else { '' }
-    players        = $players
-    discovery      = [ordered]@{
-        playout_hint            = $PlayoutHint
-        detected_player_count   = $players.Count
-        detected_playout_types  = @(Get-UniqueStrings -Values @($players | ForEach-Object { $_.playout_type }))
-        running_processes       = @(Get-RunningProcessHints)
-        generic_log_hints       = @(Get-GenericLogHints)
-        existing_pulse_config   = $existingPulseConfig
+    $knownCount = $instaPlayers.Count + $admaxPlayers.Count + $registryPlayers.Count
+    $genericPlayers = @(
+        Find-GenericProfilePlayers `
+            -NodeId $nodeId `
+            -StartIndex $knownCount `
+            -PlayoutHint $PlayoutHint `
+            -RunningProcesses $runningProcessHints `
+            -ServiceHints $serviceHints `
+            -StartupHints $startupHints `
+            -ScheduledTaskHints $scheduledTaskHints `
+            -LogHints $genericLogHints
+    )
+    $players = @(Get-DedupedPlayers -Players @($instaPlayers + $admaxPlayers + $registryPlayers + $genericPlayers))
+
+    Write-DiscoveryPhase -Step 8 -Message 'Writing discovery report'
+    $localTimeZone = [TimeZoneInfo]::Local
+    $utcOffsetMinutes = [int]$localTimeZone.GetUtcOffset((Get-Date)).TotalMinutes
+
+    $report = [ordered]@{
+        report_version = 1
+        generated_at   = (Get-Date).ToUniversalTime().ToString('o')
+        machine        = [ordered]@{
+            hostname           = $hostname
+            username           = $env:USERNAME
+            timezone_id        = $localTimeZone.Id
+            utc_offset_minutes = $utcOffsetMinutes
+        }
+        node_id        = $nodeId
+        node_name      = if ($existingPulseConfig.node_name)      { $existingPulseConfig.node_name }      else { $hostname }
+        site_id        = if ($existingPulseConfig.site_id)        { $existingPulseConfig.site_id }        else { $nodeId }
+        hub_url        = if ($existingPulseConfig.hub_url)        { $existingPulseConfig.hub_url }        else { '' }
+        agent_token    = if ($existingPulseConfig.agent_token)    { $existingPulseConfig.agent_token }    else { '' }
+        enrollment_key = if ($existingPulseConfig.enrollment_key) { $existingPulseConfig.enrollment_key } else { '' }
+        players        = $players
+        discovery      = [ordered]@{
+            playout_hint            = $PlayoutHint
+            detected_player_count   = $players.Count
+            detected_playout_types  = @(Get-UniqueStrings -Values @($players | ForEach-Object { $_.playout_type }))
+            running_processes       = $runningProcessHints
+            generic_log_hints       = $genericLogHints
+            existing_pulse_config   = $existingPulseConfig
+        }
     }
+
+    $json = $report | ConvertTo-Json -Depth 12
+
+    if (-not $StdOut) {
+        $directory = Split-Path -Path $OutputPath -Parent
+        if (-not [string]::IsNullOrWhiteSpace($directory) -and -not (Test-Path -LiteralPath $directory)) {
+            New-Item -Path $directory -ItemType Directory -Force | Out-Null
+        }
+        [System.IO.File]::WriteAllText($OutputPath, $json, (New-Object System.Text.UTF8Encoding $false))
+        Complete-DiscoveryPhase -Message 'Discovery scan complete'
+        Write-Host "Pulse discovery report written to $OutputPath"
+        return
+    }
+
+    $json
+} catch {
+    if (-not $StdOut) {
+        Write-Progress -Activity 'Clarix Pulse discovery scan' -Completed
+        Write-Host ('ERROR: Pulse discovery scan failed: {0}' -f $_.Exception.Message)
+    }
+    throw
 }
-
-$json = $report | ConvertTo-Json -Depth 12
-
-if (-not $StdOut) {
-    $directory = Split-Path -Path $OutputPath -Parent
-    if (-not [string]::IsNullOrWhiteSpace($directory) -and -not (Test-Path -LiteralPath $directory)) {
-        New-Item -Path $directory -ItemType Directory -Force | Out-Null
-    }
-    [System.IO.File]::WriteAllText($OutputPath, $json, (New-Object System.Text.UTF8Encoding $false))
-    Write-Host "Pulse discovery report written to $OutputPath"
-    return
-}
-
-$json
