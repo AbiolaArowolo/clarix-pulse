@@ -34,18 +34,16 @@ echo    CLARIX PULSE  ^|  Node Setup  ^|  %BUNDLE_VERSION%
 echo  =====================================================
 echo.
 echo    [1]  Install Pulse as a Windows service
-echo    [2]  Run discovery scan and open local setup UI
-echo    [3]  Scan this computer and auto-load local setup UI
-echo    [4]  Uninstall and remove Pulse service
-echo    [5]  Exit
+echo    [2]  Scan this computer and open local setup UI
+echo    [3]  Uninstall and remove Pulse service
+echo    [4]  Exit
 echo.
-set /p CHOICE=   Choose an option (1-5):
+set /p CHOICE=   Choose an option (1-4):
 
 if "%CHOICE%"=="1" goto INSTALL
 if "%CHOICE%"=="2" goto CONFIGURE
-if "%CHOICE%"=="3" goto SCAN
-if "%CHOICE%"=="4" goto UNINSTALL
-if "%CHOICE%"=="5" exit /b 0
+if "%CHOICE%"=="3" goto UNINSTALL
+if "%CHOICE%"=="4" exit /b 0
 goto MENU
 
 :DETECT_VERSION
@@ -82,7 +80,7 @@ call :RUN_SCAN
 if errorlevel 1 (
     echo.
     echo  Discovery scan failed. The temporary setup UI was not opened.
-    echo  Review the messages above, then run option [2] again.
+    echo  Review the messages above, then choose option [2] again.
     echo.
     pause
     goto MENU
@@ -90,30 +88,6 @@ if errorlevel 1 (
 call :SHOW_SUMMARY
 echo.
 echo  Opening local setup UI with the scan details pre-loaded...
-echo  Temporary setup URL will use the first free localhost port from 3211-3299.
-echo  If it does not open automatically, use the exact localhost URL printed below.
-call :OPEN_LOCAL_SETUP
-echo.
-pause
-goto MENU
-
-:SCAN
-echo.
-echo  Scanning this computer for playout players and services...
-echo  Output: %REPORT_PATH%
-echo.
-call :RUN_SCAN
-if errorlevel 1 (
-    echo.
-    echo  Discovery scan failed. No report is available to import yet.
-    echo  Review the messages above, then run option [3] again.
-    echo.
-    pause
-    goto MENU
-)
-call :SHOW_SUMMARY
-echo.
-echo  Scan complete. Launching setup UI with discovery results pre-loaded...
 echo  Temporary setup URL will use the first free localhost port from 3211-3299.
 echo  If it does not open automatically, use the exact localhost URL printed below.
 call :OPEN_LOCAL_SETUP
@@ -175,7 +149,7 @@ timeout /t 3 >nul
 "%EXE_PATH%" --open-local-ui
 if "%ERRORLEVEL%"=="2" (
     echo  Persistent local UI is not running yet.
-    echo  Run configure.bat if you need the guided setup flow.
+    echo  Use option [2] ^(Scan + setup^) to run guided configuration.
 )
 exit /b 0
 

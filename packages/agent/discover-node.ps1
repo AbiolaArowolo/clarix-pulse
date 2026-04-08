@@ -583,8 +583,26 @@ function Find-InstaPlayers {
             )
             $detectedProcessNames = @(Get-ProcessNamesInDirectory -DirectoryPath $channelPath)
             $sharedExecutablePath = Get-InstaSharedExecutable -IndytekRoot $indytekRoot -ChannelPath $channelPath
-            $hasRuntimeEvidence = Test-InstaChannelRuntimeEvidence -ChannelPath $channelPath -InstanceRoot $instanceRoot
-            if (-not $hasRuntimeEvidence -and [string]::IsNullOrWhiteSpace($sharedExecutablePath) -and $detectedProcessNames.Count -eq 0) { continue }
+            # Compute runtime flags early so they can inform the channel-evidence filter below.
+            $runtimeFlags = Get-InstaRuntimeFlags -InstanceRoot $instanceRoot
+
+            # Require channel-specific evidence, not just "directory exists" or "shared exe present".
+            # A channel folder is only a real player when at least one of these is true:
+            #   1. A process is currently running from this channel dir.
+            #   2. The channel has its own copy of the exe (not just the shared root exe).
+            #   3. A Settings subfolder was found (means the channel has been configured).
+            #   4. Runtime state files exist (runningstatus.txt, filebar.txt, playlist XML).
+            #   5. A playlist-scan log dir exists (the channel has been used).
+            $hasChannelEvidence =
+                ($detectedProcessNames.Count -gt 0) -or
+                (Test-Path -LiteralPath (Join-Path $channelPath 'Insta Playout.exe') -PathType Leaf) -or
+                (Test-Path -LiteralPath (Join-Path $channelPath 'Insta Helper.exe')  -PathType Leaf) -or
+                ($instanceRoot -ne $channelPath) -or
+                $runtimeFlags.has_status_file -or
+                $runtimeFlags.has_filebar -or
+                (Test-Path -LiteralPath (Join-Path $channelPath 'Mainplaylist.xml')     -PathType Leaf) -or
+                (Test-Path -LiteralPath (Join-Path $channelPath 'MainplaylistOrig.xml') -PathType Leaf)
+            if (-not $hasChannelEvidence) { continue }
 
             $sharedLogDir = Get-FirstExistingDirectory -Candidates @(
                 (Join-Path $indytekRoot 'Insta log'),
@@ -603,7 +621,6 @@ function Find-InstaPlayers {
                 (Join-Path $channelPath 'logs\playlistscan'),
                 (Join-Path $channelPath 'playlistscan')
             )
-            $runtimeFlags = Get-InstaRuntimeFlags -InstanceRoot $instanceRoot
             $processNames = if ($detectedProcessNames.Count -gt 0) { $detectedProcessNames } else { @('Insta Playout.exe') }
             $processSelectors = @{ process_names = $processNames }
             if (-not [string]::IsNullOrWhiteSpace($sharedExecutablePath)) {
@@ -659,6 +676,12 @@ function Get-AdmaxExecutableFilters {
         'unistreamer.exe',
         'Admax-One Playout2.0.exe',
         'Admax-One Playout2.0.2.exe',
+        'AdmaxBroadcast.exe',
+        'AdmaxLauncher.exe',
+        'AdmaxEngine.exe',
+        'AdmaxPlayer.exe',
+        'AdmaxScheduler.exe',
+        'AdmaxController.exe',
         'Admax-One*.exe',
         'Admax*.exe'
     )
@@ -728,8 +751,18 @@ function Find-AdmaxRootCandidates {
     $seenNormalized = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 
     foreach ($baseDir in @($programFilesX86, $programFiles)) {
+        # Standard location: C:\Program Files (x86)\Unimedia\Admax*
         $unimediaRoot = Join-Path $baseDir 'Unimedia'
         foreach ($productDir in (Get-SafeDirectories -Path $unimediaRoot -Filter 'Admax*')) {
+            $normalizedName = ($productDir.Name -replace '\s','').ToLowerInvariant()
+            if (-not $seenNormalized.Add($normalizedName)) { continue }
+            [void]$roots.Add($productDir.FullName)
+            foreach ($admaxDir in (Get-SafeDirectories -Path $productDir.FullName -Filter 'admax*')) {
+                [void]$roots.Add($admaxDir.FullName)
+            }
+        }
+        # Direct location: C:\Program Files\Admax* (no Unimedia parent)
+        foreach ($productDir in (Get-SafeDirectories -Path $baseDir -Filter 'Admax*')) {
             $normalizedName = ($productDir.Name -replace '\s','').ToLowerInvariant()
             if (-not $seenNormalized.Add($normalizedName)) { continue }
             [void]$roots.Add($productDir.FullName)
@@ -750,7 +783,7 @@ function Find-AdmaxRootCandidates {
             [string]$hint.task_path,
             $executablePath
         ) -join ' '
-        if ($identity -notmatch 'admax|unimedia') { continue }
+        if ($identity -notmatch 'admax|unimedia|admaxone|admax.one|admax-one') { continue }
 
         $rootCandidate = Resolve-AdmaxRootCandidate -ExecutablePath $executablePath
         if ($rootCandidate) { [void]$roots.Add($rootCandidate) }
@@ -759,7 +792,7 @@ function Find-AdmaxRootCandidates {
     foreach ($entry in @($UninstallEntries)) {
         $displayName = [string]$entry.name
         $publisher = [string]$entry.publisher
-        if (($displayName + ' ' + $publisher) -notmatch 'admax|unimedia') { continue }
+        if (($displayName + ' ' + $publisher) -notmatch 'admax|unimedia|clarity systems|admax systems|admax broadcast') { continue }
 
         $installLocation = [string]$entry.install_loc
         if ([string]::IsNullOrWhiteSpace($installLocation) -or -not (Test-Path -LiteralPath $installLocation -PathType Container)) {
@@ -787,6 +820,86 @@ function Find-AdmaxRootCandidates {
     }
 
     return @($filteredRoots | ForEach-Object { $_ })
+}
+
+function Get-AdmaxChannelRoots {
+    param(
+        [string]$InstallRoot,
+        [string[]]$DataRoots = @()
+    )
+    # Returns channel-specific subdirectory paths when multiple Admax channels are
+    # detected within one installation root. Returns empty array for single-channel
+    # installs so the caller falls through to the standard single-instance path.
+    #
+    # Strategy 1 — process command-line inspection (most reliable when running):
+    #   Admax passes its per-channel config file as a CLI argument, e.g.
+    #   AdmaxBroadcast.exe -config "D:\Admax One\Channel 1\config.xml"
+    #   Each unique config directory under this root => one distinct channel.
+    #
+    # Strategy 2 — named/numbered subdirectory scanning (catches not-yet-running):
+    #   Scans for Channel*, ch[0-9]*, Instance*, etc. that contain config evidence.
+    $channelPaths = New-Object System.Collections.Generic.List[string]
+
+    # Strategy 1: running process command lines
+    try {
+        $admaxProcs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object {
+                $ep = [string]$_.ExecutablePath
+                -not [string]::IsNullOrWhiteSpace($ep) -and
+                $ep.ToLowerInvariant().StartsWith($InstallRoot.ToLowerInvariant())
+            }
+        foreach ($proc in $admaxProcs) {
+            $cmdLine = [string]$proc.CommandLine
+            if ([string]::IsNullOrWhiteSpace($cmdLine)) { continue }
+            $pathMatches = [regex]::Matches($cmdLine, '"([^"]{4,}\.(?:ini|xml|cfg|json))"')
+            foreach ($m in $pathMatches) {
+                $configPath = $m.Groups[1].Value.Trim()
+                $configDir = if (Test-Path $configPath -PathType Container) {
+                    $configPath
+                } elseif (Test-Path $configPath -PathType Leaf) {
+                    Split-Path $configPath -Parent
+                } else { $null }
+                if (-not [string]::IsNullOrWhiteSpace($configDir) -and
+                    $configDir.ToLowerInvariant().StartsWith($InstallRoot.ToLowerInvariant()) -and
+                    $configDir.ToLowerInvariant() -ne $InstallRoot.ToLowerInvariant()) {
+                    [void]$channelPaths.Add($configDir)
+                }
+            }
+        }
+    } catch { }
+
+    # Strategy 2: named/numbered channel subdirectories with config evidence
+    $channelNamePatterns = @('Channel*', 'ch[0-9]*', 'Ch[0-9]*', 'Instance*',
+                             'Output*', 'Station*', '[0-9][0-9]*')
+    $configFileHints = @(
+        'Settings.ini', 'admax.ini', 'config.ini', 'config.xml',
+        'AdmaxBroadcast.ini', 'channel.ini', 'schedule.xml', 'admax.xml'
+    )
+    foreach ($dataRoot in $DataRoots) {
+        foreach ($pattern in $channelNamePatterns) {
+            foreach ($subDir in (Get-SafeDirectories -Path $dataRoot -Filter $pattern)) {
+                $hasEvidence = $false
+                foreach ($hint in $configFileHints) {
+                    if (Test-Path (Join-Path $subDir.FullName $hint) -PathType Leaf) {
+                        $hasEvidence = $true; break
+                    }
+                }
+                if (-not $hasEvidence) {
+                    $hasEvidence =
+                        (Test-Path (Join-Path $subDir.FullName 'logs')      -PathType Container) -or
+                        (Test-Path (Join-Path $subDir.FullName 'Playlist')  -PathType Container) -or
+                        (Test-Path (Join-Path $subDir.FullName 'Playlists') -PathType Container) -or
+                        (@(Get-SafeFiles -Path $subDir.FullName -Filter '*.xml' | Select-Object -First 1).Count -gt 0)
+                }
+                if ($hasEvidence) { [void]$channelPaths.Add($subDir.FullName) }
+            }
+        }
+    }
+
+    # Only trigger multi-channel mode when 2+ distinct channel paths are found
+    $unique = @(Get-UniqueStrings -Values @($channelPaths))
+    if ($unique.Count -ge 2) { return $unique }
+    return @()
 }
 
 function Find-AdmaxPlayers {
@@ -817,6 +930,59 @@ function Find-AdmaxPlayers {
             [void]$dataRootCandidates.Add($nestedAdmaxDir.FullName)
         }
         $dataRoots = @(Get-UniqueStrings -Values @($dataRootCandidates))
+
+        # ── Smart multi-channel detection ─────────────────────────────────
+        # Some Admax installs run multiple simultaneous channels from named
+        # subdirs within one root. Detect and emit one player entry per channel.
+        $channelRoots = @(Get-AdmaxChannelRoots -InstallRoot $admaxRoot -DataRoots @($dataRoots))
+        if ($channelRoots.Count -ge 2) {
+            $channelIdx = 0
+            foreach ($channelRoot in $channelRoots) {
+                $chSettingsCandidates = @(
+                    (Join-Path $channelRoot 'Settings.ini'),
+                    (Join-Path $channelRoot 'admax.ini'),
+                    (Join-Path $channelRoot 'config.ini'),
+                    (Join-Path $channelRoot 'config.xml'),
+                    (Join-Path $channelRoot 'channel.ini')
+                )
+                $chSettingsIni = Get-FirstExistingFile -Candidates $chSettingsCandidates
+                $chPlayoutLog  = Get-FirstExistingDirectory -Candidates @(
+                    (Join-Path $channelRoot 'logs\logs\Playout'),
+                    (Join-Path $channelRoot 'logs\Playout'),
+                    (Join-Path $channelRoot 'logs')
+                )
+                $chFnfLog = Get-FirstExistingDirectory -Candidates @(
+                    (Join-Path $channelRoot 'logs\FNF'),
+                    (Join-Path $channelRoot 'FNF')
+                )
+                $chEvidence = [System.Collections.Generic.List[string]]::new()
+                [void]$chEvidence.Add("Admax multi-channel install at $admaxRoot")
+                [void]$chEvidence.Add("Channel directory: $channelRoot")
+                if ($chSettingsIni) { [void]$chEvidence.Add("Config: $chSettingsIni") }
+                if ($chPlayoutLog)  { [void]$chEvidence.Add("Playout log: $chPlayoutLog") }
+                if ($chFnfLog)      { [void]$chEvidence.Add("FNF log: $chFnfLog") }
+
+                $chLabel      = 'Admax {0} Ch{1}' -f ($offset + 1), ($channelIdx + 1)
+                $chConfidence = if ($chSettingsIni -or $chPlayoutLog -or $chFnfLog) { 0.91 } else { 0.80 }
+                [void]$players.Add((New-PlayerReport -NodeId $NodeId -Index ($players.Count) `
+                    -PlayoutType 'admax' -Label $chLabel -Paths @{
+                        admax_root_candidates = @($admaxRoot)
+                        install_dir           = $admaxRoot
+                        channel_dir           = $channelRoot
+                        admax_state_path      = $chSettingsIni
+                        playout_log_dir       = $chPlayoutLog
+                        fnf_log               = $chFnfLog
+                    } `
+                    -ProcessSelectors @{ executable_path_contains = @($admaxRoot) } `
+                    -LogSelectors @{} `
+                    -Evidence @($chEvidence) `
+                    -Confidence $chConfidence))
+                $channelIdx++
+            }
+            continue  # skip single-instance report for this root
+        }
+        # ── end multi-channel ──────────────────────────────────────────────
+
         $playoutCandidates = New-Object System.Collections.Generic.List[string]
         $fnfCandidates = New-Object System.Collections.Generic.List[string]
         $playlistCandidates = New-Object System.Collections.Generic.List[string]
