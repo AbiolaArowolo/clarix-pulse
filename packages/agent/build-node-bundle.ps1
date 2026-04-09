@@ -140,6 +140,9 @@ $requiredRepoFiles = @(
     @{ Source = (Join-Path $PSScriptRoot 'uninstall.bat'); Target = 'uninstall.bat' }
     @{ Source = (Join-Path $PSScriptRoot 'install-from-url.ps1'); Target = 'install-from-url.ps1' }
     @{ Source = (Join-Path $PSScriptRoot 'config.example.yaml'); Target = 'config.example.yaml' }
+    @{ Source = (Join-Path $PSScriptRoot 'fingerprint_manifest.json'); Target = 'fingerprint_manifest.json' }
+    @{ Source = (Join-Path $PSScriptRoot 'confidence_scorer.py'); Target = 'confidence_scorer.py' }
+    @{ Source = (Join-Path $PSScriptRoot 'learning_store.py'); Target = 'learning_store.py' }
     @{ Source = (Join-Path $PSScriptRoot 'discover-node.ps1'); Target = 'discover-node.ps1' }
     @{ Source = (Join-Path $PSScriptRoot 'show-discovery-summary.ps1'); Target = 'show-discovery-summary.ps1' }
     @{ Source = (Join-Path $PSScriptRoot 'README.txt'); Target = 'README.txt' }

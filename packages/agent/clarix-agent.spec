@@ -5,7 +5,7 @@ a = Analysis(
     ['agent.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('fingerprint_manifest.json', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

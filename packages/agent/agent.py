@@ -31,6 +31,7 @@ import yaml
 import requests
 import psutil
 
+from confidence_scorer import score_detection_payload
 from monitors import process_monitor, log_monitor, file_monitor, connectivity, udp_probe
 from playout_profiles import (
     DEFAULT_PLAYOUT_TYPE,
@@ -3059,10 +3060,48 @@ def _stage_runtime_files() -> str:
     staged_exe = _installed_path("clarix-agent.exe")
     _copy_if_exists(_current_executable_path(), staged_exe)
 
-    for filename in ("install.bat", "configure.bat", "uninstall.bat", "config.example.yaml"):
+    for filename in (
+        "install.bat",
+        "configure.bat",
+        "uninstall.bat",
+        "config.example.yaml",
+        "confidence_scorer.py",
+        "learning_store.py",
+        "fingerprint_manifest.json",
+    ):
         _copy_if_exists(_bundle_path(filename), _installed_path(filename))
 
     return staged_exe
+
+
+def score_discovery_command(input_path: str | None = None, db_path: str | None = None) -> int:
+    payload_path = input_path or "-"
+    if payload_path == "-":
+        payload = json.load(sys.stdin)
+    else:
+        with open(payload_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+
+    result = score_detection_payload(payload, db_path=db_path or None)
+    print(json.dumps(result, separators=(",", ":")))
+    return 0
+
+
+def _command_option_value(args: list[str], option_name: str, default: str | None = None) -> str | None:
+    try:
+        option_index = args.index(option_name)
+    except ValueError:
+        return default
+
+    next_index = option_index + 1
+    if next_index >= len(args):
+        return default
+
+    value = args[next_index]
+    if value.startswith("--"):
+        return default
+
+    return value
 
 
 def _load_or_prepare_config(config_path: str) -> dict[str, Any]:
@@ -3796,6 +3835,10 @@ def main() -> int:
     args = sys.argv[1:]
     if args:
         command = args[0]
+        if command == "--score-discovery":
+            input_path = args[1] if len(args) > 1 and not args[1].startswith("--") else None
+            db_path = _command_option_value(args[1:], "--db-path")
+            return score_discovery_command(input_path, db_path)
         if command == "--validate-config":
             config_path = args[1] if len(args) > 1 else None
             return validate_config_command(config_path)

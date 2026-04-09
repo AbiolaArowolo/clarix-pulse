@@ -1,6 +1,7 @@
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DISCOVERY_SCRIPT = REPO_ROOT / "packages" / "agent" / "discover-node.ps1"
+AGENT_ROOT = REPO_ROOT / "packages" / "agent"
 POWERSHELL_EXE = shutil.which("pwsh") or shutil.which("powershell") or shutil.which("powershell.exe")
 
 
@@ -634,6 +636,90 @@ class DiscoverNodeScriptTests(unittest.TestCase):
             {player["label"] for player in players},
             {"PlayBox AirBox Channel 1", "PlayBox AirBox Channel 2"},
         )
+
+    def test_emits_detection_contract_with_confidence_and_confirmation_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            bundle_root = temp_root / "bundle"
+            bundle_root.mkdir()
+            program_files = temp_root / "Program Files"
+            program_files_x86 = temp_root / "Program Files (x86)"
+            program_data = temp_root / "ProgramData"
+            airbox_dir = program_files / "PlayBox Neo"
+            airbox_dir.mkdir(parents=True)
+            executable_path = airbox_dir / "AirBox.exe"
+            executable_path.write_text("", encoding="utf-8")
+
+            for filename in (
+                "discover-node.ps1",
+                "confidence_scorer.py",
+                "learning_store.py",
+                "fingerprint_manifest.json",
+            ):
+                (bundle_root / filename).write_text(
+                    (AGENT_ROOT / filename).read_text(encoding="utf-8"),
+                    encoding="utf-8",
+                )
+
+            python_dir = Path(sys.executable).resolve().parent
+            command = f"""
+& {{
+  $programFiles = '{_ps_quote(program_files)}'
+  $programFilesX86 = '{_ps_quote(program_files_x86)}'
+  $programData = '{_ps_quote(program_data)}'
+  $pythonDir = '{_ps_quote(python_dir)}'
+  [Environment]::SetEnvironmentVariable('ProgramFiles', $programFiles, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramFiles(x86)', $programFilesX86, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramData', $programData, 'Process')
+  [Environment]::SetEnvironmentVariable('Path', $pythonDir + ';' + $env:Path, 'Process')
+  function Get-CimInstance {{
+    [CmdletBinding()]
+    param([string]$ClassName)
+    if ($ClassName -ne 'Win32_Process') {{ return @() }}
+    return @(
+      [pscustomobject]@{{
+        Name='AirBox.exe';
+        ExecutablePath='{_ps_quote(executable_path)}';
+        CommandLine='"{_ps_quote(executable_path)}" --channel=1 --service=playout'
+      }},
+      [pscustomobject]@{{
+        Name='AirBox.exe';
+        ExecutablePath='{_ps_quote(executable_path)}';
+        CommandLine='"{_ps_quote(executable_path)}" --channel=2 --service=playout'
+      }}
+    )
+  }}
+  & '{_ps_quote(bundle_root / "discover-node.ps1")}' -StdOut
+}}
+"""
+            completed = subprocess.run(
+                [
+                    POWERSHELL_EXE,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    command,
+                ],
+                cwd=bundle_root,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+        report = json.loads(completed.stdout)
+        detections = [detection for detection in report["detections"] if detection["player_type"] == "playbox_neo"]
+        players = [player for player in report["players"] if player["playout_type"] == "playbox_neo"]
+
+        self.assertEqual(len(detections), 2)
+        self.assertEqual(report["report_version"], 2)
+        self.assertIn("engine", report["discovery"]["scoring"])
+        self.assertTrue(all(detection["confidence"] >= 0.85 for detection in detections))
+        self.assertTrue(all(detection["needs_confirmation"] is False for detection in detections))
+        self.assertEqual(len({detection["instance_id"] for detection in detections}), 2)
+        self.assertEqual(len({player["instance_id"] for player in players}), 2)
+        self.assertTrue(all(player["discovery"]["needs_confirmation"] is False for player in players))
+        self.assertTrue(all(player["discovery"]["confidence_band"] == "high" for player in players))
 
     def test_generic_discovery_uses_startup_commands_when_process_is_not_running(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

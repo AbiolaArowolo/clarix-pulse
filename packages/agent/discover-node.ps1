@@ -74,7 +74,7 @@ function Write-DiscoveryStage {
 }
 
 $_discoveryStartedAt = Get-Date
-$script:_discoveryPhaseTotal = 8
+$script:_discoveryPhaseTotal = 9
 
 function Write-DiscoveryPhase {
     param([int]$Step, [string]$Message)
@@ -116,6 +116,212 @@ function Convert-ToNodeSlug {
     $slug = $slug.Trim('-')
     if ([string]::IsNullOrWhiteSpace($slug)) { return 'windows-node' }
     return $slug
+}
+
+function Convert-ToObjectArray {
+    param($Value)
+
+    if ($null -eq $Value) { return @() }
+    if ($Value -is [string]) { return @([string]$Value) }
+    if ($Value -is [System.Collections.IEnumerable]) {
+        return @($Value | ForEach-Object { $_ })
+    }
+    return @($Value)
+}
+
+function Get-DiscoveryThresholds {
+    return [ordered]@{
+        high   = 0.85
+        medium = 0.60
+        low    = 0.0
+    }
+}
+
+function Get-ConfidenceBand {
+    param(
+        [double]$Confidence,
+        [hashtable]$Thresholds = (Get-DiscoveryThresholds)
+    )
+
+    if ($Confidence -ge [double]$Thresholds.high) { return 'high' }
+    if ($Confidence -ge [double]$Thresholds.medium) { return 'medium' }
+    return 'low'
+}
+
+function Get-DiscoveryPythonCommand {
+    foreach ($candidate in @('python.exe', 'python', 'py.exe', 'py')) {
+        $command = Get-Command $candidate -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($command -and -not [string]::IsNullOrWhiteSpace([string]$command.Source)) {
+            return [string]$command.Source
+        }
+    }
+    return ''
+}
+
+function New-LegacyDetectionResult {
+    param([object[]]$Players)
+
+    $thresholds = Get-DiscoveryThresholds
+    $detections = New-Object System.Collections.Generic.List[object]
+    foreach ($player in @($Players)) {
+        $playerId = [string]$player.player_id
+        $playerType = if ($player.playout_type) { [string]$player.playout_type } else { 'generic_windows' }
+        $legacyConfidence = 0.0
+        if ($player.discovery -and $null -ne $player.discovery.confidence) {
+            $legacyConfidence = [double]$player.discovery.confidence
+        }
+        $confidence = [Math]::Round($legacyConfidence, 2)
+        $confidenceBand = Get-ConfidenceBand -Confidence $confidence -Thresholds $thresholds
+        $instanceId = if ($playerId) { $playerId } else { '{0}:{1}' -f $playerType, ($detections.Count + 1) }
+        $label = if ($player.label) { [string]$player.label } else { [string]$playerType }
+        $evidenceSources = if ($player.discovery -and $player.discovery.evidence) { @($player.discovery.evidence) } else { @() }
+
+        [void]$detections.Add([ordered]@{
+            player_id           = $playerId
+            player_type         = $playerType
+            instance_id         = $instanceId
+            confidence          = $confidence
+            confidence_band     = $confidenceBand
+            needs_confirmation  = $confidenceBand -ne 'high'
+            suggested_label     = $label
+            legacy_confidence   = $confidence
+            learning_match      = $null
+            evidence            = @(
+                [ordered]@{
+                    type         = 'legacy'
+                    weight       = 1.0
+                    strength     = $confidence
+                    contribution = $confidence
+                    summary      = 'Legacy PowerShell heuristics'
+                    sources      = $evidenceSources
+                }
+            )
+        })
+    }
+
+    $highCount = @($detections | Where-Object { $_.confidence_band -eq 'high' }).Count
+    $mediumCount = @($detections | Where-Object { $_.confidence_band -eq 'medium' }).Count
+    $lowCount = @($detections | Where-Object { $_.confidence_band -eq 'low' }).Count
+    $needsConfirmationCount = @($detections | Where-Object { $_.needs_confirmation }).Count
+    $summary = @{
+        total              = $detections.Count
+        high               = $highCount
+        medium             = $mediumCount
+        low                = $lowCount
+        needs_confirmation = $needsConfirmationCount
+    }
+    $result = @{
+        generated_at = (Get-Date).ToUniversalTime().ToString('o')
+        thresholds   = $thresholds
+        detections   = (Convert-ToObjectArray -Value $detections)
+        summary      = $summary
+        engine       = 'legacy-fallback'
+    }
+    return $result
+}
+
+function Invoke-DiscoveryConfidenceScorer {
+    param([object[]]$Players)
+
+    $players = @($Players)
+    if ($players.Count -eq 0) {
+        return (New-LegacyDetectionResult -Players @())
+    }
+
+    $thresholds = Get-DiscoveryThresholds
+    $payload = [ordered]@{ players = $players }
+    $inputPath = [System.IO.Path]::GetTempFileName()
+
+    try {
+        [System.IO.File]::WriteAllText(
+            $inputPath,
+            ($payload | ConvertTo-Json -Depth 16),
+            (New-Object System.Text.UTF8Encoding $false)
+        )
+
+        $dbPath = Join-Path (Get-EnvPathOrFallback -Name 'ProgramData' -Fallback 'C:\ProgramData') 'ClarixPulse\learned_fingerprints.db'
+        $scorerScript = Join-Path $_scriptDir 'confidence_scorer.py'
+        $agentExeCandidates = @(
+            (Join-Path $_scriptDir 'clarix-agent.exe'),
+            (Join-Path (Join-Path $_scriptDir 'dist') 'clarix-agent.exe')
+        ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+
+        $commandsToTry = New-Object System.Collections.Generic.List[object]
+        $pythonCommand = Get-DiscoveryPythonCommand
+        if ($pythonCommand -and (Test-Path -LiteralPath $scorerScript -PathType Leaf)) {
+            [void]$commandsToTry.Add([ordered]@{
+                engine = 'python'
+                file   = $pythonCommand
+                args   = @($scorerScript, '--input', $inputPath, '--db-path', $dbPath)
+            })
+        }
+        foreach ($agentExe in $agentExeCandidates) {
+            [void]$commandsToTry.Add([ordered]@{
+                engine = 'agent-exe'
+                file   = [string]$agentExe
+                args   = @('--score-discovery', $inputPath, '--db-path', $dbPath)
+            })
+        }
+
+        foreach ($command in $commandsToTry) {
+            try {
+                $rawLines = & $command.file @($command.args) 2>&1
+                $exitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+                if ($exitCode -ne 0) { continue }
+
+                $outputText = (@($rawLines) | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
+                if ([string]::IsNullOrWhiteSpace($outputText)) { continue }
+
+                $parsed = $outputText | ConvertFrom-Json
+                if ($null -eq $parsed -or $null -eq $parsed.detections) { continue }
+
+                return [ordered]@{
+                    generated_at = if ($parsed.generated_at) { $parsed.generated_at } else { (Get-Date).ToUniversalTime().ToString('o') }
+                    thresholds   = if ($parsed.thresholds) { $parsed.thresholds } else { $thresholds }
+                    detections   = @($parsed.detections)
+                    summary      = if ($parsed.summary) { $parsed.summary } else { [ordered]@{ total = @($parsed.detections).Count } }
+                    engine       = [string]$command.engine
+                }
+            } catch {
+                continue
+            }
+        }
+    } finally {
+        if (Test-Path -LiteralPath $inputPath) {
+            Remove-Item -LiteralPath $inputPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    return (New-LegacyDetectionResult -Players $players)
+}
+
+function Apply-DetectionMetadata {
+    param(
+        [object[]]$Players,
+        [object[]]$Detections
+    )
+
+    $detectionByPlayerId = @{}
+    foreach ($detection in @($Detections)) {
+        $playerId = [string]$detection.player_id
+        if (-not [string]::IsNullOrWhiteSpace($playerId)) {
+            $detectionByPlayerId[$playerId] = $detection
+        }
+    }
+
+    foreach ($player in @($Players)) {
+        $playerId = [string]$player.player_id
+        if (-not $detectionByPlayerId.ContainsKey($playerId)) { continue }
+
+        $detection = $detectionByPlayerId[$playerId]
+        $player.instance_id = [string]$detection.instance_id
+        $player.discovery.confidence = [double]$detection.confidence
+        $player.discovery.confidence_band = [string]$detection.confidence_band
+        $player.discovery.needs_confirmation = [bool]$detection.needs_confirmation
+        $player.discovery.suggested_label = [string]$detection.suggested_label
+        $player.discovery.legacy_confidence = [double]$detection.legacy_confidence
+        $player.discovery.evidence_breakdown = @($detection.evidence)
+    }
 }
 
 function Get-UniqueStrings {
@@ -1971,6 +2177,7 @@ function Find-PulseConfigPaths {
     $programData     = Get-EnvPathOrFallback -Name 'ProgramData'       -Fallback 'C:\ProgramData'
     $programFiles    = Get-EnvPathOrFallback -Name 'ProgramFiles'      -Fallback 'C:\Program Files'
     $programFilesX86 = Get-EnvPathOrFallback -Name 'ProgramFiles(x86)' -Fallback 'C:\Program Files (x86)'
+    $localAppData    = Get-EnvPathOrFallback -Name 'LocalAppData'      -Fallback (Join-Path $env:USERPROFILE 'AppData\Local')
 
     $fixed = @(
         # Installed / live agent config - highest priority (has active agent_token)
@@ -1984,13 +2191,17 @@ function Find-PulseConfigPaths {
         (Join-Path $_scriptDir                          'clarix-pulse\config.yaml'),
         (Join-Path (Split-Path $_scriptDir -Parent)     'clarix-pulse\config.yaml'),
         (Join-Path (Split-Path $_scriptDir -Parent)     'config.yaml'),
-        # Default install-from-url.ps1 destination
+        # Current install-from-url.ps1 destination
+        (Join-Path $localAppData   'ClarixPulse\Bundles\clarix-pulse\config.yaml'),
+        (Join-Path $localAppData   'ClarixPulse\Bundles\config.yaml'),
+        # Legacy install-from-url.ps1 destination
         'C:\pulse-node-bundle\clarix-pulse\config.yaml',
         'C:\pulse-node-bundle\config.yaml'
     )
 
     # Dynamic search - any config.yaml found recursively near the script or bundle roots
     $searchRoots = @(
+        (Join-Path $localAppData 'ClarixPulse\Bundles'),
         'C:\pulse-node-bundle',
         $_scriptDir,
         (Split-Path $_scriptDir -Parent)
@@ -2142,17 +2353,21 @@ try {
         Find-GenericBroadcastFromFolders `
             -NodeId $nodeId `
             -StartIndex ($instaPlayers.Count + $admaxPlayers.Count + $registryPlayers.Count + $genericPlayers.Count) `
-            -KnownInstallDirs @($namedInstallDirs)
+            -KnownInstallDirs (Convert-ToObjectArray -Value $namedInstallDirs)
     )
 
     $players = @(Get-DedupedPlayers -Players @($instaPlayers + $admaxPlayers + $registryPlayers + $genericPlayers + $folderPlayers))
 
-    Write-DiscoveryPhase -Step 8 -Message 'Writing discovery report'
+    Write-DiscoveryPhase -Step 8 -Message 'Scoring detections and assigning instance confidence'
+    $detectionResult = Invoke-DiscoveryConfidenceScorer -Players $players
+    Apply-DetectionMetadata -Players $players -Detections $detectionResult.detections
+
+    Write-DiscoveryPhase -Step 9 -Message 'Writing discovery report'
     $localTimeZone = [TimeZoneInfo]::Local
     $utcOffsetMinutes = [int]$localTimeZone.GetUtcOffset((Get-Date)).TotalMinutes
 
     $report = [ordered]@{
-        report_version = 1
+        report_version = 2
         generated_at   = (Get-Date).ToUniversalTime().ToString('o')
         machine        = [ordered]@{
             hostname           = $hostname
@@ -2167,17 +2382,23 @@ try {
         agent_token    = if ($existingPulseConfig.agent_token)    { $existingPulseConfig.agent_token }    else { '' }
         enrollment_key = if ($existingPulseConfig.enrollment_key) { $existingPulseConfig.enrollment_key } else { '' }
         players        = $players
+        detections     = @($detectionResult.detections)
         discovery      = [ordered]@{
             playout_hint            = $PlayoutHint
             detected_player_count   = $players.Count
             detected_playout_types  = @(Get-UniqueStrings -Values @($players | ForEach-Object { $_.playout_type }))
             running_processes       = $runningProcessHints
             generic_log_hints       = $genericLogHints
+            scoring                 = [ordered]@{
+                engine     = [string]$detectionResult.engine
+                thresholds = $detectionResult.thresholds
+                summary    = $detectionResult.summary
+            }
             existing_pulse_config   = $existingPulseConfig
         }
     }
 
-    $json = $report | ConvertTo-Json -Depth 12
+    $json = $report | ConvertTo-Json -Depth 16
 
     if (-not $StdOut) {
         $directory = Split-Path -Path $OutputPath -Parent
