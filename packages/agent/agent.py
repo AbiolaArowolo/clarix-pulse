@@ -3252,6 +3252,40 @@ def uninstall_service_command() -> int:
         return 1
 
 
+def decommission_hub_command() -> int:
+    try:
+        raw_config = _load_yaml_if_exists(_runtime_config_path())
+        if not isinstance(raw_config, dict) or not raw_config:
+            print("ERROR: No runtime config was found. Hub decommission was skipped.")
+            return 1
+
+        existing_config = _config_for_hub_sync(raw_config)
+        cleanup_result = _decommission_node_from_hub(raw_config)
+        cleanup_ok = bool(cleanup_result.get("ok"))
+        cleanup_error = _as_str(cleanup_result.get("error"))
+
+        # Older hubs may not have /api/config/node/decommission yet.
+        if not cleanup_ok and existing_config is not None and cleanup_error.startswith("HTTP 404"):
+            cleanup_result = _sync_node_config_mirror_to_hub(existing_config, players_override=[])
+            cleanup_ok = bool(cleanup_result.get("ok"))
+            cleanup_error = _as_str(cleanup_result.get("error"))
+
+        if cleanup_ok:
+            removed_count = len(cleanup_result.get("removed_player_ids", []))
+            print(
+                "Hub decommission complete for this node."
+                if removed_count == 0
+                else f"Hub decommission complete. Removed {removed_count} player record(s)."
+            )
+            return 0
+
+        print(f"ERROR: Hub decommission failed: {cleanup_error or 'Unknown error.'}")
+        return 1
+    except Exception as exc:
+        print(f"ERROR: {exc}")
+        return 1
+
+
 def _is_interactive_session() -> bool:
     session_name = os.environ.get("SESSIONNAME", "")
     return sys.stdin.isatty() and session_name.lower() != "services"
@@ -3938,6 +3972,8 @@ def main() -> int:
             return open_local_ui_command()
         if command == "--uninstall-service":
             return uninstall_service_command()
+        if command == "--decommission-hub":
+            return decommission_hub_command()
         if command == "--service-loop":
             return run_agent_loop()
 

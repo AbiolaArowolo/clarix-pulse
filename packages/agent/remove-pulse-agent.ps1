@@ -115,6 +115,54 @@ Write-Host "===========================================================" -Foregr
 Write-Host ""
 
 # ============================================================================
+# 0. BEST-EFFORT HUB DECOMMISSION (SO STALE NODES DISAPPEAR FROM HUB)
+# ============================================================================
+
+Write-Host "-- 0. Hub Decommission ------------------------------------" -ForegroundColor White
+
+Invoke-Step "Notify hub node decommission" {
+    if ($WhatIf) {
+        Write-Info "WhatIf: Would request hub decommission using clarix-agent.exe --decommission-hub"
+        return $true
+    }
+
+    $agentCandidates = @(
+        (Join-Path $_scriptDir 'clarix-agent.exe'),
+        (Join-Path $env:ProgramData 'ClarixPulse\Agent\clarix-agent.exe')
+    ) | Where-Object {
+        -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path $_)
+    } | Select-Object -Unique
+
+    if (-not $agentCandidates) {
+        Write-Skip "No clarix-agent.exe found for hub decommission - continuing with local cleanup"
+        return $false
+    }
+
+    foreach ($agentExe in $agentCandidates) {
+        try {
+            Write-Info "Attempting hub decommission via $agentExe"
+            $output = & $agentExe --decommission-hub 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                if ($output) {
+                    Write-Host "  $($output -join [Environment]::NewLine)" -ForegroundColor DarkGray
+                }
+                Write-Ok "Hub decommission requested successfully"
+                return $true
+            }
+            Write-Skip "Decommission attempt via '$agentExe' returned exit code $LASTEXITCODE"
+            if ($output) {
+                Write-Host "  $($output -join [Environment]::NewLine)" -ForegroundColor DarkGray
+            }
+        } catch {
+            Write-Skip "Decommission attempt via '$agentExe' failed: $_"
+        }
+    }
+
+    Write-Skip "Hub decommission could not be confirmed - local cleanup will continue"
+    return $false
+}
+
+# ============================================================================
 # 1. STOP AND REMOVE THE WINDOWS SERVICE
 # ============================================================================
 
