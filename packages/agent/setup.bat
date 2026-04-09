@@ -154,5 +154,10 @@ if "%ERRORLEVEL%"=="2" (
 exit /b 0
 
 :SHOW_SUMMARY
-"%PS_EXE%" -ExecutionPolicy Bypass -NoProfile -File "%BASE_DIR%show-discovery-summary.ps1" -ReportPath "%REPORT_PATH%"
+if exist "%BASE_DIR%show-discovery-summary.ps1" (
+    "%PS_EXE%" -ExecutionPolicy Bypass -NoProfile -File "%BASE_DIR%show-discovery-summary.ps1" -ReportPath "%REPORT_PATH%"
+) else (
+    echo  Discovery summary helper not bundled in this installer.
+    echo  Setup will continue with the generated report directly.
+)
 exit /b 0

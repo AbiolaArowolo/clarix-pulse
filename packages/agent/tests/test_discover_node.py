@@ -164,7 +164,9 @@ class DiscoverNodeScriptTests(unittest.TestCase):
             product_root = program_files_x86 / "Unimedia" / "Admax One 2.0"
             admax_root = product_root / "admax"
             product_root.mkdir(parents=True)
+            admax_root.mkdir(parents=True, exist_ok=True)
             (product_root / "unistreamer.exe").write_text("", encoding="utf-8")
+            (admax_root / "Settings.ini").write_text("", encoding="utf-8")
             (admax_root / "bin" / "64bit" / "logs" / "FNF").mkdir(parents=True)
             (admax_root / "bin" / "64bit" / "logs" / "logs" / "Playout").mkdir(parents=True)
 
@@ -205,8 +207,63 @@ class DiscoverNodeScriptTests(unittest.TestCase):
         self.assertEqual(len(admax_players), 1)
         self.assertEqual(admax_players[0]["paths"]["admax_root_candidates"], [str(product_root), str(admax_root)])
         self.assertEqual(admax_players[0]["paths"]["install_dir"], str(product_root))
-        self.assertIn("unistreamer.exe", admax_players[0]["process_selectors"]["process_names"])
+        self.assertEqual(admax_players[0]["paths"]["admax_state_path"], str(admax_root / "Settings.ini"))
+        self.assertNotIn("process_names", admax_players[0]["process_selectors"])
+        self.assertEqual(admax_players[0]["process_selectors"]["process_name_regex"], "(?i)admax|unistreamer")
+        self.assertIn("Executable found: unistreamer.exe", admax_players[0]["discovery"]["evidence"])
         self.assertIn(str(admax_root / "bin" / "64bit" / "logs" / "logs" / "Playout"), admax_players[0]["paths"]["playout_log_dir"])
+
+    def test_skips_admax_when_only_stale_files_exist_without_runtime_anchors(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            bundle_root = temp_root / "bundle"
+            bundle_root.mkdir()
+            program_files = temp_root / "Program Files"
+            program_files_x86 = temp_root / "Program Files (x86)"
+            program_data = temp_root / "ProgramData"
+
+            product_root = program_files_x86 / "Unimedia" / "Admax One 2.0"
+            admax_root = product_root / "admax"
+            admax_root.mkdir(parents=True, exist_ok=True)
+            (product_root / "unistreamer.exe").write_text("", encoding="utf-8")
+            (admax_root / "bin" / "64bit" / "logs" / "FNF").mkdir(parents=True)
+            (admax_root / "bin" / "64bit" / "logs" / "logs" / "Playout").mkdir(parents=True)
+
+            command = f"""
+& {{
+  $programFiles = '{_ps_quote(program_files)}'
+  $programFilesX86 = '{_ps_quote(program_files_x86)}'
+  $programData = '{_ps_quote(program_data)}'
+  [Environment]::SetEnvironmentVariable('ProgramFiles', $programFiles, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramFiles(x86)', $programFilesX86, 'Process')
+  [Environment]::SetEnvironmentVariable('ProgramData', $programData, 'Process')
+  function Get-CimInstance {{
+    [CmdletBinding()]
+    param([string]$ClassName)
+    return @()
+  }}
+  & '{_ps_quote(DISCOVERY_SCRIPT)}' -StdOut
+}}
+"""
+            completed = subprocess.run(
+                [
+                    POWERSHELL_EXE,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    command,
+                ],
+                cwd=bundle_root,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+        report = json.loads(completed.stdout)
+        admax_players = [player for player in report["players"] if player["playout_type"] == "admax"]
+
+        self.assertEqual(admax_players, [])
 
     def test_detects_insta_channels_from_settings_folders_when_exe_is_shared(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

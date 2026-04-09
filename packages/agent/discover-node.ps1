@@ -1239,6 +1239,13 @@ function Find-AdmaxPlayers {
                 Select-Object -First 1
             if ($proc) { $isRunningNow = $true }
         } catch { }
+        $runningProcessNames = @(
+            Get-UniqueStrings -Values @(
+                foreach ($dataRoot in $dataRoots) {
+                    @(Get-ProcessNamesInDirectory -DirectoryPath $dataRoot)
+                }
+            )
+        )
 
         $playoutLogDir = Get-FirstExistingDirectory -Candidates @($playoutCandidates)
         $fnfLog = Get-FirstExistingDirectory -Candidates @($fnfCandidates)
@@ -1247,15 +1254,81 @@ function Find-AdmaxPlayers {
         $hasInstallEvidence = $hasExe -or $isRunningNow -or $playoutLogDir -or $fnfLog -or $playlistScanLog -or $settingsIni
         if (-not $hasInstallEvidence) { continue }
 
-        # Auto-detect running processes whose exe lives inside this Admax product tree.
-        $detectedProcessNames = @(
+        $rootAnchors = @(
             Get-UniqueStrings -Values @(
-                @($matchedExecutableNames)
-                foreach ($dataRoot in $dataRoots) {
-                    @(Get-ProcessNamesInDirectory -DirectoryPath $dataRoot)
-                }
+                @($runningRoots)
+                @($admaxRoot)
             )
         )
+        $hintPattern = 'admax|unimedia|admaxone|admax.one|admax-one|unistreamer'
+        $hasServiceAnchor = @(
+            $ServiceHints | Where-Object {
+                $identity = @(
+                    [string]$_.name,
+                    [string]$_.display_name,
+                    [string]$_.path_name,
+                    [string]$_.command,
+                    [string]$_.executable_path
+                ) -join ' '
+                if ($identity -match $hintPattern) { return $true }
+                $exePath = [string]$_.executable_path
+                if ([string]::IsNullOrWhiteSpace($exePath)) { return $false }
+                foreach ($rootPath in $rootAnchors) {
+                    if ($exePath.ToLowerInvariant().StartsWith($rootPath.ToLowerInvariant())) { return $true }
+                }
+                return $false
+            }
+        ).Count -gt 0
+        $hasStartupAnchor = @(
+            @($StartupHints + $ScheduledTaskHints) | Where-Object {
+                $identity = @(
+                    [string]$_.name,
+                    [string]$_.display_name,
+                    [string]$_.path_name,
+                    [string]$_.command,
+                    [string]$_.task_name,
+                    [string]$_.task_path,
+                    [string]$_.executable_path
+                ) -join ' '
+                if ($identity -match $hintPattern) { return $true }
+                $exePath = [string]$_.executable_path
+                if ([string]::IsNullOrWhiteSpace($exePath)) { return $false }
+                foreach ($rootPath in $rootAnchors) {
+                    if ($exePath.ToLowerInvariant().StartsWith($rootPath.ToLowerInvariant())) { return $true }
+                }
+                return $false
+            }
+        ).Count -gt 0
+        $hasRegistryAnchor = @(
+            $UninstallEntries | Where-Object {
+                $identity = @(
+                    [string]$_.name,
+                    [string]$_.publisher,
+                    [string]$_.install_loc
+                ) -join ' '
+                if ($identity -match $hintPattern) { return $true }
+                $installLocation = [string]$_.install_loc
+                if ([string]::IsNullOrWhiteSpace($installLocation)) { return $false }
+                foreach ($rootPath in $rootAnchors) {
+                    if ($installLocation.ToLowerInvariant().StartsWith($rootPath.ToLowerInvariant())) { return $true }
+                }
+                return $false
+            }
+        ).Count -gt 0
+
+        # Avoid false positives from stale folders/cached logs by requiring at least one
+        # strong Admax anchor (runtime/service/startup/registry/config).
+        $hasStrongAnchorEvidence =
+            $isRunningNow -or
+            ($runningProcessNames.Count -gt 0) -or
+            -not [string]::IsNullOrWhiteSpace($settingsIni) -or
+            $hasServiceAnchor -or
+            $hasStartupAnchor -or
+            $hasRegistryAnchor
+        if (-not $hasStrongAnchorEvidence) { continue }
+
+        # Auto-detect running processes whose exe lives inside this Admax product tree.
+        $detectedProcessNames = @($runningProcessNames)
 
         $evidence = New-Object System.Collections.Generic.List[string]
         [void]$evidence.Add("Admax root found at $admaxRoot")
@@ -1269,6 +1342,9 @@ function Find-AdmaxPlayers {
         foreach ($exeName in (Get-UniqueStrings -Values @($matchedExecutableNames))) {
             [void]$evidence.Add("Executable found: $exeName")
         }
+        if ($hasServiceAnchor)  { [void]$evidence.Add('Service hint linked to Admax installation') }
+        if ($hasStartupAnchor)  { [void]$evidence.Add('Startup/scheduled-task hint linked to Admax installation') }
+        if ($hasRegistryAnchor) { [void]$evidence.Add('Registry uninstall entry linked to Admax installation') }
         foreach ($pn in $detectedProcessNames) { [void]$evidence.Add("Running process detected: $pn") }
 
         $processSelectors = @{

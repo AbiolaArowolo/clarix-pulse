@@ -188,6 +188,11 @@ def _score_process_evidence(
     profile: dict[str, Any],
     contributions: list[dict[str, Any]],
 ) -> None:
+    # Process selectors are also used as monitor configuration for not-running players.
+    # Only score "process evidence" when discovery marked the player as currently running.
+    if not bool(player.get("running")):
+        return
+
     selectors = _selectors(player)
     signals = _unique(
         _as_list(selectors.get("process_names"))
