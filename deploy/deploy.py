@@ -9,7 +9,6 @@ import sys
 import io
 import re
 import posixpath
-import zipfile
 from pathlib import Path
 import paramiko
 import time
@@ -107,7 +106,7 @@ def main():
     client.connect(HOST, port=PORT, username=USER, password=PASSWORD, timeout=30)
     print("Connected.")
 
-    local_release_dir, local_installer_zip, remote_installer_zip = resolve_latest_bundle_paths()
+    _, local_installer_zip, remote_installer_zip = resolve_latest_bundle_paths()
 
     # -- Step 1: Discover PM2 hub entry point ---------------------------------
     print("\n" + "=" * 60)
@@ -239,24 +238,9 @@ def main():
     sftp.close()
     print("Dashboard dist upload complete.")
 
-    # -- Step 3c: Repack installer ZIP from release folder --------------------
+    # -- Step 3c: Upload installer ZIP ----------------------------------------
     print("\n" + "=" * 60)
-    print("STEP 3c: Repack installer ZIP from release folder")
-    print("=" * 60)
-
-    print(f"  packing {local_release_dir} -> {local_installer_zip}")
-    with zipfile.ZipFile(local_installer_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, dirs, files in os.walk(local_release_dir):
-            for fname in files:
-                full = os.path.join(root, fname)
-                arcname = os.path.relpath(full, os.path.dirname(local_release_dir))
-                zf.write(full, arcname)
-    zip_mb = os.path.getsize(local_installer_zip) / 1024 / 1024
-    safe_print(f"  ZIP repacked: {zip_mb:.1f} MB")
-
-    # -- Step 3d: Upload installer ZIP ----------------------------------------
-    print("\n" + "=" * 60)
-    print("STEP 3d: Upload installer ZIP -> " + remote_installer_zip)
+    print("STEP 3c: Upload installer ZIP -> " + remote_installer_zip)
     print("=" * 60)
 
     sftp = client.open_sftp()
