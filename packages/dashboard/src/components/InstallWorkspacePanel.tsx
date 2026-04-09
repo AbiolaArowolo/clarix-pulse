@@ -139,7 +139,7 @@ export function InstallWorkspacePanel({ layout = 'page' }: { layout?: 'page' | '
 
   return (
     <section className={`ui-shell-panel rounded-[var(--radius-panel)] ${isRailLayout ? 'px-4 py-4 sm:px-5 sm:py-5' : 'px-5 py-5 sm:px-6 sm:py-6'}`}>
-      <div className={isRailLayout ? 'space-y-5' : 'grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(260px,0.85fr)] xl:items-start'}>
+      <div className={isRailLayout ? 'space-y-4' : 'grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(260px,0.85fr)] xl:items-start'}>
         <div className="min-w-0">
           <div className="flex items-start gap-4">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[1.15rem] bg-white/[0.04]">
@@ -197,7 +197,7 @@ export function InstallWorkspacePanel({ layout = 'page' }: { layout?: 'page' | '
           </div>
 
           <div className={`${isRailLayout ? 'mt-5' : 'mt-6'} rounded-[var(--radius-panel)] border border-slate-800/70 bg-slate-950/45 p-5`}>
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(240px,0.9fr)]">
+            <div className={isRailLayout ? 'grid gap-4' : 'grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(240px,0.9fr)]'}>
               <div>
                 <p className="ui-kicker-muted">Device hint</p>
                 <p className="mt-3 text-sm leading-6 text-slate-300">{installHint}</p>

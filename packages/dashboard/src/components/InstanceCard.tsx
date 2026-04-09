@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   InstanceState,
+  StatusColor,
   getConnectivityBadgeColor,
   getHeadlineStatus,
   getRuntimeBadgeColor,
@@ -189,21 +190,42 @@ export function InstanceCard({ instance }: Props) {
         ? 'Net: maintenance'
         : `Net: ${instance.connectivityHealth}`;
   const heartbeatLabel = inactive ? 'inactive' : formatAge(instance.lastHeartbeatAt, nowMs);
+  const statusBadges: Array<{ key: string; color: StatusColor; label: string }> = [
+    { key: 'runtime', color: getRuntimeBadgeColor(instance), label: runtimeLabel },
+    { key: 'connectivity', color: getConnectivityBadgeColor(instance), label: connectivityLabel },
+    {
+      key: 'mode',
+      color: monitoringSuppressed ? 'gray' : showUdpMonitoring ? udpBadgeColor : 'gray',
+      label: modeLabel,
+    },
+  ];
+
+  if (!monitoringSuppressed && showUdpMonitoring) {
+    statusBadges.push({ key: 'udp-health', color: udpBadgeColor, label: udpLabel });
+  }
+
+  if (!monitoringSuppressed && showUdpMonitoring && instance.udpSelectedInputId) {
+    statusBadges.push({
+      key: 'udp-selected',
+      color: udpBadgeColor,
+      label: `Selected on node: ${instance.udpSelectedInputId}`,
+    });
+  }
 
   return (
     <div
       className={`theme-dark-gradient-card rounded-2xl border bg-[linear-gradient(180deg,rgba(30,41,59,0.78),rgba(15,23,42,0.95))] p-4 transition-all duration-300 ${borderColorMap[color]} ${glowMap[color]}`}
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold leading-tight text-slate-100">{instance.label}</h3>
           <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">{instance.playoutType}</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <span className="rounded-full border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-300">
-              Instance {instance.playerId}
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <span className="min-w-0 rounded-full border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+              <span className="block truncate">Instance {instance.playerId}</span>
             </span>
-            <span className="rounded-full border border-slate-800 bg-slate-950/70 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-500">
-              Node {instance.nodeId}
+            <span className="min-w-0 rounded-full border border-slate-800 bg-slate-950/70 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-500">
+              <span className="block truncate">Node {instance.nodeId}</span>
             </span>
           </div>
         </div>
@@ -214,19 +236,12 @@ export function InstanceCard({ instance }: Props) {
         />
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        <StatusBadge color={getRuntimeBadgeColor(instance)} label={runtimeLabel} />
-        <StatusBadge
-          color={getConnectivityBadgeColor(instance)}
-          label={connectivityLabel}
-        />
-        <StatusBadge color={monitoringSuppressed ? 'gray' : showUdpMonitoring ? udpBadgeColor : 'gray'} label={modeLabel} />
-        {!monitoringSuppressed && showUdpMonitoring && (
-          <StatusBadge color={udpBadgeColor} label={udpLabel} />
-        )}
-        {!monitoringSuppressed && showUdpMonitoring && instance.udpSelectedInputId && (
-          <StatusBadge color={udpBadgeColor} label={`Selected on node: ${instance.udpSelectedInputId}`} />
-        )}
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        {statusBadges.map((badge) => (
+          <div key={badge.key} className="min-w-0">
+            <StatusBadge color={badge.color} label={badge.label} />
+          </div>
+        ))}
       </div>
 
       {inactive && (

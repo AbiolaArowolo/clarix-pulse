@@ -232,7 +232,7 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
           </div>
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)] xl:items-start">
           <section className="space-y-5">
             <div className="flex flex-col gap-2 px-1 sm:flex-row sm:items-end sm:justify-between">
               <div>
@@ -272,7 +272,7 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
             )}
           </section>
 
-          <aside className="space-y-4">
+          <aside className="space-y-4 xl:self-start">
             <div className="px-1">
               <p className="ui-kicker-muted">Operator tools</p>
               <h3 className="mt-2 text-2xl font-semibold text-slate-50">Setup, alerts, and install handoff</h3>

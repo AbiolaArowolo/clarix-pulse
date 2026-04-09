@@ -26,9 +26,9 @@ const dotMap: Record<StatusColor, string> = {
 export function StatusBadge({ color, label, size = 'sm' }: Props) {
   const padding = size === 'md' ? 'px-3 py-1.5 text-sm' : 'px-2 py-0.5 text-xs';
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border font-medium ${padding} ${colorMap[color]}`}>
+    <span className={`inline-flex max-w-full items-center gap-1.5 rounded-full border font-medium ${padding} ${colorMap[color]}`}>
       <span className={`h-2 w-2 rounded-full shrink-0 ${dotMap[color]}`} />
-      {label}
+      <span className="truncate">{label}</span>
     </span>
   );
 }

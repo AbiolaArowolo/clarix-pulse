@@ -138,6 +138,7 @@ $requiredRepoFiles = @(
     @{ Source = (Join-Path $PSScriptRoot 'configure.bat'); Target = 'configure.bat' }
     @{ Source = (Join-Path $PSScriptRoot 'install.bat'); Target = 'install.bat' }
     @{ Source = (Join-Path $PSScriptRoot 'uninstall.bat'); Target = 'uninstall.bat' }
+    @{ Source = (Join-Path $PSScriptRoot 'remove-pulse-agent.ps1'); Target = 'remove-pulse-agent.ps1' }
     @{ Source = (Join-Path $PSScriptRoot 'install-from-url.ps1'); Target = 'install-from-url.ps1' }
     @{ Source = (Join-Path $PSScriptRoot 'config.example.yaml'); Target = 'config.example.yaml' }
     @{ Source = (Join-Path $PSScriptRoot 'fingerprint_manifest.json'); Target = 'fingerprint_manifest.json' }

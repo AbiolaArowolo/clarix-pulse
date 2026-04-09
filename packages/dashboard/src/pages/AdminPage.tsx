@@ -308,7 +308,7 @@ export function AdminPage({
                   key={tenant.tenantId}
                   className="rounded-3xl border border-slate-800 bg-slate-950/55 p-4"
                 >
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(620px,0.95fr)] xl:items-start">
                     <div className="space-y-2">
                       <p className="text-lg font-semibold text-white">{tenant.tenantName}</p>
                       <p className="text-sm text-slate-400">{tenant.tenantSlug}</p>
@@ -328,12 +328,12 @@ export function AdminPage({
                       )}
                     </div>
 
-                    <div className="flex flex-wrap gap-2">
+                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
                       <button
                         type="button"
                         onClick={() => void openWorkspace(tenant.tenantId)}
                         disabled={pending}
-                        className="rounded-full border border-amber-400/35 bg-amber-400/12 px-4 py-2 text-sm font-semibold text-amber-50 transition-colors hover:border-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex min-h-10 items-center justify-center rounded-full border border-amber-400/35 bg-amber-400/12 px-4 py-2 text-center text-sm font-semibold text-amber-50 transition-colors hover:border-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {pending ? 'Working...' : 'Open workspace'}
                       </button>
@@ -341,7 +341,7 @@ export function AdminPage({
                         type="button"
                         onClick={() => void sendPasswordReset(tenant.tenantId)}
                         disabled={pending}
-                        className="rounded-full border border-cyan-400/35 bg-cyan-400/12 px-4 py-2 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex min-h-10 items-center justify-center rounded-full border border-cyan-400/35 bg-cyan-400/12 px-4 py-2 text-center text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {pending ? 'Working...' : 'Send reset link'}
                       </button>
@@ -349,7 +349,7 @@ export function AdminPage({
                         type="button"
                         onClick={() => void updateAccess(tenant.tenantId, !tenant.enabled)}
                         disabled={pending}
-                        className="rounded-full border border-slate-700 bg-slate-900/80 px-4 py-2 text-sm font-medium text-slate-200 transition-colors hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex min-h-10 items-center justify-center rounded-full border border-slate-700 bg-slate-900/80 px-4 py-2 text-center text-sm font-medium text-slate-200 transition-colors hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {tenant.enabled ? 'Disable account' : 'Enable account'}
                       </button>
@@ -357,7 +357,7 @@ export function AdminPage({
                         type="button"
                         onClick={() => void renewKey(tenant.tenantId)}
                         disabled={pending}
-                        className="rounded-full border border-emerald-400/35 bg-emerald-400/12 px-4 py-2 text-sm font-semibold text-emerald-50 transition-colors hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex min-h-10 items-center justify-center rounded-full border border-emerald-400/35 bg-emerald-400/12 px-4 py-2 text-center text-sm font-semibold text-emerald-50 transition-colors hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {pending ? 'Working...' : 'Renew 365-day key'}
                       </button>
@@ -365,7 +365,7 @@ export function AdminPage({
                         type="button"
                         onClick={() => void deleteTenant(tenant.tenantId, tenant.tenantName)}
                         disabled={pending}
-                        className="rounded-full border border-red-500/35 bg-red-500/12 px-4 py-2 text-sm font-semibold text-red-50 transition-colors hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex min-h-10 items-center justify-center rounded-full border border-red-500/35 bg-red-500/12 px-4 py-2 text-center text-sm font-semibold text-red-50 transition-colors hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {pending ? 'Working...' : 'Delete account'}
                       </button>
@@ -391,16 +391,16 @@ export function AdminPage({
                 key={event.eventId}
                 className="rounded-3xl border border-slate-800 bg-slate-950/55 p-4"
               >
-                <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-                  <div>
+                <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_160px] lg:items-start">
+                  <div className="min-w-0">
                     <p className="text-sm font-semibold text-white">{event.action.replace(/_/g, ' ')}</p>
-                    <p className="mt-1 text-sm text-slate-400">
+                    <p className="mt-1 break-words text-sm text-slate-400">
                       Actor: <span className="text-slate-200">{event.actorEmail}</span>
                       {event.targetTenantName ? ` | Tenant: ${event.targetTenantName}` : ''}
                       {event.targetEmail ? ` | Target: ${event.targetEmail}` : ''}
                     </p>
                   </div>
-                  <p className="text-xs text-slate-500">{event.createdAt}</p>
+                  <p className="text-xs text-slate-500 lg:text-right">{event.createdAt}</p>
                 </div>
               </div>
             ))}

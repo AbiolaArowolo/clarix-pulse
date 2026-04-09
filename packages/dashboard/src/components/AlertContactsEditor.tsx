@@ -314,14 +314,14 @@ export function AlertContactsEditor() {
           </div>
         ) : (
             <>
-              <div className="grid gap-4 lg:grid-cols-3">
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/45 p-3">
-                  <div className="mb-3 flex items-start justify-between gap-2">
+              <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
+                <div className="flex h-full flex-col rounded-2xl border border-slate-800 bg-slate-950/45 p-3">
+                  <div className="mb-3 flex min-h-10 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Email Recipients</p>
                     <button
                       type="button"
                       onClick={() => updateToggle('emailEnabled', !draft.emailEnabled)}
-                      className={`rounded-full border px-3 py-1 text-[11px] font-medium transition-colors ${
+                      className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-medium transition-colors ${
                         draft.emailEnabled
                           ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
                           : 'border-slate-700 text-slate-400'
@@ -344,16 +344,14 @@ export function AlertContactsEditor() {
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/45 p-3">
-                  <div className="mb-3 flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Telegram Recipients</p>
-                    </div>
-                    <div className="flex gap-2">
+                <div className="flex h-full flex-col rounded-2xl border border-slate-800 bg-slate-950/45 p-3">
+                  <div className="mb-3 flex min-h-10 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Telegram Recipients</p>
+                    <div className="flex flex-wrap gap-2 sm:justify-end">
                       <button
                         type="button"
                         onClick={() => updateToggle('telegramEnabled', !draft.telegramEnabled)}
-                        className={`rounded-full border px-3 py-1 text-[11px] font-medium transition-colors ${
+                        className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-medium transition-colors ${
                           draft.telegramEnabled
                             ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
                             : 'border-slate-700 text-slate-400'
@@ -365,7 +363,7 @@ export function AlertContactsEditor() {
                         type="button"
                         onClick={() => void loadTelegramTargets()}
                         disabled={discoveringTelegram || !capabilities.telegramDeliveryConfigured}
-                        className="rounded-full border border-slate-700 px-3 py-1 text-[11px] font-medium text-slate-300 transition-colors hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                        className="shrink-0 rounded-full border border-slate-700 px-3 py-1 text-[11px] font-medium text-slate-300 transition-colors hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {discoveringTelegram ? 'Refreshing...' : 'Refresh'}
                       </button>
@@ -409,14 +407,14 @@ export function AlertContactsEditor() {
                   )}
                 </div>
 
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/45 p-3">
-                  <div className="mb-3 flex items-start justify-between gap-2">
+                <div className="flex h-full flex-col rounded-2xl border border-slate-800 bg-slate-950/45 p-3">
+                  <div className="mb-3 flex min-h-10 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Phone Contacts</p>
                     <button
                       type="button"
                       onClick={() => updateToggle('phoneEnabled', !draft.phoneEnabled)}
                       disabled={!capabilities.phoneDeliveryConfigured}
-                      className={`rounded-full border px-3 py-1 text-[11px] font-medium transition-colors ${
+                      className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-medium transition-colors ${
                         !capabilities.phoneDeliveryConfigured
                           ? 'cursor-not-allowed border-slate-800 text-slate-600'
                           : draft.phoneEnabled
@@ -450,14 +448,16 @@ export function AlertContactsEditor() {
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => void saveSettings()}
-                disabled={saving}
-                className="w-full rounded-xl border border-yellow-600/60 bg-yellow-500/15 px-4 py-2 text-sm font-semibold text-yellow-100 transition-colors hover:border-yellow-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {saving ? 'Saving...' : 'Apply alert contacts'}
-              </button>
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={() => void saveSettings()}
+                  disabled={saving}
+                  className="w-full rounded-xl border border-yellow-600/60 bg-yellow-500/15 px-4 py-2 text-sm font-semibold text-yellow-100 transition-colors hover:border-yellow-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                >
+                  {saving ? 'Saving...' : 'Apply alert contacts'}
+                </button>
+              </div>
             </>
           )}
 

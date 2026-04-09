@@ -32,7 +32,9 @@ $_scriptDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
 }
 
 # -- Self-elevate to Administrator if not already ----------------------------
-if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+$script:isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+if (-not $script:isAdmin) {
     $scriptPath = $MyInvocation.MyCommand.Definition
     $psExe = if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell.exe' }
     $whatIfArg = if ($WhatIf) { ' -WhatIf' } else { '' }
@@ -83,6 +85,21 @@ function Invoke-Step {
     }
 }
 
+function Get-ServiceProcessId {
+    param([string]$ServiceName)
+
+    try {
+        $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='$ServiceName'" -ErrorAction Stop
+        if ($service -and $service.ProcessId -gt 0) {
+            return [int]$service.ProcessId
+        }
+    } catch {
+        # Best effort only. Locked-down hosts can refuse CIM access.
+    }
+
+    return $null
+}
+
 # ============================================================================
 # BANNER
 # ============================================================================
@@ -122,6 +139,19 @@ foreach ($svcName in $serviceNames) {
             $deadline = (Get-Date).AddSeconds(10)
             while ((Get-Service -Name $svcName -ErrorAction SilentlyContinue).Status -ne 'Stopped' -and (Get-Date) -lt $deadline) {
                 Start-Sleep -Milliseconds 500
+            }
+            $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+            if ($svc -and $svc.Status -ne 'Stopped') {
+                $servicePid = Get-ServiceProcessId -ServiceName $svcName
+                if ($servicePid) {
+                    Write-Info "Service '$svcName' did not stop in time; forcing PID $servicePid"
+                    Stop-Process -Id $servicePid -Force -ErrorAction Stop
+                    Start-Sleep -Milliseconds 750
+                    $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+                }
+            }
+            if ($svc -and $svc.Status -ne 'Stopped') {
+                throw "Service '$svcName' is still in state '$($svc.Status)'"
             }
             Write-Ok "Stopped service '$svcName'"
         } else {
@@ -188,18 +218,33 @@ Invoke-Step "NSSM service removal" {
 Write-Host ""
 Write-Host "-- 2. Running Processes ------------------------------------" -ForegroundColor White
 
-Invoke-Step "Kill clarix-agent process(es)" {
-    $procs = Get-Process -Name 'clarix-agent' -ErrorAction SilentlyContinue
-    if (-not $procs) {
-        Write-Skip "No 'clarix-agent' process found"
+Invoke-Step "Kill Clarix agent process(es)" {
+    $candidateIds = @()
+    $namedProcesses = Get-Process -Name 'clarix-agent' -ErrorAction SilentlyContinue
+    if ($namedProcesses) {
+        $candidateIds += $namedProcesses | Select-Object -ExpandProperty Id
+    }
+
+    $clarixProcesses = Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -eq 'clarix-agent.exe' -or
+        $_.ExecutablePath -like '*ClarixPulse*' -or
+        $_.CommandLine -like '*clarix-agent*'
+    }
+    if ($clarixProcesses) {
+        $candidateIds += $clarixProcesses | Select-Object -ExpandProperty ProcessId
+    }
+
+    $candidateIds = $candidateIds | Where-Object { $_ -gt 0 } | Sort-Object -Unique
+    if (-not $candidateIds) {
+        Write-Skip "No Clarix agent processes found"
         return $false
     }
     if ($WhatIf) {
-        Write-Info "WhatIf: Would Stop-Process -Name clarix-agent -Force ($($procs.Count) process(es))"
+        Write-Info "WhatIf: Would Stop-Process -Id $($candidateIds -join ', ') -Force"
         return $true
     }
-    Stop-Process -Name 'clarix-agent' -Force -ErrorAction SilentlyContinue
-    Write-Ok "Killed $($procs.Count) 'clarix-agent' process(es)"
+    Stop-Process -Id $candidateIds -Force -ErrorAction SilentlyContinue
+    Write-Ok "Killed $($candidateIds.Count) Clarix agent process(es)"
     return $true
 }
 
@@ -210,12 +255,28 @@ Invoke-Step "Kill clarix-agent process(es)" {
 Write-Host ""
 Write-Host "-- 3. Directories ------------------------------------------" -ForegroundColor White
 
+$localAppData = [Environment]::GetFolderPath('LocalApplicationData')
+if ([string]::IsNullOrWhiteSpace($localAppData)) {
+    $localAppData = $env:LOCALAPPDATA
+}
+$tempPath = [System.IO.Path]::GetTempPath()
+
 $dirsToRemove = @(
     'C:\ProgramData\ClarixPulse',
     'C:\pulse-node-bundle',
     'C:\Program Files\ClarixPulse',
     'C:\Program Files (x86)\ClarixPulse'
 )
+if (-not [string]::IsNullOrWhiteSpace($localAppData)) {
+    $dirsToRemove += @(
+        (Join-Path $localAppData 'ClarixPulse'),
+        (Join-Path $localAppData 'ClarixPulse\Bundles')
+    )
+}
+if (-not [string]::IsNullOrWhiteSpace($tempPath)) {
+    $dirsToRemove += (Join-Path $tempPath 'ClarixPulse\Bundles')
+}
+$dirsToRemove = $dirsToRemove | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
 
 foreach ($dir in $dirsToRemove) {
     Invoke-Step "Remove directory '$dir'" {
@@ -234,14 +295,16 @@ foreach ($dir in $dirsToRemove) {
 }
 
 # -- Relative directories beside this script ----------------------------------
-$relativeDirs = @(
-    'pulse-node-bundle',
-    'clarix-pulse-v1.17',
-    'clarix-pulse-v1.9'
-)
+$relativeDirs = Get-ChildItem -Path $_scriptDir -Directory -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.Name -eq 'pulse-node-bundle' -or
+        $_.Name -eq 'clarix-pulse' -or
+        $_.Name -like 'clarix-pulse-v*'
+    } |
+    Select-Object -ExpandProperty FullName -Unique
 
-foreach ($rel in $relativeDirs) {
-    $fullPath = Join-Path $_scriptDir $rel
+foreach ($fullPath in $relativeDirs) {
+    $rel = Split-Path $fullPath -Leaf
     Invoke-Step "Remove relative directory '$rel'" {
         if (-not (Test-Path $fullPath)) {
             Write-Skip "Relative directory not found: $fullPath"
@@ -356,5 +419,8 @@ if ($WhatIf) {
     Write-Host "  Clarix Pulse Agent cleanup complete." -ForegroundColor Green
 } else {
     Write-Host "  Clarix Pulse Agent cleanup finished with $($script:failedItems.Count) error(s)." -ForegroundColor Yellow
+}
+if (-not $script:isAdmin) {
+    Write-Host "  Administrator approval is still required to remove the Windows service and protected ClarixPulse folders on locked-down PCs." -ForegroundColor Yellow
 }
 Write-Host ""

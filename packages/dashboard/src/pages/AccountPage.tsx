@@ -127,7 +127,7 @@ export function AccountPage({
 
   return (
     <div className="space-y-5">
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)] xl:items-start">
         <div className="ui-hero-panel overflow-hidden px-5 py-5 sm:px-6 sm:py-6">
           <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
             <div className="max-w-3xl">
@@ -227,7 +227,7 @@ export function AccountPage({
           </div>
         </div>
 
-        <aside className="space-y-5">
+        <aside className="space-y-5 xl:self-start">
           <div className="ui-accent-card rounded-[var(--radius-panel)] px-5 py-5">
             <p className="ui-kicker-muted text-indigo-100">Access status</p>
             <div className="mt-4 space-y-4">

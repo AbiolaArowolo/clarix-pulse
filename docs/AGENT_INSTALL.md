@@ -37,6 +37,7 @@ Every shipped bundle contains:
 - `install.bat`
 - `configure.bat`
 - `uninstall.bat`
+- `remove-pulse-agent.ps1`
 - `discover-node.ps1`
 - `README.txt`
 - `install-from-url.ps1`
@@ -53,6 +54,7 @@ Every shipped bundle contains:
 - `clarix-agent.exe`: the Windows monitoring runtime
 - `install.bat`: final install or update flow for the node
 - `configure.bat`: opens the local setup UI or falls back to guided setup
+- `remove-pulse-agent.ps1`: force-cleanup script for broken or locked service removal
 - `discover-node.ps1`: PowerShell scanner that inspects the PC and writes a discovery report
 - `pulse-node-discovery-report.json`: discovery output used for auto-fill
 - `config.yaml`: the final node configuration file
@@ -255,7 +257,39 @@ The local UI can still enroll if:
 
 ## Fresh Reinstall / Uninstall
 
-Use an elevated shell on the node:
+Preferred uninstall path from the extracted bundle:
+
+```bat
+uninstall.bat
+```
+
+If Windows says the service is still in use, files are locked, or uninstall is otherwise broken, run the force-clean script from an elevated shell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\remove-pulse-agent.ps1
+```
+
+Preview mode:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\remove-pulse-agent.ps1 -WhatIf
+```
+
+The cleanup script removes:
+
+- the `ClarixPulseAgent` Windows service
+- running `clarix-agent.exe` processes
+- `C:\ProgramData\ClarixPulse`
+- `C:\Program Files\ClarixPulse`
+- `%LOCALAPPDATA%\ClarixPulse`
+- `%LOCALAPPDATA%\ClarixPulse\Bundles`
+
+Important:
+
+- if the PC blocks Administrator approval or UAC, Windows will not allow full removal of the service or protected folders
+- in that case, local IT or an Administrator must run the uninstall once in an elevated shell
+
+Legacy service-only fallback:
 
 ```bat
 echo y| "C:\ProgramData\ClarixPulse\Agent\clarix-agent.exe" --uninstall-service
@@ -281,14 +315,33 @@ Expected result:
 False
 ```
 
-Fallback manual cleanup if uninstall is broken:
+Fallback manual cleanup if uninstall is broken.
+
+If you are in **Command Prompt (cmd.exe)**:
 
 ```bat
 sc stop ClarixPulseAgent
 sc delete ClarixPulseAgent
 taskkill /F /IM clarix-agent.exe
 rmdir /s /q C:\ProgramData\ClarixPulse
+rmdir /s /q "%LOCALAPPDATA%\ClarixPulse"
 ```
+
+If you are in **PowerShell**:
+
+```powershell
+sc.exe stop ClarixPulseAgent
+sc.exe delete ClarixPulseAgent
+taskkill /F /IM clarix-agent.exe
+Remove-Item -LiteralPath 'C:\ProgramData\ClarixPulse' -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $env:LOCALAPPDATA 'ClarixPulse') -Recurse -Force -ErrorAction SilentlyContinue
+```
+
+If node cleanup still says `Unauthorized`, remove the stale node from the dashboard:
+
+1. open `Monitoring Dashboard`
+2. open `Remote Setup`
+3. use `Hub cleanup` and remove that node ID
 
 ---
 

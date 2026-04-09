@@ -658,6 +658,48 @@ export async function removePlayer(playerId: string, nodeId: string, tenantId: s
   await deleteThumbnailsForPlayers([playerId]);
 }
 
+export async function removeNode(nodeId: string, tenantId: string): Promise<{
+  removed: boolean;
+  removedPlayerIds: string[];
+}> {
+  const node = await getNode(tenantId, nodeId);
+  if (!node) {
+    return {
+      removed: false,
+      removedPlayerIds: [],
+    };
+  }
+
+  const players = await listPlayersForNode(nodeId, tenantId);
+  const removedPlayerIds = players.map((player) => player.playerId);
+
+  for (const playerId of removedPlayerIds) {
+    await removePlayer(playerId, nodeId, tenantId);
+  }
+
+  await exec(`
+    DELETE FROM nodes
+    WHERE node_id = $1
+      AND site_id IN (SELECT site_id FROM sites WHERE tenant_id = $2)
+  `, [nodeId, tenantId]);
+
+  await exec(`
+    DELETE FROM sites s
+    WHERE s.tenant_id = $1
+      AND NOT EXISTS (
+        SELECT 1
+        FROM nodes n
+        WHERE n.site_id = s.site_id
+      )
+  `, [tenantId]);
+
+  const stillExists = await getNode(tenantId, nodeId);
+  return {
+    removed: !stillExists,
+    removedPlayerIds,
+  };
+}
+
 export async function markPlayerSeen(playerId: string, observedAt = new Date().toISOString()): Promise<void> {
   await exec(`
     UPDATE players

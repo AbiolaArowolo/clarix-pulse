@@ -23,6 +23,7 @@ STEP 1 - Download and extract
        %USERPROFILE%\Downloads\ClarixPulse
   6. Open the extracted Clarix Pulse folder and confirm these files are there:
        setup.bat, configure.bat, install.bat, uninstall.bat,
+       remove-pulse-agent.ps1,
        clarix-agent.exe, discover-node.ps1, show-discovery-summary.ps1,
        config.yaml, README.txt
 
@@ -112,6 +113,8 @@ Install fails because this PC blocks Administrator approval:
 Install fails even as Administrator:
   - Run setup.bat and choose [4] to fully uninstall first
   - Then run setup.bat and choose [1] to reinstall fresh
+  - If setup.bat still cannot remove the service, run remove-pulse-agent.ps1
+    from an elevated PowerShell window for a full cleanup
 
 Changing settings after install:
   - Run setup.bat and choose [2] to open the configuration UI
@@ -119,6 +122,16 @@ Changing settings after install:
 
 Uninstalling:
   - Run setup.bat and choose [4] Uninstall and remove Pulse service
+  - If Windows says the service or files are still in use, run:
+      powershell -ExecutionPolicy Bypass -File .\remove-pulse-agent.ps1
+  - Use:
+      powershell -ExecutionPolicy Bypass -File .\remove-pulse-agent.ps1 -WhatIf
+    first if you want to preview what will be removed
+  - Administrator approval is still required on locked-down PCs because
+    Windows protects services and ProgramData folders
+  - If you manually clean up in PowerShell, use:
+      Remove-Item -LiteralPath 'C:\ProgramData\ClarixPulse' -Recurse -Force
+    (cmd-style `rmdir /s /q` only works in Command Prompt, not PowerShell)
   - Your config.yaml is kept so you can reinstall without losing settings
 
 

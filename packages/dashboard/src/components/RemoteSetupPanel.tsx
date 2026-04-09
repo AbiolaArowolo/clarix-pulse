@@ -59,6 +59,13 @@ interface InstallHandoffLinkResponse {
   error?: string;
 }
 
+interface RemoveNodeResponse {
+  ok?: boolean;
+  nodeId?: string;
+  removedPlayerIds?: string[];
+  error?: string;
+}
+
 interface PlayerFormState {
   playerId: string;
   label: string;
@@ -312,6 +319,8 @@ export function RemoteSetupPanel() {
   const [creatingHandoffLink, setCreatingHandoffLink] = useState(false);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [discoveryAutoLoaded, setDiscoveryAutoLoaded] = useState(false);
+  const [cleanupNodeId, setCleanupNodeId] = useState('');
+  const [removingNode, setRemovingNode] = useState(false);
 
   const stats = useMemo(() => ({
     players: form.players.length,
@@ -343,6 +352,12 @@ export function RemoteSetupPanel() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const fallbackNodeId = form.nodeId || lastProvision?.nodeId || '';
+    if (!fallbackNodeId) return;
+    setCleanupNodeId((current) => current || fallbackNodeId);
+  }, [form.nodeId, lastProvision?.nodeId]);
 
   const requestHeaders = (contentType = true): HeadersInit => {
     const headers = new Headers();
@@ -604,6 +619,49 @@ export function RemoteSetupPanel() {
     }
   };
 
+  const removeNodeFromHub = async () => {
+    const nodeId = (cleanupNodeId || form.nodeId || lastProvision?.nodeId || '').trim();
+    if (!nodeId) {
+      setError('Enter the node ID you want to remove from the hub.');
+      setNotice(null);
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Remove node "${nodeId}" from this workspace? This deletes its mirrored config, active token, and player records from the hub.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setRemovingNode(true);
+    setError(null);
+    setNotice(null);
+    setCopyNotice(null);
+
+    try {
+      const response = await fetch(`/api/config/remote/node/${encodeURIComponent(nodeId)}`, {
+        method: 'DELETE',
+      });
+      const payload = await response.json() as RemoveNodeResponse;
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error ?? 'Failed to remove node from hub.');
+      }
+
+      const removedPlayerCount = Array.isArray(payload.removedPlayerIds) ? payload.removedPlayerIds.length : 0;
+      setNotice(`Removed node ${nodeId} from the hub and cleared ${removedPlayerCount} player record${removedPlayerCount === 1 ? '' : 's'}.`);
+      if (lastProvision?.nodeId === nodeId) {
+        setLastProvision(null);
+      }
+      setHandoffLink(null);
+      setCleanupNodeId(nodeId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove node from hub.');
+    } finally {
+      setRemovingNode(false);
+    }
+  };
+
   return (
     <CollapsibleSection
       id="remote-setup"
@@ -614,10 +672,10 @@ export function RemoteSetupPanel() {
     >
       <div className="ui-hero-panel overflow-hidden">
       <div className="border-b border-white/[0.08] px-4 py-5 sm:px-6 sm:py-6">
-        <div className="grid gap-5 2xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
+        <div className="grid gap-5">
           <div className="max-w-3xl">
             <p className="ui-kicker-muted">Remote setup flow</p>
-            <h2 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">Provision nodes from the remote dashboard</h2>
+            <h2 className="mt-3 text-2xl font-semibold text-white">Provision nodes from the remote dashboard</h2>
             <p className="mt-3 max-w-2xl text-base leading-7 text-slate-300">
               Pull discovery in first, keep advanced fields folded until you need them, and generate a ready-to-download node config with a fresh agent token when the draft looks right.
             </p>
@@ -664,7 +722,7 @@ export function RemoteSetupPanel() {
               </p>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(120px,1fr))]">
               <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-3">
                 <p className="ui-kicker-muted">Players</p>
                 <p className="mt-2 text-2xl font-semibold text-white">{stats.players}</p>
@@ -682,7 +740,7 @@ export function RemoteSetupPanel() {
         </div>
       </div>
 
-      <div className="grid gap-5 px-4 py-5 sm:px-6 2xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.8fr)]">
+      <div className="grid gap-5 px-4 py-5 sm:px-6">
         <div className="space-y-5">
           <div className="rounded-2xl border border-white/[0.08] bg-slate-950/28 p-5 shadow-[0_18px_48px_rgba(2,12,27,0.14)]">
             <div className="mb-4">
@@ -691,7 +749,7 @@ export function RemoteSetupPanel() {
               <p className="mt-2 text-sm leading-6 text-slate-400">Uploaded reports can fill these automatically, but you can edit them before provisioning.</p>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
               <label>
                 <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Node ID</span>
                 <input
@@ -728,7 +786,7 @@ export function RemoteSetupPanel() {
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/85 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400"
                 />
               </label>
-              <label className="md:max-w-[220px]">
+              <label>
                 <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Poll Interval</span>
                 <input
                   type="number"
@@ -764,7 +822,7 @@ export function RemoteSetupPanel() {
                   key={`${player.playerId}-${index}`}
                   className="rounded-3xl border border-white/[0.08] bg-slate-950/28 p-4 shadow-[0_16px_42px_rgba(2,12,27,0.14)]"
                 >
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="flex flex-col gap-4">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="rounded-xl border border-slate-700 bg-slate-900/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300">
@@ -826,7 +884,7 @@ export function RemoteSetupPanel() {
                     </div>
                   </div>
 
-                  <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                  <div className="mt-4 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
                     <label>
                       <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Player ID</span>
                       <input
@@ -868,7 +926,7 @@ export function RemoteSetupPanel() {
                     </div>
                   </div>
 
-                  <div className="mt-4 grid gap-3 lg:grid-cols-3">
+                  <div className="mt-4 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
                     <label>
                       <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                         {isInsta ? 'Shared Log Dir' : isAdmax ? 'Admax Root' : 'Primary Log Path'}
@@ -972,7 +1030,7 @@ export function RemoteSetupPanel() {
                               </div>
                             </div>
 
-                            <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+                            <div className="mt-3 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
                               <label>
                                 <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Stream ID</span>
                                 <input
@@ -1016,8 +1074,8 @@ export function RemoteSetupPanel() {
                   <div className={`grid transition-all duration-200 ease-in-out ${player.advancedOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
                   <div className="overflow-hidden">
                   {player.advancedOpen && (
-                    <div className="mt-4 grid gap-3 2xl:grid-cols-3">
-                      <label className="2xl:col-span-1">
+                    <div className="mt-4 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))]">
+                      <label>
                         <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Playlist / Secondary Log</span>
                         <input
                           type="text"
@@ -1027,7 +1085,7 @@ export function RemoteSetupPanel() {
                         />
                       </label>
 
-                      <label className="2xl:col-span-1">
+                      <label>
                         <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Process Selectors JSON</span>
                         <textarea
                           value={player.processSelectorsText}
@@ -1036,7 +1094,7 @@ export function RemoteSetupPanel() {
                         />
                       </label>
 
-                      <label className="2xl:col-span-1">
+                      <label>
                         <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Log Selectors JSON</span>
                         <textarea
                           value={player.logSelectorsText}
@@ -1045,7 +1103,7 @@ export function RemoteSetupPanel() {
                         />
                       </label>
 
-                      <label className="2xl:col-span-3">
+                      <label className="[grid-column:1/-1]">
                         <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">UDP Inputs JSON (Advanced)</span>
                         <textarea
                           value={player.udpInputsText}
@@ -1080,6 +1138,34 @@ export function RemoteSetupPanel() {
               <p>2. Keep advanced selectors hidden unless the player needs custom matching. UDP inputs stay visible in each player card.</p>
               <p>3. Provisioning uses your signed-in tenant, mirrors the node config, rotates a fresh agent token, and downloads a ready YAML config for the node.</p>
             </div>
+          </div>
+
+          <div className="rounded-2xl border border-red-500/25 bg-red-500/8 p-5">
+            <p className="ui-kicker-muted !text-red-100">Hub cleanup</p>
+            <p className="mt-3 text-sm leading-6 text-red-50/90">
+              If a node was uninstalled on a PC but still appears in this dashboard, remove it here to clear stale hub inventory.
+            </p>
+            <label className="mt-4 block">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-red-100/80">Node ID</span>
+              <input
+                type="text"
+                value={cleanupNodeId}
+                onChange={(event) => setCleanupNodeId(event.target.value)}
+                className="mt-2 w-full rounded-2xl border border-red-400/35 bg-slate-950/80 px-4 py-3 text-sm text-red-50 outline-none placeholder:text-red-100/45 focus:border-red-300"
+                placeholder="example-node-id"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => void removeNodeFromHub()}
+              disabled={removingNode}
+              className="mt-3 w-full rounded-2xl border border-red-400/45 bg-red-500/12 px-4 py-2.5 text-sm font-semibold text-red-50 transition-colors hover:border-red-300 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {removingNode ? 'Removing node...' : 'Remove node from hub'}
+            </button>
+            <p className="mt-3 text-xs leading-5 text-red-100/70">
+              This removes the node, player records, mirrored config, and active token for this workspace.
+            </p>
           </div>
 
           {lastProvision && (

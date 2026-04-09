@@ -3216,20 +3216,31 @@ def uninstall_service_command() -> int:
         return _relaunch_as_admin(["--uninstall-service"])
 
     try:
-        existing_config = _config_for_hub_sync(_load_yaml_if_exists(_runtime_config_path()))
+        raw_config = _load_yaml_if_exists(_runtime_config_path())
+        existing_config = _config_for_hub_sync(raw_config)
         nssm_path = _installed_path("nssm.exe") if os.path.exists(_installed_path("nssm.exe")) else ""
         _stop_existing_service(nssm_path or None)
 
-        if existing_config is not None:
-            sync_result = _sync_node_config_mirror_to_hub(existing_config, players_override=[])
-            if sync_result.get("ok"):
-                removed_count = len(_player_ids_from_config(existing_config))
+        if isinstance(raw_config, dict) and raw_config:
+            cleanup_result = _decommission_node_from_hub(raw_config)
+            cleanup_ok = bool(cleanup_result.get("ok"))
+            cleanup_error = _as_str(cleanup_result.get("error"))
+
+            # Older hubs may not have /api/config/node/decommission yet.
+            if not cleanup_ok and existing_config is not None and cleanup_error.startswith("HTTP 404"):
+                cleanup_result = _sync_node_config_mirror_to_hub(existing_config, players_override=[])
+                cleanup_ok = bool(cleanup_result.get("ok"))
+                cleanup_error = _as_str(cleanup_result.get("error"))
+
+            if cleanup_ok:
+                removed_count = len(cleanup_result.get("removed_player_ids", []))
                 if removed_count > 0:
                     print(f"Removed {removed_count} player(s) from the hub immediately.")
-            else:
-                details = _as_str(sync_result.get("error"))
-                if details:
-                    print(f"WARNING: Pulse was removed locally, but hub cleanup failed: {details}")
+            elif cleanup_error:
+                print(
+                    "WARNING: Pulse was removed locally, but hub cleanup failed: "
+                    f"{cleanup_error}. Remove the stale node from Dashboard > Remote Setup > Hub cleanup."
+                )
 
         if os.path.exists(INSTALL_DIR) and _prompt_yes_no(f"Delete installed files from {INSTALL_DIR}", False):
             shutil.rmtree(INSTALL_DIR, ignore_errors=True)
@@ -3618,6 +3629,78 @@ def _sync_node_config_mirror_to_hub(
         "ok": True,
         "removed_player_ids": removed_player_ids,
         "updated_at": _as_str(body.get("updatedAt")) if isinstance(body, dict) else "",
+        "error": "",
+    }
+
+
+def _decommission_node_from_hub(config: dict[str, Any]) -> dict[str, Any]:
+    hub_url = _as_str(config.get("hub_url")).rstrip("/")
+    node_id = _as_str(config.get("node_id") or config.get("agent_id"))
+    token = _as_non_placeholder_str(config.get("agent_token"))
+    enrollment_key = _as_non_placeholder_str(config.get("enrollment_key"))
+
+    if not hub_url or not node_id:
+        return {
+            "ok": False,
+            "removed_player_ids": [],
+            "error": "Node ID or hub URL is missing.",
+        }
+
+    if not token and not enrollment_key:
+        return {
+            "ok": False,
+            "removed_player_ids": [],
+            "error": "Agent token or enrollment key is missing.",
+        }
+
+    headers: dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    payload: dict[str, Any] = {
+        "nodeId": node_id,
+    }
+    if enrollment_key:
+        payload["enrollmentKey"] = enrollment_key
+
+    try:
+        response = requests.post(
+            f"{hub_url}/api/config/node/decommission",
+            json=payload,
+            headers=headers or None,
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        return {
+            "ok": False,
+            "removed_player_ids": [],
+            "error": str(exc),
+        }
+
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+
+    if response.status_code >= 400:
+        error_message = _as_str(body.get("error")) if isinstance(body, dict) else ""
+        return {
+            "ok": False,
+            "removed_player_ids": [],
+            "error": error_message or f"HTTP {response.status_code}",
+        }
+
+    removed_player_ids = []
+    if isinstance(body, dict) and isinstance(body.get("removedPlayerIds"), list):
+        removed_player_ids = [
+            _as_str(player_id)
+            for player_id in body.get("removedPlayerIds", [])
+            if _as_str(player_id)
+        ]
+
+    return {
+        "ok": True,
+        "removed_player_ids": removed_player_ids,
         "error": "",
     }
 
