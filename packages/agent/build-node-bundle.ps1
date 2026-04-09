@@ -279,28 +279,31 @@ try {
 setlocal EnableExtensions
 set "SRC_DIR=%~dp0"
 set "TARGET_DIR=C:\ClarixPulse"
+set "LOG_PATH=C:\ClarixPulse\install-launcher.log"
 
 if not exist "%TARGET_DIR%" mkdir "%TARGET_DIR%" >nul 2>nul
 
-robocopy "%SRC_DIR%" "%TARGET_DIR%" *.* /E /R:2 /W:1 /NFL /NDL /NJH /NJS /XF launcher-install.cmd >nul
+echo [%DATE% %TIME%] ClarixPulseSetup launcher started > "%LOG_PATH%"
+echo Source=%SRC_DIR% >> "%LOG_PATH%"
+echo Target=%TARGET_DIR% >> "%LOG_PATH%"
+
+robocopy "%SRC_DIR%" "%TARGET_DIR%" *.* /E /R:2 /W:1 /NFL /NDL /NJH /NJS /XF launcher-install.cmd >> "%LOG_PATH%" 2>&1
 set "ROBO=%ERRORLEVEL%"
 if %ROBO% GEQ 8 (
-    echo Failed to copy Clarix Pulse files to %TARGET_DIR% (robocopy exit %ROBO%).
-    pause
+    echo Failed to copy Clarix Pulse files to %TARGET_DIR% (robocopy exit %ROBO%). >> "%LOG_PATH%"
+    start "" cmd.exe /K "echo Clarix Pulse install failed (copy stage). & echo Log: %LOG_PATH% & type \"%LOG_PATH%\""
     exit /b 1
 )
 
 if not exist "%TARGET_DIR%\setup.bat" (
-    echo setup.bat was not copied to %TARGET_DIR%.
-    pause
+    echo setup.bat was not copied to %TARGET_DIR%. >> "%LOG_PATH%"
+    start "" cmd.exe /K "echo Clarix Pulse install failed (setup.bat missing). & echo Log: %LOG_PATH% & type \"%LOG_PATH%\""
     exit /b 1
 )
 
-pushd "%TARGET_DIR%"
-call "%TARGET_DIR%\setup.bat"
-set "EC=%ERRORLEVEL%"
-popd
-exit /b %EC%
+echo Launching setup.bat from %TARGET_DIR% >> "%LOG_PATH%"
+start "" cmd.exe /K "cd /d \"%TARGET_DIR%\" && call \"%TARGET_DIR%\setup.bat\""
+exit /b 0
 '@ | Set-Content -Path $setupLauncherPath -Encoding ASCII
 
     $setupSourceFiles = @(
@@ -323,26 +326,25 @@ exit /b %EC%
 @echo off
 setlocal EnableExtensions
 set "TARGET_DIR=C:\ClarixPulse"
+set "LOG_PATH=C:\ClarixPulse\uninstall-launcher.log"
 
 if not exist "%TARGET_DIR%" (
-    echo Clarix Pulse is not installed on this PC.
-    pause
+    start "" cmd.exe /K "echo Clarix Pulse is not installed on this PC. & exit /b 0"
     exit /b 0
 )
 
+echo [%DATE% %TIME%] Uninstall launcher started > "%LOG_PATH%"
+
 if exist "%TARGET_DIR%\uninstall.bat" (
-    pushd "%TARGET_DIR%"
-    call "%TARGET_DIR%\uninstall.bat"
-    set "EC=%ERRORLEVEL%"
-    popd
-    exit /b %EC%
+    start "" cmd.exe /K "cd /d \"%TARGET_DIR%\" && call \"%TARGET_DIR%\uninstall.bat\""
+    exit /b 0
 )
 
 if exist "%TARGET_DIR%\clarix-agent.exe" (
-    "%TARGET_DIR%\clarix-agent.exe" --uninstall-service
+    "%TARGET_DIR%\clarix-agent.exe" --uninstall-service >> "%LOG_PATH%" 2>&1
 )
 if exist "%TARGET_DIR%\remove-pulse-agent.ps1" (
-    powershell -ExecutionPolicy Bypass -NoProfile -File "%TARGET_DIR%\remove-pulse-agent.ps1"
+    powershell -ExecutionPolicy Bypass -NoProfile -File "%TARGET_DIR%\remove-pulse-agent.ps1" >> "%LOG_PATH%" 2>&1
 )
 exit /b 0
 '@ | Set-Content -Path $uninstallLauncherPath -Encoding ASCII
