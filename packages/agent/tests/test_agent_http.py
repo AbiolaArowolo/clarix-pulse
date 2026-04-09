@@ -669,6 +669,97 @@ class HubDecommissionTests(unittest.TestCase):
         self.assertEqual(prepared["enrollment_key"], "ENROLL-ABC-123")
         self.assertIn("enrollment key", (message or "").lower())
 
+    def test_prepare_config_for_hub_decommission_loads_missing_fields_from_nearby_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            runtime_root = temp_root / "runtime"
+            runtime_root.mkdir(parents=True, exist_ok=True)
+            fallback_root = temp_root / "installed"
+            fallback_root.mkdir(parents=True, exist_ok=True)
+            runtime_config_path = runtime_root / "config.yaml"
+            (fallback_root / "config.yaml").write_text(
+                "\n".join(
+                    [
+                        "node_id: studio-a",
+                        "node_name: Studio A",
+                        "site_id: studio-a",
+                        "hub_url: https://pulse.example.com",
+                        "agent_token: TOKEN-123",
+                        "enrollment_key: ENROLL-ABC-123",
+                        "players: []",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(agent, "_runtime_config_path", return_value=str(runtime_config_path)):
+                with patch.object(agent, "INSTALL_DIR", str(fallback_root)):
+                    prepared, message = agent._prepare_config_for_hub_decommission({})
+
+        self.assertEqual(prepared["node_id"], "studio-a")
+        self.assertEqual(prepared["agent_token"], "TOKEN-123")
+        self.assertEqual(prepared["hub_url"], "https://pulse.example.com")
+        self.assertIn("node id", (message or "").lower())
+
+    def test_decommission_node_from_hub_allows_token_only_payload(self) -> None:
+        response = Mock(status_code=200)
+        response.json.return_value = {"ok": True, "removedPlayerIds": []}
+
+        with patch.object(agent.requests, "post", return_value=response) as post_mock:
+            result = agent._decommission_node_from_hub(
+                {
+                    "hub_url": "https://pulse.example.com",
+                    "agent_token": "TOKEN-123",
+                }
+            )
+
+        self.assertTrue(result["ok"])
+        payload = post_mock.call_args.kwargs.get("json")
+        self.assertIsInstance(payload, dict)
+        self.assertNotIn("nodeId", payload)
+
+    def test_decommission_hub_command_retries_after_unauthorized_with_refreshed_token(self) -> None:
+        raw_config = {
+            "node_id": "studio-a",
+            "node_name": "Studio A",
+            "site_id": "studio-a",
+            "hub_url": "https://pulse.example.com",
+            "agent_token": "STALE-TOKEN",
+            "enrollment_key": "ENROLL-123",
+            "players": [
+                {"player_id": "studio-a-insta-1", "playout_type": "insta"},
+            ],
+        }
+        observed_tokens: list[str] = []
+
+        def fake_decommission(config: dict[str, object]) -> dict[str, object]:
+            observed_tokens.append(str(config.get("agent_token", "")))
+            if len(observed_tokens) == 1:
+                return {
+                    "ok": False,
+                    "removed_player_ids": [],
+                    "error": "Unauthorized",
+                    "status_code": 401,
+                }
+            return {
+                "ok": True,
+                "removed_player_ids": [],
+                "error": "",
+                "status_code": 200,
+            }
+
+        with patch.object(agent, "_runtime_config_path", return_value="C:\\temp\\config.yaml"):
+            with patch.object(agent, "_load_yaml_if_exists", return_value=raw_config):
+                with patch.object(agent, "_prepare_config_for_hub_decommission", return_value=(dict(raw_config), None)):
+                    with patch.object(agent, "_config_for_hub_sync", return_value=None):
+                        with patch.object(agent, "_refresh_agent_token_from_enrollment", return_value=("FRESH-TOKEN", "")):
+                            with patch.object(agent, "_decommission_node_from_hub", side_effect=fake_decommission):
+                                exit_code = agent.decommission_hub_command()
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(observed_tokens, ["STALE-TOKEN", "FRESH-TOKEN"])
+
     def test_uninstall_service_command_uses_pulse_account_defaults_for_hub_decommission(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

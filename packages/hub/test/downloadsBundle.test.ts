@@ -95,11 +95,15 @@ test('/api/downloads/bundle/windows/latest injects pulse-account.json for the au
 
       const accountConfig = JSON.parse(accountFile!.getData().toString('utf8')) as {
         hubUrl: string;
+        hub_url: string;
         enrollmentKey: string;
+        enrollment_key: string;
       };
 
       assert.equal(accountConfig.hubUrl, 'https://pulse.example.com');
+      assert.equal(accountConfig.hub_url, 'https://pulse.example.com');
       assert.equal(accountConfig.enrollmentKey, mockedEnrollmentKey);
+      assert.equal(accountConfig.enrollment_key, mockedEnrollmentKey);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

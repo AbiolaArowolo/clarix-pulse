@@ -62,7 +62,9 @@ export function buildTenantBundleBuffer(input: {
   const accountConfig = JSON.stringify(
     {
       hubUrl: input.hubUrl,
+      hub_url: input.hubUrl,
       enrollmentKey: input.enrollmentKey,
+      enrollment_key: input.enrollmentKey,
     },
     null,
     2,

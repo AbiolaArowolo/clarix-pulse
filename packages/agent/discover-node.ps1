@@ -98,11 +98,13 @@ if (Test-Path -LiteralPath $_accountJsonPath -PathType Leaf) {
     try {
         $ErrorActionPreference = 'SilentlyContinue'
         $accountData = Get-Content -LiteralPath $_accountJsonPath -Raw | ConvertFrom-Json
-        if ($accountData.hubUrl -and -not (Is-PlaceholderValue -Value ([string]$accountData.hubUrl) -Kind 'url')) {
-            $_accountHubUrl = [string]$accountData.hubUrl
+        $accountHubCandidate = if ($accountData.hubUrl) { [string]$accountData.hubUrl } elseif ($accountData.hub_url) { [string]$accountData.hub_url } else { '' }
+        $accountEnrollmentCandidate = if ($accountData.enrollmentKey) { [string]$accountData.enrollmentKey } elseif ($accountData.enrollment_key) { [string]$accountData.enrollment_key } else { '' }
+        if ($accountHubCandidate -and -not (Is-PlaceholderValue -Value $accountHubCandidate -Kind 'url')) {
+            $_accountHubUrl = $accountHubCandidate
         }
-        if ($accountData.enrollmentKey -and -not (Is-PlaceholderValue -Value ([string]$accountData.enrollmentKey) -Kind 'enrollment')) {
-            $_accountEnrollmentKey = [string]$accountData.enrollmentKey
+        if ($accountEnrollmentCandidate -and -not (Is-PlaceholderValue -Value $accountEnrollmentCandidate -Kind 'enrollment')) {
+            $_accountEnrollmentKey = $accountEnrollmentCandidate
         }
         $ErrorActionPreference = 'Stop'
     } catch {

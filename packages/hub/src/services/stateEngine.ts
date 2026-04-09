@@ -326,14 +326,9 @@ function computeRuntime(obs: Observations, context: HealthComputationContext): R
     return 'healthy';
   }
 
-  // Fresh log tokens should reflect immediately. A real pause should stay latched
-  // until the agent sees playback movement again.
-  if (logToken === 'app_exited') {
-    return explicitHealthyInsta ? 'healthy' : 'stopped';
-  }
-  if (logToken === 'reinit') {
-    return explicitHealthyInsta ? 'healthy' : 'restarting';
-  }
+  // Fresh stop/reinit tokens are handled earlier. Stale stop/reinit tokens are
+  // treated as historical signals so they do not pin runtime in restarting/stopped
+  // after playback has already recovered.
   if (stalePauseShouldWin || keepPausedWhileStatic) {
     return 'paused';
   }

@@ -69,3 +69,43 @@ test('computeHealth keeps player health separate from a network outage reported 
   assert.equal(result.broadcastHealth, 'healthy');
   assert.equal(result.connectivityHealth, 'offline');
 });
+
+test('computeHealth ignores stale reinit token once process is back up', () => {
+  const result = computeHealth(
+    {
+      playout_process_up: 1,
+      log_last_token: 'reinit',
+      log_last_token_fresh: 0,
+    },
+    false,
+    {
+      previousRuntimeHealth: 'restarting',
+      previousRuntimeStartedAt: '2026-04-06T13:58:50.000Z',
+      previousBroadcastHealth: 'degraded',
+      previousBroadcastStartedAt: '2026-04-06T13:58:50.000Z',
+    },
+  );
+
+  assert.equal(result.runtimeHealth, 'healthy');
+  assert.equal(result.broadcastHealth, 'healthy');
+});
+
+test('computeHealth ignores stale app_exited token once process is back up', () => {
+  const result = computeHealth(
+    {
+      playout_process_up: 1,
+      log_last_token: 'app_exited',
+      log_last_token_fresh: 0,
+    },
+    false,
+    {
+      previousRuntimeHealth: 'restarting',
+      previousRuntimeStartedAt: '2026-04-06T13:58:50.000Z',
+      previousBroadcastHealth: 'degraded',
+      previousBroadcastStartedAt: '2026-04-06T13:58:50.000Z',
+    },
+  );
+
+  assert.equal(result.runtimeHealth, 'healthy');
+  assert.equal(result.broadcastHealth, 'healthy');
+});

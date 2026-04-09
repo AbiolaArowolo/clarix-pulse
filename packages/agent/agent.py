@@ -522,6 +522,66 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
         .filter(Boolean);
     }
 
+    function isLikelyEnrollmentKey(value) {
+      const text = String(value || "").trim();
+      if (!text) return false;
+      if (
+        text.includes("://")
+        || text.includes("/")
+        || text.includes("?")
+        || text.includes("&")
+        || text.includes("=")
+        || text.includes(" ")
+      ) {
+        return false;
+      }
+      return text.length >= 12;
+    }
+
+    function enrollmentKeyFromSetupUrl(rawValue) {
+      const text = String(rawValue || "").trim();
+      if (!text) return "";
+
+      try {
+        const parsed = new URL(text, window.location.origin);
+        const queryKey = (
+          parsed.searchParams.get("enrollment_key")
+          || parsed.searchParams.get("enrollmentKey")
+          || parsed.searchParams.get("enroll")
+          || parsed.searchParams.get("key")
+          || ""
+        ).trim();
+
+        let hashKey = "";
+        if (parsed.hash && parsed.hash.includes("=")) {
+          const hashParams = new URLSearchParams(parsed.hash.replace(/^#/, ""));
+          hashKey = (
+            hashParams.get("enrollment_key")
+            || hashParams.get("enrollmentKey")
+            || hashParams.get("enroll")
+            || hashParams.get("key")
+            || ""
+          ).trim();
+        }
+
+        const candidate = queryKey || hashKey;
+        return isLikelyEnrollmentKey(candidate) ? candidate : "";
+      } catch {
+        return isLikelyEnrollmentKey(text) ? text : "";
+      }
+    }
+
+    function maybePrefillEnrollmentKeyFromSetupUrl(rawValue) {
+      if (String(state.enrollment_key || "").trim()) return;
+
+      const candidate = enrollmentKeyFromSetupUrl(rawValue);
+      if (!candidate) return;
+
+      state.enrollment_key = candidate;
+      renderTop();
+      showMessage("notice", "Enrollment key auto-filled from the setup link.");
+    }
+
     function ensureAdvanced(player) {
       player.process_selectors = player.process_selectors || {};
       player.log_selectors = player.log_selectors || {};
@@ -757,6 +817,7 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
       });
       document.getElementById("import_setup_url").addEventListener("input", (event) => {
         state.import_setup_url = event.target.value;
+        maybePrefillEnrollmentKeyFromSetupUrl(state.import_setup_url);
       });
       document.getElementById("import_setup_file").addEventListener("change", (event) => {
         void window.PulseUi.importFile(event);
@@ -931,6 +992,7 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
       }
     };
 
+    maybePrefillEnrollmentKeyFromSetupUrl(window.location.href);
     render();
     wireTopInputs();
   </script>
@@ -2870,6 +2932,157 @@ def _apply_pulse_account_defaults(
     )
 
 
+def _decommission_candidate_paths(search_roots: list[str]) -> list[str]:
+    candidate_roots: list[str] = []
+    for root in search_roots:
+        normalized_root = _as_str(root)
+        if normalized_root:
+            candidate_roots.append(normalized_root)
+
+    local_app_data = _as_str(os.environ.get("LOCALAPPDATA"))
+    if local_app_data:
+        candidate_roots.extend(
+            [
+                os.path.join(local_app_data, "ClarixPulse", "Bundles"),
+                os.path.join(local_app_data, "ClarixPulse", "Bundles", "clarix-pulse"),
+            ]
+        )
+
+    candidate_roots.extend(
+        [
+            os.path.join(r"C:\pulse-node-bundle"),
+            os.path.join(r"C:\pulse-node-bundle", "clarix-pulse"),
+        ]
+    )
+
+    candidate_paths: list[str] = []
+    for root in candidate_roots:
+        candidate_paths.extend(
+            [
+                os.path.join(root, "config.yaml"),
+                os.path.join(root, "pulse-node-discovery-report.json"),
+                os.path.join(root, "pulse-discovery-report.json"),
+            ]
+        )
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidate_paths:
+        resolved = os.path.abspath(candidate)
+        lowered = resolved.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        deduped.append(resolved)
+
+    return deduped
+
+
+def _decommission_document_from_path(path: str) -> dict[str, Any]:
+    if not os.path.isfile(path):
+        return {}
+
+    try:
+        with open(path, "r", encoding="utf-8-sig") as handle:
+            if path.lower().endswith(".json"):
+                parsed = json.load(handle)
+            else:
+                parsed = yaml.safe_load(handle) or {}
+    except (OSError, ValueError, yaml.YAMLError):
+        return {}
+
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _extract_decommission_defaults(document: dict[str, Any]) -> dict[str, str]:
+    nested_existing = {}
+    discovery = document.get("discovery")
+    if isinstance(discovery, dict) and isinstance(discovery.get("existing_pulse_config"), dict):
+        nested_existing = discovery.get("existing_pulse_config", {})
+
+    lookup_docs = [document]
+    if nested_existing:
+        lookup_docs.append(nested_existing)
+
+    def _first_string(keys: list[str], *, allow_placeholders: bool = False) -> str:
+        for source in lookup_docs:
+            for key in keys:
+                value = (
+                    _as_str(source.get(key))
+                    if allow_placeholders
+                    else _as_non_placeholder_str(source.get(key))
+                )
+                if value:
+                    return value
+        return ""
+
+    return {
+        "node_id": _first_string(["node_id", "nodeId", "agent_id"], allow_placeholders=True),
+        "node_name": _first_string(["node_name", "nodeName", "pc_name"], allow_placeholders=True),
+        "site_id": _first_string(["site_id", "siteId"], allow_placeholders=True),
+        "hub_url": _first_string(["hub_url", "hubUrl"]),
+        "agent_token": _first_string(["agent_token", "agentToken"]),
+        "enrollment_key": _first_string(["enrollment_key", "enrollmentKey"]),
+    }
+
+
+def _apply_decommission_config_defaults(
+    state: dict[str, Any] | None,
+    search_roots: list[str],
+) -> tuple[dict[str, Any], str | None]:
+    current = copy.deepcopy(state) if isinstance(state, dict) else {}
+
+    gathered: dict[str, str] = {
+        "node_id": "",
+        "node_name": "",
+        "site_id": "",
+        "hub_url": "",
+        "agent_token": "",
+        "enrollment_key": "",
+    }
+    for candidate_path in _decommission_candidate_paths(search_roots):
+        document = _decommission_document_from_path(candidate_path)
+        if not document:
+            continue
+
+        defaults = _extract_decommission_defaults(document)
+        for field_name, value in defaults.items():
+            if value and not gathered[field_name]:
+                gathered[field_name] = value
+
+        if all(gathered.values()):
+            break
+
+    applied_fields: list[str] = []
+    field_labels = {
+        "node_id": "node ID",
+        "node_name": "node name",
+        "site_id": "site ID",
+        "hub_url": "hub URL",
+        "agent_token": "agent token",
+        "enrollment_key": "enrollment key",
+    }
+    for field_name, value in gathered.items():
+        if not value:
+            continue
+        current_value = (
+            _as_str(current.get(field_name))
+            if field_name in {"node_id", "node_name", "site_id"}
+            else _as_non_placeholder_str(current.get(field_name))
+        )
+        if current_value:
+            continue
+        current[field_name] = value
+        applied_fields.append(field_labels[field_name])
+
+    if not applied_fields:
+        return current, None
+
+    return current, (
+        f"Loaded {' and '.join(applied_fields)} from nearby Pulse config files."
+    )
+
+
 def _prepare_config_for_hub_decommission(raw_config: dict[str, Any] | None) -> tuple[dict[str, Any], str | None]:
     config = copy.deepcopy(raw_config) if isinstance(raw_config, dict) else {}
     runtime_config_path = _runtime_config_path()
@@ -2879,7 +3092,10 @@ def _prepare_config_for_hub_decommission(raw_config: dict[str, Any] | None) -> t
         _base_dir(),
         os.getcwd(),
     ]
-    return _apply_pulse_account_defaults(config, search_roots)
+    config, account_message = _apply_pulse_account_defaults(config, search_roots)
+    config, config_message = _apply_decommission_config_defaults(config, search_roots)
+    messages = [message for message in (account_message, config_message) if message]
+    return config, " ".join(messages) if messages else None
 
 
 def configure_bundle_command(import_path: str | None = None) -> int:
@@ -3353,6 +3569,19 @@ def uninstall_service_command() -> int:
             cleanup_ok = bool(cleanup_result.get("ok"))
             cleanup_error = _as_str(cleanup_result.get("error"))
 
+            if not cleanup_ok and _is_hub_unauthorized(cleanup_result):
+                refreshed_token, refresh_error = _refresh_agent_token_from_enrollment(
+                    decommission_config,
+                    "Hub decommission unauthorized",
+                )
+                if refreshed_token:
+                    decommission_config["agent_token"] = refreshed_token
+                    cleanup_result = _decommission_node_from_hub(decommission_config)
+                    cleanup_ok = bool(cleanup_result.get("ok"))
+                    cleanup_error = _as_str(cleanup_result.get("error"))
+                elif refresh_error:
+                    cleanup_error = refresh_error
+
             # Older hubs may not have /api/config/node/decommission yet.
             if not cleanup_ok and existing_config is not None and cleanup_error.startswith("HTTP 404"):
                 cleanup_result = _sync_node_config_mirror_to_hub(existing_config, players_override=[])
@@ -3393,6 +3622,19 @@ def decommission_hub_command() -> int:
         cleanup_result = _decommission_node_from_hub(decommission_config)
         cleanup_ok = bool(cleanup_result.get("ok"))
         cleanup_error = _as_str(cleanup_result.get("error"))
+
+        if not cleanup_ok and _is_hub_unauthorized(cleanup_result):
+            refreshed_token, refresh_error = _refresh_agent_token_from_enrollment(
+                decommission_config,
+                "Hub decommission unauthorized",
+            )
+            if refreshed_token:
+                decommission_config["agent_token"] = refreshed_token
+                cleanup_result = _decommission_node_from_hub(decommission_config)
+                cleanup_ok = bool(cleanup_result.get("ok"))
+                cleanup_error = _as_str(cleanup_result.get("error"))
+            elif refresh_error:
+                cleanup_error = refresh_error
 
         # Older hubs may not have /api/config/node/decommission yet.
         if not cleanup_ok and existing_config is not None and cleanup_error.startswith("HTTP 404"):
@@ -3839,11 +4081,12 @@ def _decommission_node_from_hub(config: dict[str, Any]) -> dict[str, Any]:
     token = _as_non_placeholder_str(config.get("agent_token"))
     enrollment_key = _as_non_placeholder_str(config.get("enrollment_key"))
 
-    if not hub_url or not node_id:
+    if not hub_url:
         return {
             "ok": False,
             "removed_player_ids": [],
-            "error": "Node ID or hub URL is missing.",
+            "error": "Hub URL is missing.",
+            "status_code": None,
         }
 
     if not token and not enrollment_key:
@@ -3851,15 +4094,24 @@ def _decommission_node_from_hub(config: dict[str, Any]) -> dict[str, Any]:
             "ok": False,
             "removed_player_ids": [],
             "error": "Agent token or enrollment key is missing.",
+            "status_code": None,
+        }
+
+    if not node_id and not token:
+        return {
+            "ok": False,
+            "removed_player_ids": [],
+            "error": "Node ID is required when agent token is missing.",
+            "status_code": None,
         }
 
     headers: dict[str, str] = {}
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    payload: dict[str, Any] = {
-        "nodeId": node_id,
-    }
+    payload: dict[str, Any] = {}
+    if node_id:
+        payload["nodeId"] = node_id
     if enrollment_key:
         payload["enrollmentKey"] = enrollment_key
 
@@ -3875,6 +4127,7 @@ def _decommission_node_from_hub(config: dict[str, Any]) -> dict[str, Any]:
             "ok": False,
             "removed_player_ids": [],
             "error": str(exc),
+            "status_code": None,
         }
 
     try:
@@ -3888,6 +4141,7 @@ def _decommission_node_from_hub(config: dict[str, Any]) -> dict[str, Any]:
             "ok": False,
             "removed_player_ids": [],
             "error": error_message or f"HTTP {response.status_code}",
+            "status_code": response.status_code,
         }
 
     removed_player_ids = []
@@ -3902,6 +4156,7 @@ def _decommission_node_from_hub(config: dict[str, Any]) -> dict[str, Any]:
         "ok": True,
         "removed_player_ids": removed_player_ids,
         "error": "",
+        "status_code": response.status_code,
     }
 
 
@@ -4086,6 +4341,10 @@ def run_agent_loop() -> int:
             sort_keys=True,
         )
         if config_signature != last_config_signature:
+            try:
+                _ensure_ff_tools(required=_config_has_enabled_udp(config))
+            except Exception as exc:
+                log.error(f"UDP monitoring tools unavailable: {exc}")
             log.info(f"Pulse Agent starting - node_id={node_id}, node_name={node_name}, hub={hub_url}")
             log.info(f"Monitoring {len(players)} player(s): {[p['player_id'] for p in players]}")
             last_config_signature = config_signature
