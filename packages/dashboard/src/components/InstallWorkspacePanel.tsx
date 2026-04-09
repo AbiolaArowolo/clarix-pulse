@@ -208,7 +208,7 @@ export function InstallWorkspacePanel({ layout = 'page' }: { layout?: 'page' | '
               </div>
             </div>
 
-            <div className="mt-4 overflow-x-auto rounded-[var(--radius-control)] border border-slate-800 bg-slate-950 px-4 py-3 font-mono text-xs text-indigo-100">
+            <div className="mt-4 rounded-[var(--radius-control)] border border-slate-800 bg-slate-950 px-4 py-3 font-mono text-xs text-indigo-100 break-all whitespace-normal">
               {shareUrl}
             </div>
           </div>

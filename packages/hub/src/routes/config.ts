@@ -9,11 +9,11 @@ import {
 } from '../config/remoteSetup';
 import { requireSession } from '../serverAuth';
 import { createBundleDownloadLink, createInstallHandoffLink, createNodeConfigDownloadLink, verifyDownloadToken } from '../services/downloadTokens';
-import { appendAdminAuditEvent, findTenantByEnrollmentKey, getTenantAccessSummary } from '../store/auth';
+import { appendAdminAuditEvent, findTenantByEnrollmentKey, getTenantAccessSummary, getTenantEnrollmentKey } from '../store/auth';
 import { getAlertSettings, updateAlertSettings } from '../store/alertSettings';
 import { getInstanceControls, updateInstanceControls } from '../store/instanceControls';
 import { getMirroredNodeConfig, getMirroredPlayerConfig, updateMirroredNodeConfig, updateMirroredPlayerStreamUrl } from '../store/nodeConfigMirror';
-import { enrollNode, getActiveAgentToken, getNode, getPlayer, removeNode, resolveNodeAuthForToken } from '../store/registry';
+import { enrollNode, getActiveAgentToken, getNode, getPlayer, removeNode, resolveNodeAuthForAnyToken, resolveNodeAuthForToken } from '../store/registry';
 
 function bearerToken(req: Request): string | null {
   const auth = req.headers.authorization ?? '';
@@ -172,6 +172,10 @@ function emitRemovedPlayers(io: SocketServer, tenantId: string, nodeId: string, 
   }
 }
 
+function emitNodeRemoved(io: SocketServer, tenantId: string, nodeId: string): void {
+  io.to(`tenant:${tenantId}`).emit('node_removed', { nodeId });
+}
+
 export function createConfigRouter(io: SocketServer): Router {
   const router = Router();
 
@@ -291,12 +295,19 @@ export function createConfigRouter(io: SocketServer): Router {
   router.post('/node/decommission', async (req: Request, res: Response) => {
     const token = bearerToken(req);
     const tokenAuth = token ? await resolveNodeAuthForToken(token) : null;
+    const tokenAnyAuth = !tokenAuth && token ? await resolveNodeAuthForAnyToken(token) : null;
     const requestedNodeId = asString(req.body?.nodeId ?? req.body?.node_id);
 
     let tenantId = tokenAuth?.tenantId ?? '';
     let nodeId = tokenAuth?.nodeId ?? requestedNodeId;
 
-    if (!tokenAuth) {
+    // Allow decommission with an inactive historical token only when the
+    // request explicitly names the same nodeId. This keeps uninstall resilient
+    // after token rotation while still constraining scope.
+    if (!tokenAuth && tokenAnyAuth && requestedNodeId && tokenAnyAuth.nodeId === requestedNodeId) {
+      tenantId = tokenAnyAuth.tenantId;
+      nodeId = tokenAnyAuth.nodeId;
+    } else if (!tokenAuth) {
       const enrollmentKey = asString(req.body?.enrollmentKey ?? req.body?.enrollment_key);
       if (!requestedNodeId || !enrollmentKey) {
         return res.status(401).json({ error: 'Unauthorized' });
@@ -322,6 +333,7 @@ export function createConfigRouter(io: SocketServer): Router {
 
     const removal = await removeNode(nodeId, tenantId);
     emitRemovedPlayers(io, tenantId, nodeId, removal.removedPlayerIds);
+    emitNodeRemoved(io, tenantId, nodeId);
 
     return res.json({
       ok: true,
@@ -702,7 +714,8 @@ export function createConfigRouter(io: SocketServer): Router {
         });
       }
 
-      const configYaml = serializeAgentConfigYaml(draft, enrollment.agentToken);
+      const enrollmentKey = await getTenantEnrollmentKey(req.auth!.tenantId);
+      const configYaml = serializeAgentConfigYaml(draft, enrollment.agentToken, enrollmentKey);
       let configPullUrl: string | null = null;
       let configPullExpiresAt: string | null = null;
       if (mirrored) {
@@ -764,6 +777,7 @@ export function createConfigRouter(io: SocketServer): Router {
     }
 
     emitRemovedPlayers(io, req.auth!.tenantId, nodeId, removal.removedPlayerIds);
+    emitNodeRemoved(io, req.auth!.tenantId, nodeId);
     await appendAdminAuditEvent({
       actorUserId: req.auth!.userId,
       actorEmail: req.auth!.email,

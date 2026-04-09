@@ -480,6 +480,25 @@ export async function resolveNodeAuthForToken(token: string): Promise<{ nodeId: 
   };
 }
 
+export async function resolveNodeAuthForAnyToken(token: string): Promise<{ nodeId: string; tenantId: string } | null> {
+  const row = await queryOne<{ node_id: string; tenant_id: string }>(`
+    SELECT a.node_id, s.tenant_id
+    FROM agent_tokens a
+    JOIN nodes n ON n.node_id = a.node_id
+    JOIN sites s ON s.site_id = n.site_id
+    WHERE a.token = $1
+  `, [token]);
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    nodeId: row.node_id,
+    tenantId: row.tenant_id,
+  };
+}
+
 export async function getActiveAgentToken(nodeId: string, tenantId: string): Promise<string | null> {
   const row = await queryOne<{ token: string }>(`
     SELECT a.token

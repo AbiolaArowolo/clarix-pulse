@@ -120,10 +120,25 @@ export function useMonitoring() {
       if (!event.playerId) return;
       thumbnailsRef.current.delete(event.playerId);
       setSites((prev) =>
-        prev.map((site) => ({
-          ...site,
-          instances: site.instances.filter((inst) => inst.id !== event.playerId),
-        }))
+        prev
+          .map((site) => ({
+            ...site,
+            instances: site.instances.filter((inst) => inst.id !== event.playerId),
+          }))
+          .filter((site) => site.instances.length > 0),
+      );
+    });
+
+    socket.on('node_removed', (event: { nodeId: string }) => {
+      markConnected();
+      if (!event?.nodeId) return;
+      setSites((prev) =>
+        prev
+          .map((site) => ({
+            ...site,
+            instances: site.instances.filter((inst) => inst.nodeId !== event.nodeId),
+          }))
+          .filter((site) => site.instances.length > 0),
       );
     });
 
@@ -136,6 +151,7 @@ export function useMonitoring() {
       socket.off('state_update');
       socket.off('thumbnail_update');
       socket.off('player_removed');
+      socket.off('node_removed');
     };
   }, []);
 

@@ -28,7 +28,7 @@ export function StatusBadge({ color, label, size = 'sm' }: Props) {
   return (
     <span className={`inline-flex max-w-full items-center gap-1.5 rounded-full border font-medium ${padding} ${colorMap[color]}`}>
       <span className={`h-2 w-2 rounded-full shrink-0 ${dotMap[color]}`} />
-      <span className="truncate">{label}</span>
+      <span className="break-words whitespace-normal text-left leading-5">{label}</span>
     </span>
   );
 }

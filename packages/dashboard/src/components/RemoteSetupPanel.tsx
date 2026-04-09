@@ -1183,7 +1183,7 @@ export function RemoteSetupPanel() {
                   <p className="mt-2 text-sm leading-6 text-emerald-50">
                     Paste this into the node&apos;s local UI to pull the provisioned <code>config.yaml</code> directly.
                   </p>
-                  <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 font-mono text-xs text-cyan-100">
+                  <div className="mt-3 rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 font-mono text-xs text-cyan-100 break-all whitespace-normal">
                     {lastProvision.configPullUrl}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -1220,7 +1220,7 @@ export function RemoteSetupPanel() {
                 </div>
                 {handoffLink?.url && (
                   <div className="mt-4 rounded-2xl border border-cyan-400/20 bg-slate-950 p-4">
-                    <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 font-mono text-xs text-cyan-100">
+                    <div className="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 font-mono text-xs text-cyan-100 break-all whitespace-normal">
                       {handoffLink.url}
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-3">

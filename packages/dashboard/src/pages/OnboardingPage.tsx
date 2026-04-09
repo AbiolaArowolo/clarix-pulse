@@ -115,8 +115,8 @@ export function OnboardingPage({
 
   return (
     <div className="space-y-5">
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.7fr)]">
-        <div className="ui-hero-panel overflow-hidden px-5 py-5 sm:px-6 sm:py-6">
+      <section className="grid gap-5 [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))]">
+        <div className="ui-hero-panel min-w-0 overflow-hidden px-5 py-5 sm:px-6 sm:py-6">
           <div className="max-w-3xl">
             <p className="ui-kicker-muted">Recommended first pass</p>
             <h3 className="mt-3 text-3xl font-semibold leading-tight text-slate-50 sm:text-4xl">
@@ -179,7 +179,7 @@ export function OnboardingPage({
               <p className="mt-2 text-sm leading-6 text-slate-300">
                 Share this short-lived installer URL with a remote operator when they need to pull the bundle without signing into the dashboard.
               </p>
-              <div className="mt-4 overflow-x-auto rounded-[var(--radius-control)] border border-slate-800 bg-slate-950 px-4 py-3 font-mono text-xs text-indigo-100">
+              <div className="mt-4 rounded-[var(--radius-control)] border border-slate-800 bg-slate-950 px-4 py-3 font-mono text-xs text-indigo-100 break-all whitespace-normal">
                 {installerLink.url}
               </div>
               <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -197,7 +197,7 @@ export function OnboardingPage({
 
           <div className="mt-6 rounded-[var(--radius-panel)] border border-slate-800/70 bg-slate-950/42 px-4 py-4 shadow-[0_18px_40px_rgba(2,6,23,0.18)]">
             <p className="ui-kicker-muted">Initial alert route</p>
-            <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="mt-3 flex flex-col gap-3">
               <div>
                 <p className="text-lg font-semibold text-slate-50">{alertEmail}</p>
                 <p className="mt-2 text-sm leading-6 text-slate-400">
@@ -210,7 +210,7 @@ export function OnboardingPage({
             </div>
           </div>
 
-          <div className="mt-8 grid gap-4 2xl:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
+          <div className="mt-8 grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">
             <div className="rounded-[var(--radius-panel)] border border-slate-800/70 bg-slate-900/50 px-5 py-5 shadow-[0_18px_45px_rgba(2,6,23,0.22)]">
               <p className="ui-kicker-muted">Operator flow</p>
               <div className="mt-4 space-y-3">
@@ -236,7 +236,7 @@ export function OnboardingPage({
               <div className="mt-4 space-y-4">
                 <div>
                   <p className="text-sm text-slate-300">Enrollment key</p>
-                  <div className="mt-3 overflow-x-auto rounded-[var(--radius-control)] border border-indigo-300/18 bg-slate-950/55 px-4 py-3 font-mono text-sm text-indigo-100">
+                  <div className="mt-3 rounded-[var(--radius-control)] border border-indigo-300/18 bg-slate-950/55 px-4 py-3 font-mono text-sm text-indigo-100 break-all whitespace-normal">
                     {session.tenant.enrollmentKey}
                   </div>
                 </div>
@@ -254,7 +254,7 @@ export function OnboardingPage({
           </div>
         </div>
 
-        <aside className="space-y-5">
+        <aside className="min-w-0 space-y-5">
           <div className="ui-shell-panel rounded-[var(--radius-panel)] px-5 py-5">
             <p className="ui-kicker-muted">Before you start</p>
             <div className="mt-4 space-y-3">
@@ -285,8 +285,8 @@ export function OnboardingPage({
         </aside>
       </section>
 
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-        <div className="ui-shell-panel rounded-[var(--radius-panel)] px-5 py-5">
+      <section className="grid gap-5 [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))]">
+        <div className="ui-shell-panel min-w-0 rounded-[var(--radius-panel)] px-5 py-5">
           <p className="ui-kicker-muted">Local install checklist</p>
           <div className="mt-4 space-y-3">
             {localInstallChecklist.map((item, index) => (
@@ -297,13 +297,13 @@ export function OnboardingPage({
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-slate-700 bg-slate-900/80 text-sm font-semibold text-slate-200">
                   {index + 1}
                 </div>
-                <p className="text-sm leading-6 text-slate-300">{item}</p>
+                <p className="min-w-0 break-words text-sm leading-6 text-slate-300">{item}</p>
               </div>
             ))}
           </div>
         </div>
 
-        <div className="ui-shell-panel rounded-[var(--radius-panel)] px-5 py-5">
+        <div className="ui-shell-panel min-w-0 rounded-[var(--radius-panel)] px-5 py-5">
           <p className="ui-kicker-muted">What success looks like</p>
           <div className="mt-4 space-y-4 text-sm leading-6 text-slate-300">
             <div className="rounded-[var(--radius-control)] border border-slate-800/70 bg-slate-950/42 px-4 py-4">

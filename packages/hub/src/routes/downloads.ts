@@ -371,6 +371,7 @@ export function createDownloadsRouter(): Router {
     if (!agentToken) {
       return res.status(409).json({ error: 'No active agent token is available for this node.' });
     }
+    const enrollmentKey = await getTenantEnrollmentKey(auth.tenantId);
 
     const configYaml = serializeAgentConfigYaml({
       nodeId: mirror.nodeId,
@@ -388,7 +389,7 @@ export function createDownloadsRouter(): Router {
         logSelectors: player.logSelectors,
         udpInputs: player.udpInputs,
       })),
-    }, agentToken);
+    }, agentToken, enrollmentKey);
 
     res.setHeader('Content-Type', 'application/x-yaml; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${node.nodeId}-pulse-config.yaml"`);

@@ -33,9 +33,9 @@ export function SiteGroup({ site }: Props) {
 
   return (
     <section className={`rounded-3xl border bg-slate-900/62 p-5 backdrop-blur ${headerBorderMap[worstColor]}`}>
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold tracking-[0.18em] text-slate-100 uppercase">{site.name}</h2>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="break-words text-base font-semibold tracking-[0.18em] text-slate-100 uppercase">{site.name}</h2>
           <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">Pulse node cluster</p>
         </div>
 
@@ -58,7 +58,7 @@ export function SiteGroup({ site }: Props) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">
         {site.instances.map((inst) => (
           <InstanceCard key={inst.id} instance={inst} />
         ))}

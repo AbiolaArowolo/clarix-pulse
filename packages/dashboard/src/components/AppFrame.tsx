@@ -188,8 +188,8 @@ export function AppFrame({
             </div>
           </div>
 
-          <div className="mt-7 grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
-            <section className="ui-hero-panel px-5 py-5 sm:px-6 sm:py-6">
+          <div className="mt-7 grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))]">
+            <section className="ui-hero-panel min-w-0 px-5 py-5 sm:px-6 sm:py-6">
               <p className="ui-kicker-muted">Clarix Pulse workspace</p>
               <h2 className="mt-3 max-w-3xl text-3xl font-semibold leading-tight text-slate-50 sm:text-4xl">
                 {title}
@@ -208,13 +208,13 @@ export function AppFrame({
               </div>
             </section>
 
-            <aside className="ui-accent-card rounded-[var(--radius-hero)] px-5 py-5 sm:px-6 sm:py-6">
+            <aside className="ui-accent-card min-w-0 rounded-[var(--radius-hero)] px-5 py-5 sm:px-6 sm:py-6">
               <p className="ui-kicker-muted text-indigo-100">Workspace status</p>
 
               <div className="mt-4 space-y-4">
                 <div>
                   <p className="text-sm text-slate-300">Default alert contact</p>
-                  <p className="mt-1 text-lg font-semibold text-slate-50">{defaultAlertTarget}</p>
+                  <p className="mt-1 break-words text-lg font-semibold text-slate-50">{defaultAlertTarget}</p>
                 </div>
 
                 <div className="ui-quiet-rule h-px" />

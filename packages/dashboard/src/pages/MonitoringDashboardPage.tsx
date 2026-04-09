@@ -121,7 +121,7 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
   };
 
   return (
-    <div className="relative pb-8 sm:pb-6">
+    <div className="relative min-w-0 pb-8 sm:pb-6">
       <AlarmBanner
         sites={sites}
         muted={muted}
@@ -174,8 +174,8 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
             </div>
           </div>
 
-          <div className="mt-8 grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_repeat(3,minmax(0,0.85fr))]">
-            <div className="ui-accent-card rounded-3xl px-5 py-5">
+          <div className="mt-8 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
+            <div className="ui-accent-card rounded-3xl px-5 py-5 [grid-column:1/-1]">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <p className="ui-kicker-muted text-indigo-100">Signal health</p>
@@ -232,8 +232,8 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
           </div>
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)] xl:items-start">
-          <section className="space-y-5">
+        <div className="grid gap-6 [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))]">
+          <section className="min-w-0 space-y-5">
             <div className="flex flex-col gap-2 px-1 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <p className="ui-kicker-muted">Live estate</p>
@@ -272,7 +272,7 @@ export function MonitoringDashboardPage({ onNavigate }: { onNavigate: (pathname:
             )}
           </section>
 
-          <aside className="space-y-4 xl:self-start">
+          <aside className="min-w-0 space-y-4">
             <div className="px-1">
               <p className="ui-kicker-muted">Operator tools</p>
               <h3 className="mt-2 text-2xl font-semibold text-slate-50">Setup, alerts, and install handoff</h3>

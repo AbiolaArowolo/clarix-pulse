@@ -218,7 +218,7 @@ export function InstanceCard({ instance }: Props) {
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold leading-tight text-slate-100">{instance.label}</h3>
+          <h3 className="break-words text-sm font-semibold leading-tight text-slate-100">{instance.label}</h3>
           <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">{instance.playoutType}</p>
           <div className="mt-2 grid gap-2 sm:grid-cols-2">
             <span className="min-w-0 rounded-full border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-300">

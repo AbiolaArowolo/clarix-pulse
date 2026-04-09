@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { InstallWorkspacePanel } from '../components/InstallWorkspacePanel';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { downloadAuthenticatedFile, requestAuthenticatedDownloadLink } from '../lib/downloads';
@@ -21,6 +21,13 @@ interface SessionShape {
     accessKeyHint?: string | null;
     accessKeyExpiresAt?: string | null;
   };
+}
+
+interface TenantNodeRecord {
+  nodeId: string;
+  siteId: string;
+  instanceCount: number;
+  labels: string[];
 }
 
 function formatDateLabel(value: string | null | undefined): string | null {
@@ -54,6 +61,95 @@ export function AccountPage({
   const [keyRequestBusy, setKeyRequestBusy] = useState(false);
   const [keyRequestNotice, setKeyRequestNotice] = useState<string | null>(null);
   const [keyRequestError, setKeyRequestError] = useState<string | null>(null);
+  const [nodeRecords, setNodeRecords] = useState<TenantNodeRecord[]>([]);
+  const [nodeCleanupLoading, setNodeCleanupLoading] = useState(false);
+  const [nodeCleanupBusyId, setNodeCleanupBusyId] = useState<string | null>(null);
+  const [nodeCleanupNotice, setNodeCleanupNotice] = useState<string | null>(null);
+  const [nodeCleanupError, setNodeCleanupError] = useState<string | null>(null);
+
+  const refreshNodeRecords = async () => {
+    setNodeCleanupLoading(true);
+    setNodeCleanupError(null);
+    try {
+      const response = await fetch('/api/status');
+      const payload = await response.json() as {
+        sites?: Array<{
+          id?: string;
+          instances?: Array<{ nodeId?: string; label?: string }>;
+        }>;
+      };
+      if (!response.ok) {
+        throw new Error('Failed to load node records from hub status.');
+      }
+
+      const map = new Map<string, TenantNodeRecord>();
+      for (const site of payload.sites ?? []) {
+        const siteId = site.id ?? '';
+        for (const instance of site.instances ?? []) {
+          const nodeId = (instance.nodeId ?? '').trim();
+          if (!nodeId) continue;
+          const current = map.get(nodeId) ?? {
+            nodeId,
+            siteId,
+            instanceCount: 0,
+            labels: [],
+          };
+          current.instanceCount += 1;
+          const label = (instance.label ?? '').trim();
+          if (label && !current.labels.includes(label)) {
+            current.labels.push(label);
+          }
+          map.set(nodeId, current);
+        }
+      }
+
+      setNodeRecords(
+        Array.from(map.values())
+          .sort((a, b) => a.nodeId.localeCompare(b.nodeId)),
+      );
+    } catch (error) {
+      setNodeCleanupError(error instanceof Error ? error.message : 'Failed to load node records.');
+    } finally {
+      setNodeCleanupLoading(false);
+    }
+  };
+
+  const removeNodeRecord = async (nodeId: string) => {
+    const normalizedNodeId = nodeId.trim();
+    if (!normalizedNodeId) return;
+
+    const confirmed = window.confirm(
+      `Remove node "${normalizedNodeId}" from this workspace hub inventory? This deletes mirrored player records for that node.`,
+    );
+    if (!confirmed) return;
+
+    setNodeCleanupBusyId(normalizedNodeId);
+    setNodeCleanupError(null);
+    setNodeCleanupNotice(null);
+    try {
+      const response = await fetch(`/api/config/remote/node/${encodeURIComponent(normalizedNodeId)}`, {
+        method: 'DELETE',
+      });
+      const payload = await response.json() as { ok?: boolean; removedPlayerIds?: string[]; error?: string };
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error ?? 'Failed to remove node.');
+      }
+
+      const removedPlayerCount = Array.isArray(payload.removedPlayerIds) ? payload.removedPlayerIds.length : 0;
+      setNodeCleanupNotice(
+        `Removed ${normalizedNodeId} from hub records and cleared ${removedPlayerCount} mirrored player record${removedPlayerCount === 1 ? '' : 's'}.`,
+      );
+      await refreshNodeRecords();
+    } catch (error) {
+      setNodeCleanupError(error instanceof Error ? error.message : 'Failed to remove node.');
+    } finally {
+      setNodeCleanupBusyId(null);
+    }
+  };
+
+  useEffect(() => {
+    void refreshNodeRecords();
+  }, []);
 
   const requestAccessKey = async () => {
     setKeyRequestBusy(true);
@@ -127,8 +223,8 @@ export function AccountPage({
 
   return (
     <div className="space-y-5">
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)] xl:items-start">
-        <div className="ui-hero-panel overflow-hidden px-5 py-5 sm:px-6 sm:py-6">
+      <section className="grid gap-5 [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))]">
+        <div className="ui-hero-panel min-w-0 overflow-hidden px-5 py-5 sm:px-6 sm:py-6">
           <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
             <div className="max-w-3xl">
               <p className="ui-kicker-muted">Downloads and access</p>
@@ -197,7 +293,7 @@ export function AccountPage({
               <p className="mt-2 text-sm leading-6 text-slate-300">
                 Use this expiring installer URL with <code>install-from-url.ps1</code> or send it directly to a remote technician finishing setup on the node.
               </p>
-              <div className="mt-4 overflow-x-auto rounded-[var(--radius-control)] border border-slate-800 bg-slate-950 px-4 py-3 font-mono text-xs text-indigo-100">
+              <div className="mt-4 rounded-[var(--radius-control)] border border-slate-800 bg-slate-950 px-4 py-3 font-mono text-xs text-indigo-100 break-all whitespace-normal">
                 {secureLink.url}
               </div>
               <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -227,7 +323,7 @@ export function AccountPage({
           </div>
         </div>
 
-        <aside className="space-y-5 xl:self-start">
+        <aside className="min-w-0 space-y-5">
           <div className="ui-accent-card rounded-[var(--radius-panel)] px-5 py-5">
             <p className="ui-kicker-muted text-indigo-100">Access status</p>
             <div className="mt-4 space-y-4">
@@ -297,10 +393,74 @@ export function AccountPage({
                 <p className="mt-2 text-sm leading-6 text-slate-300">
                   Keep this as the contingency path for local self-enrollment when a provisioned config is not available yet.
                 </p>
-                <div className="mt-3 overflow-x-auto rounded-[var(--radius-control)] border border-slate-700 bg-slate-950/70 px-4 py-3 font-mono text-sm text-indigo-100">
+                <div className="mt-3 rounded-[var(--radius-control)] border border-slate-700 bg-slate-950/70 px-4 py-3 font-mono text-sm text-indigo-100 break-all whitespace-normal">
                   {session.tenant.enrollmentKey}
                 </div>
               </div>
+            </div>
+          </div>
+
+          <div className="ui-shell-panel rounded-[var(--radius-panel)] px-5 py-5">
+            <p className="ui-kicker-muted">Retired node cleanup</p>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              If a node was uninstalled on a PC but still appears in this workspace, remove the stale hub record here.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void refreshNodeRecords()}
+                disabled={nodeCleanupLoading || nodeCleanupBusyId !== null}
+                className="rounded-[var(--radius-control)] border border-slate-700 bg-slate-900/75 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {nodeCleanupLoading ? 'Refreshing...' : 'Refresh node list'}
+              </button>
+            </div>
+
+            {nodeCleanupNotice && (
+              <div className="mt-4 rounded-[var(--radius-control)] border border-emerald-700/40 bg-emerald-900/20 px-4 py-3 text-sm text-emerald-100">
+                {nodeCleanupNotice}
+              </div>
+            )}
+            {nodeCleanupError && (
+              <div className="mt-4 rounded-[var(--radius-control)] border border-red-700/40 bg-red-900/20 px-4 py-3 text-sm text-red-100">
+                {nodeCleanupError}
+              </div>
+            )}
+
+            <div className="mt-4 space-y-3">
+              {!nodeCleanupLoading && nodeRecords.length === 0 && (
+                <div className="rounded-[var(--radius-control)] border border-slate-800/70 bg-slate-950/45 px-4 py-3 text-sm text-slate-400">
+                  No mirrored nodes are currently visible for this workspace.
+                </div>
+              )}
+              {nodeRecords.map((record) => (
+                <div
+                  key={record.nodeId}
+                  className="rounded-[var(--radius-control)] border border-slate-800/70 bg-slate-950/45 px-4 py-3"
+                >
+                  <div className="flex flex-col gap-3">
+                    <div>
+                      <p className="break-all text-sm font-semibold text-slate-100">{record.nodeId}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Site: <span className="font-medium text-slate-400">{record.siteId || 'unknown'}</span> | Instances: {record.instanceCount}
+                      </p>
+                      {record.labels.length > 0 && (
+                        <p className="mt-1 text-xs text-slate-500">
+                          Sample labels: {record.labels.slice(0, 2).join(' | ')}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void removeNodeRecord(record.nodeId)}
+                      disabled={nodeCleanupBusyId !== null}
+                      className="w-full rounded-[var(--radius-control)] border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-100 transition-colors hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {nodeCleanupBusyId === record.nodeId ? 'Removing node...' : 'Remove node from hub'}
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </aside>

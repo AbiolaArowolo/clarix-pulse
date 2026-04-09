@@ -435,13 +435,18 @@ export function buildMirrorPayload(draft: RemoteSetupDraft): Record<string, unkn
   };
 }
 
-export function serializeAgentConfigYaml(draft: RemoteSetupDraft, agentToken: string): string {
+export function serializeAgentConfigYaml(
+  draft: RemoteSetupDraft,
+  agentToken: string,
+  enrollmentKey?: string | null,
+): string {
   const document = {
     node_id: draft.nodeId,
     node_name: draft.nodeName,
     site_id: draft.siteId,
     hub_url: draft.hubUrl,
     agent_token: agentToken,
+    ...(enrollmentKey ? { enrollment_key: enrollmentKey } : {}),
     poll_interval_seconds: draft.pollIntervalSeconds,
     players: draft.players.map((player) => ({
       player_id: player.playerId,
