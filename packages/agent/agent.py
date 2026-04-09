@@ -950,7 +950,16 @@ def _as_str(value: Any, default: str = "") -> str:
 
 def _as_non_placeholder_str(value: Any, default: str = "") -> str:
     text = _as_str(value, default)
-    return "" if "REPLACE_ME" in text else text
+    if not text:
+        return ""
+    normalized = text.strip().lower()
+    if "replace_me" in normalized:
+        return ""
+    if "replace_with_hub_enrollment_key" in normalized:
+        return ""
+    if normalized.startswith("http://example") or normalized.startswith("https://example"):
+        return ""
+    return text
 
 
 def _as_bool(value: Any, default: bool = False) -> bool:
@@ -1574,6 +1583,7 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
     node_name = _as_str(raw.get("node_name") or raw.get("pc_name") or node_id)
     hub_url = _as_str(raw.get("hub_url"))
     agent_token = _as_non_placeholder_str(raw.get("agent_token"))
+    enrollment_key = _as_non_placeholder_str(raw.get("enrollment_key"))
     poll_interval_seconds = max(1, _as_int(raw.get("poll_interval_seconds"), DEFAULT_POLL_INTERVAL_SECONDS))
 
     if not hub_url:
@@ -1604,6 +1614,7 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
         "site_id": _as_str(raw.get("site_id")),
         "hub_url": hub_url,
         "agent_token": agent_token,
+        "enrollment_key": enrollment_key,
         "poll_interval_seconds": poll_interval_seconds,
         "players": players,
     }
@@ -2068,6 +2079,7 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
 
     existing = copy.deepcopy(existing or {})
     existing_agent_token = _as_non_placeholder_str(existing.get("agent_token"))
+    existing_enrollment_key = _as_non_placeholder_str(existing.get("enrollment_key"))
     existing_registered = bool(existing_agent_token)
     allow_sensitive_edits = (
         _as_bool(payload.get("imported_sensitive_override"), False)
@@ -2084,7 +2096,12 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
     hub_url = submitted_hub_url if allow_sensitive_edits or not _as_str(existing.get("hub_url")) else _as_str(existing.get("hub_url"))
     submitted_agent_token = _as_non_placeholder_str(payload.get("agent_token"))
     agent_token = submitted_agent_token if allow_sensitive_edits or not existing_agent_token else existing_agent_token
-    enrollment_key = _as_non_placeholder_str(payload.get("enrollment_key")) if allow_sensitive_edits else ""
+    submitted_enrollment_key = _as_non_placeholder_str(payload.get("enrollment_key"))
+    enrollment_key = (
+        submitted_enrollment_key
+        if allow_sensitive_edits
+        else (existing_enrollment_key or submitted_enrollment_key)
+    )
     poll_interval_seconds = max(1, min(120, _as_int(payload.get("poll_interval_seconds"), DEFAULT_POLL_INTERVAL_SECONDS)))
 
     if not node_id:
@@ -2244,6 +2261,7 @@ def _normalize_local_ui_submission(payload: Any, existing: dict[str, Any] | None
     existing["site_id"] = site_id
     existing["hub_url"] = hub_url
     existing["agent_token"] = agent_token
+    existing["enrollment_key"] = enrollment_key
     existing["poll_interval_seconds"] = poll_interval_seconds
     existing["players"] = merged_players
     existing.pop("instances", None)
@@ -2433,7 +2451,8 @@ def _player_is_runtime_suppressed(player_id: str) -> bool:
 
 def _current_local_ui_config() -> dict[str, Any]:
     existing = _load_yaml_if_exists(_runtime_config_path())
-    return _config_for_local_ui(existing)
+    prepared, _ = _prepare_config_for_hub_decommission(existing)
+    return _config_for_local_ui(prepared)
 
 
 def _config_has_enabled_udp(config: dict[str, Any]) -> bool:
@@ -2520,11 +2539,28 @@ def _save_local_ui_config(payload: dict[str, Any]) -> tuple[dict[str, Any], str]
     _ensure_ff_tools(required=_config_has_enabled_udp(config))
 
     sync_result = _sync_node_config_mirror_to_hub(config)
+    token_refreshed = False
+    if not sync_result.get("ok") and _is_hub_unauthorized(sync_result):
+        refreshed_token, refresh_error = _refresh_agent_token_from_enrollment(
+            config,
+            "Hub sync unauthorized",
+        )
+        if refreshed_token:
+            config["agent_token"] = refreshed_token
+            _write_yaml(config_path, config)
+            _apply_runtime_local_config_override(config, removed_player_ids)
+            sync_result = _sync_node_config_mirror_to_hub(config)
+            token_refreshed = bool(sync_result.get("ok"))
+        elif refresh_error:
+            sync_result["error"] = refresh_error
+
     if sync_result.get("ok"):
         if removed_player_ids:
             message = "Local settings saved. Removed players were removed from the hub immediately."
         else:
             message = "Local settings saved. Hub details updated immediately."
+        if token_refreshed:
+            message = "Local settings saved. Agent token was refreshed and hub details updated immediately."
     else:
         details = _as_str(sync_result.get("error"))
         message = "Local settings saved. Hub sync will retry on the next heartbeat."
@@ -3455,6 +3491,10 @@ def _post_json_with_retry(
     raise RuntimeError(f"{log_label} retry loop exited unexpectedly")
 
 
+class HubUnauthorizedError(RuntimeError):
+    pass
+
+
 def post_heartbeat(
     hub_url: str,
     token: str,
@@ -3462,7 +3502,7 @@ def post_heartbeat(
     player_id: str,
     observations: dict[str, Any],
     node_config_mirror: dict[str, Any] | None = None,
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any] | None, int | None]:
     url = f"{hub_url}/api/heartbeat"
     payload = {
         "agentId": node_id,
@@ -3492,12 +3532,12 @@ def post_heartbeat(
                 payload = r.json()
             except ValueError:
                 payload = {}
-            return payload if isinstance(payload, dict) else {}
+            return payload if isinstance(payload, dict) else {}, 200
         log.warning(f"Heartbeat rejected for {player_id}: {r.status_code} {r.text[:200]}")
-        return None
+        return None, r.status_code
     except requests.RequestException as e:
         log.warning(f"Heartbeat POST failed for {player_id}: {e}")
-        return None
+        return None, None
 
 
 def post_thumbnail(
@@ -3708,6 +3748,7 @@ def _sync_node_config_mirror_to_hub(
             "removed_player_ids": [],
             "updated_at": "",
             "error": "Hub URL or agent token is missing.",
+            "status_code": None,
         }
 
     mirror_config = copy.deepcopy(config)
@@ -3729,6 +3770,7 @@ def _sync_node_config_mirror_to_hub(
             "removed_player_ids": [],
             "updated_at": "",
             "error": str(exc),
+            "status_code": None,
         }
 
     try:
@@ -3743,6 +3785,7 @@ def _sync_node_config_mirror_to_hub(
             "removed_player_ids": [],
             "updated_at": "",
             "error": error_message or f"HTTP {response.status_code}",
+            "status_code": response.status_code,
         }
 
     removed_player_ids = []
@@ -3758,7 +3801,36 @@ def _sync_node_config_mirror_to_hub(
         "removed_player_ids": removed_player_ids,
         "updated_at": _as_str(body.get("updatedAt")) if isinstance(body, dict) else "",
         "error": "",
+        "status_code": response.status_code,
     }
+
+
+def _is_hub_unauthorized(result: dict[str, Any]) -> bool:
+    status_code = result.get("status_code")
+    if isinstance(status_code, int) and status_code == 401:
+        return True
+    error_text = _as_str(result.get("error")).lower()
+    return "unauthorized" in error_text
+
+
+def _refresh_agent_token_from_enrollment(
+    config: dict[str, Any],
+    reason: str,
+) -> tuple[str | None, str]:
+    enrollment_key = _as_non_placeholder_str(config.get("enrollment_key"))
+    if not enrollment_key:
+        return None, "Enrollment key is missing."
+
+    try:
+        refreshed_token = _enroll_node_with_hub(config, enrollment_key)
+    except Exception as exc:
+        return None, str(exc)
+
+    if not refreshed_token:
+        return None, "Hub enrollment did not return an agent token."
+
+    log.warning(f"{reason}: refreshed agent token from enrollment key.")
+    return refreshed_token, ""
 
 
 def _decommission_node_from_hub(config: dict[str, Any]) -> dict[str, Any]:
@@ -3955,7 +4027,7 @@ def poll_player(
     effective_node_config_mirror = _current_runtime_node_config_mirror(node_config_mirror)
 
     # POST heartbeat
-    response_payload = post_heartbeat(
+    response_payload, response_status = post_heartbeat(
         hub_url,
         token,
         node_id,
@@ -3963,6 +4035,8 @@ def poll_player(
         observations,
         node_config_mirror=effective_node_config_mirror,
     )
+    if response_status == 401:
+        raise HubUnauthorizedError(f"Heartbeat unauthorized for {player_id}")
     if response_payload is not None:
         log.debug(f"[{player_id}] heartbeat OK - {observations}")
 
@@ -4018,6 +4092,7 @@ def run_agent_loop() -> int:
 
         cycle_start = time.time()
         cycle_context = _build_cycle_shared_context(players)
+        refreshed_token_this_cycle = False
 
         for player in players:
             player_id = _as_str(player.get("player_id"))
@@ -4032,8 +4107,26 @@ def run_agent_loop() -> int:
                     node_config_mirror=node_config_mirror,
                     cycle_context=cycle_context,
                 )
+            except HubUnauthorizedError as exc:
+                refreshed_token, refresh_error = _refresh_agent_token_from_enrollment(
+                    config,
+                    "Heartbeat unauthorized",
+                )
+                if refreshed_token:
+                    config["agent_token"] = refreshed_token
+                    _write_yaml(config_path, config)
+                    log.warning(
+                        f"{exc}. Refreshed token via enrollment key; restarting polling cycle."
+                    )
+                    refreshed_token_this_cycle = True
+                    last_config_signature = ""
+                    break
+                log.error(f"{exc}. Token refresh failed: {refresh_error or 'Enrollment key missing.'}")
             except Exception:
                 log.error(f"Unhandled error polling {player.get('player_id', '?')}:\n{traceback.format_exc()}")
+
+        if refreshed_token_this_cycle:
+            continue
 
         elapsed = time.time() - cycle_start
         sleep_time = max(0, poll_interval - elapsed)

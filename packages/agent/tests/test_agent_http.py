@@ -240,6 +240,45 @@ class ConfigureBundleCommandTests(unittest.TestCase):
         self.assertEqual(selectors["service_display_name_contains"], ["Channel 1"])
         self.assertEqual(selectors["service_path_contains"], [r"AirBox.exe"])
 
+    def test_normalize_local_ui_submission_preserves_enrollment_key_when_identity_is_locked(self) -> None:
+        existing = {
+            "node_id": "studio-a",
+            "node_name": "Studio A",
+            "site_id": "studio-a",
+            "hub_url": "https://pulse.example.com",
+            "agent_token": "TOKEN-123",
+            "enrollment_key": "ENROLL-ABC-123",
+            "poll_interval_seconds": 3,
+            "players": [
+                {
+                    "player_id": "studio-a-admax-1",
+                    "playout_type": "admax",
+                    "paths": {"admax_root_candidates": [r"C:\Admax\admax3"]},
+                    "udp_inputs": [],
+                }
+            ],
+        }
+        payload = {
+            "node_id": "studio-a",
+            "node_name": "Studio A",
+            "site_id": "studio-a",
+            "hub_url": "https://pulse.example.com",
+            "agent_token": "TOKEN-123",
+            "poll_interval_seconds": 3,
+            "players": [
+                {
+                    "player_id": "studio-a-admax-1",
+                    "playout_type": "admax",
+                    "paths": {"admax_root": r"C:\Admax\admax3"},
+                    "udp_inputs": [],
+                }
+            ],
+        }
+
+        config = agent._normalize_local_ui_submission(payload, existing)
+
+        self.assertEqual(config["enrollment_key"], "ENROLL-ABC-123")
+
 
 class CycleContextTests(unittest.TestCase):
     def test_build_cycle_shared_context_collects_connectivity_once_and_counts_log_paths(self) -> None:
@@ -537,6 +576,73 @@ class MirrorSyncTests(unittest.TestCase):
         sync_mock.assert_called_once()
         self.assertEqual(config["players"][0]["player_id"], "studio-a-insta-1")
         self.assertIn("removed from the hub immediately", message.lower())
+
+    def test_save_local_ui_config_refreshes_agent_token_after_unauthorized_sync(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.yaml"
+            existing_config = {
+                "node_id": "studio-a",
+                "node_name": "Studio A",
+                "site_id": "studio-a",
+                "hub_url": "https://pulse.example.com",
+                "agent_token": "STALE-TOKEN",
+                "enrollment_key": "ENROLL-ABC-123",
+                "poll_interval_seconds": 3,
+                "players": [
+                    {"player_id": "studio-a-insta-1", "playout_type": "insta", "paths": {}, "udp_inputs": []},
+                ],
+            }
+            agent._write_yaml(str(config_path), existing_config)
+
+            payload = {
+                "node_id": "studio-a",
+                "node_name": "Studio A",
+                "site_id": "studio-a",
+                "hub_url": "https://pulse.example.com",
+                "agent_token": "STALE-TOKEN",
+                "enrollment_key": "ENROLL-ABC-123",
+                "poll_interval_seconds": 3,
+                "players": [
+                    {
+                        "player_id": "studio-a-insta-1",
+                        "playout_type": "insta",
+                        "paths": {"shared_log_dir": "C:\\Insta\\Logs", "instance_root": "C:\\Insta\\A"},
+                        "udp_inputs": [],
+                    }
+                ],
+            }
+
+            with patch.object(agent, "_runtime_config_path", return_value=str(config_path)):
+                with patch.object(agent, "_ensure_ff_tools"):
+                    with patch.object(agent, "_apply_runtime_local_config_override"):
+                        with patch.object(agent, "_enroll_node_with_hub", return_value="FRESH-TOKEN-123") as enroll_mock:
+                            with patch.object(
+                                agent,
+                                "_sync_node_config_mirror_to_hub",
+                                side_effect=[
+                                    {
+                                        "ok": False,
+                                        "removed_player_ids": [],
+                                        "updated_at": "",
+                                        "error": "Unauthorized",
+                                        "status_code": 401,
+                                    },
+                                    {
+                                        "ok": True,
+                                        "removed_player_ids": [],
+                                        "updated_at": "2026-04-09T12:00:00Z",
+                                        "error": "",
+                                        "status_code": 200,
+                                    },
+                                ],
+                            ) as sync_mock:
+                                config, message = agent._save_local_ui_config(payload)
+
+        self.assertEqual(enroll_mock.call_count, 1)
+        self.assertEqual(sync_mock.call_count, 2)
+        self.assertEqual(config["agent_token"], "FRESH-TOKEN-123")
+        self.assertIn("token was refreshed", message.lower())
 
 
 class HubDecommissionTests(unittest.TestCase):
