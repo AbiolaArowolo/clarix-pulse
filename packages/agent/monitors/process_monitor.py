@@ -49,6 +49,12 @@ _SERVICE_SELECTOR_KEYS = {
     "service_path_contains",
     "service_path_regex",
 }
+_WINDOW_SELECTOR_KEYS = {
+    "window_title",
+    "window_title_contains",
+    "window_title_regex",
+    "window_title_regexes",
+}
 
 
 def _as_list(value: object) -> list[str]:
@@ -131,6 +137,18 @@ def _matches_process_metadata(metadata: dict, selectors: dict, playout_type: str
 
 def _has_service_selectors(selectors: dict) -> bool:
     for key in _SERVICE_SELECTOR_KEYS:
+        value = selectors.get(key)
+        if isinstance(value, (list, tuple, set)):
+            if any(str(item).strip() for item in value if item is not None):
+                return True
+            continue
+        if _as_text(value).strip():
+            return True
+    return False
+
+
+def _has_window_selectors(selectors: dict) -> bool:
+    for key in _WINDOW_SELECTOR_KEYS:
         value = selectors.get(key)
         if isinstance(value, (list, tuple, set)):
             if any(str(item).strip() for item in value if item is not None):
@@ -322,6 +340,7 @@ def _total_cpu_seconds(processes: list[psutil.Process]) -> float | None:
 
 def check(instance_id: str, playout_type: str, selectors: dict | None = None) -> dict:
     selectors = selectors or {}
+    window_expected = _has_window_selectors(selectors)
     matching_processes = list(_iter_matching_processes(playout_type, selectors))
     matching_services = list(_iter_matching_services(selectors))
     service_up = any(_service_running(metadata) for metadata in matching_services)
@@ -361,7 +380,7 @@ def check(instance_id: str, playout_type: str, selectors: dict | None = None) ->
         _prev_cpu_total.pop(instance_id, None)
         _prev_cpu_ts.pop(instance_id, None)
 
-    if process_up:
+    if process_up and window_expected:
         for proc in matching_processes:
             try:
                 if _check_window_exists(proc.pid, selectors):
@@ -374,6 +393,7 @@ def check(instance_id: str, playout_type: str, selectors: dict | None = None) ->
         "playout_process_up": 1 if process_up else 0,
         "playout_service_up": 1 if service_up else 0,
         "playout_window_up": 1 if window_up else 0,
+        "playout_window_expected": 1 if window_expected else 0,
         "restart_events_15m": restart_count,
         "playout_cpu_usage_ratio_poll": round(cpu_usage_ratio_poll, 3) if cpu_usage_ratio_poll is not None else None,
     }

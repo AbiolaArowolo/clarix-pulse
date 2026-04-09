@@ -1,5 +1,6 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
+set "ERRORLEVEL="
 
 set "BASE_DIR=%~dp0"
 set "REMOVE_SCRIPT=%BASE_DIR%remove-pulse-agent.ps1"
@@ -7,16 +8,17 @@ set "EXE_PATH=%BASE_DIR%clarix-agent.exe"
 
 if exist "%REMOVE_SCRIPT%" (
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%REMOVE_SCRIPT%"
-    set "EXIT_CODE=%ERRORLEVEL%"
+    set "EXIT_CODE=!ERRORLEVEL!"
+    if not defined EXIT_CODE set "EXIT_CODE=1"
 
     echo.
-    if "%EXIT_CODE%"=="0" (
+    if "!EXIT_CODE!"=="0" (
         echo Pulse uninstall finished.
     ) else (
-        echo Pulse uninstall finished with exit code %EXIT_CODE%.
+        echo Pulse uninstall finished with exit code !EXIT_CODE!.
     )
     pause
-    exit /b %EXIT_CODE%
+    exit /b !EXIT_CODE!
 )
 
 if not exist "%EXE_PATH%" (
@@ -26,13 +28,14 @@ if not exist "%EXE_PATH%" (
 )
 
 "%EXE_PATH%" --uninstall-service
-set "EXIT_CODE=%ERRORLEVEL%"
+set "EXIT_CODE=!ERRORLEVEL!"
+if not defined EXIT_CODE set "EXIT_CODE=1"
 
 echo.
-if "%EXIT_CODE%"=="0" (
+if "!EXIT_CODE!"=="0" (
     echo Pulse uninstall finished.
 ) else (
-    echo Pulse uninstall failed with exit code %EXIT_CODE%.
+    echo Pulse uninstall failed with exit code !EXIT_CODE!.
 )
 pause
-exit /b %EXIT_CODE%
+exit /b !EXIT_CODE!

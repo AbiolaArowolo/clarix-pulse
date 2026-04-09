@@ -274,6 +274,7 @@ def _score_path_evidence(
     signals = _unique(
         _as_list(paths.get("install_dir"))
         + _as_list(paths.get("instance_root"))
+        + _as_list(paths.get("channel_dir"))
         + _as_list(paths.get("shared_log_dir"))
         + _as_list(paths.get("admax_root"))
         + _as_list(paths.get("admax_root_candidates"))
@@ -403,6 +404,7 @@ def _score_config_evidence(
     paths = _paths(player)
     signals = _unique(
         _as_list(paths.get("instance_root"))
+        + _as_list(paths.get("channel_dir"))
         + _as_list(paths.get("admax_state_path"))
         + _as_list(paths.get("settings_ini"))
     )
@@ -423,13 +425,19 @@ def _derive_instance_source(player: dict[str, Any]) -> str:
     selectors = _selectors(player)
     paths = _paths(player)
 
+    # Prefer stable, instance-specific filesystem anchors first.
     for value in (
-        _first(_as_list(selectors.get("service_names"))),
+        str(paths.get("instance_root") or "").strip(),
+        str(paths.get("channel_dir") or "").strip(),
+        str(paths.get("admax_state_path") or "").strip(),
+        str(paths.get("settings_ini") or "").strip(),
+        str(paths.get("playout_log_dir") or "").strip(),
+        _first(_as_list(paths.get("admax_root_candidates"))),
         _first(_as_list(selectors.get("command_line_contains"))),
+        _first(_as_list(selectors.get("service_names"))),
         _first(_as_list(selectors.get("window_title_contains"))),
         _first(_as_list(selectors.get("process_names"))),
-        str(paths.get("instance_root") or "").strip(),
-        _first(_as_list(paths.get("admax_root_candidates"))),
+        str(paths.get("install_dir") or "").strip(),
         str(paths.get("log_path") or "").strip(),
         str(player.get("label") or "").strip(),
         str(player.get("player_id") or "").strip(),

@@ -420,6 +420,30 @@ class WindowsBatchLauncherTests(unittest.TestCase):
         self.assertIn("SUMMARY_OK", combined_output)
         self.assertNotIn("The syntax of the command is incorrect.", combined_output)
 
+    def test_uninstall_bat_reports_and_returns_nonzero_exit_code_from_cleanup_script(self) -> None:
+        source_uninstall = AGENT_DIR / "uninstall.bat"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            (temp_root / "uninstall.bat").write_text(source_uninstall.read_text(encoding="utf-8"), encoding="utf-8")
+            (temp_root / "remove-pulse-agent.ps1").write_text(
+                "Write-Host 'simulated cleanup failure'\nexit 5\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                ["cmd.exe", "/d", "/c", "echo.|call uninstall.bat"],
+                cwd=temp_root,
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+
+        combined_output = "\n".join(filter(None, (result.stdout, result.stderr)))
+        self.assertEqual(result.returncode, 5, combined_output)
+        self.assertIn("Pulse uninstall finished with exit code 5.", combined_output)
+
 
 class MirrorSyncTests(unittest.TestCase):
     def test_sync_node_config_mirror_to_hub_posts_payload_and_returns_removed_players(self) -> None:
@@ -513,6 +537,66 @@ class MirrorSyncTests(unittest.TestCase):
         sync_mock.assert_called_once()
         self.assertEqual(config["players"][0]["player_id"], "studio-a-insta-1")
         self.assertIn("removed from the hub immediately", message.lower())
+
+
+class HubDecommissionTests(unittest.TestCase):
+    def test_prepare_config_for_hub_decommission_loads_enrollment_key_from_pulse_account_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            runtime_config_path = temp_root / "config.yaml"
+            (temp_root / "pulse-account.json").write_text(
+                '{"hubUrl":"https://pulse.example.com","enrollmentKey":"ENROLL-ABC-123"}',
+                encoding="utf-8",
+            )
+            raw_config = {
+                "node_id": "studio-a",
+                "node_name": "Studio A",
+                "site_id": "studio-a",
+                "hub_url": "https://pulse.example.com",
+                "agent_token": "TOKEN-123",
+                "players": [],
+            }
+
+            with patch.object(agent, "_runtime_config_path", return_value=str(runtime_config_path)):
+                prepared, message = agent._prepare_config_for_hub_decommission(raw_config)
+
+        self.assertEqual(prepared["enrollment_key"], "ENROLL-ABC-123")
+        self.assertIn("enrollment key", (message or "").lower())
+
+    def test_uninstall_service_command_uses_pulse_account_defaults_for_hub_decommission(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            runtime_config_path = temp_root / "config.yaml"
+            (temp_root / "pulse-account.json").write_text(
+                '{"hubUrl":"https://pulse.example.com","enrollmentKey":"ENROLL-XYZ-789"}',
+                encoding="utf-8",
+            )
+
+            raw_config = {
+                "node_id": "studio-a",
+                "node_name": "Studio A",
+                "site_id": "studio-a",
+                "hub_url": "https://pulse.example.com",
+                "agent_token": "TOKEN-123",
+                "players": [],
+            }
+
+            captured_config: dict[str, object] = {}
+
+            def fake_decommission(config: dict[str, object]) -> dict[str, object]:
+                captured_config.update(config)
+                return {"ok": True, "removed_player_ids": [], "error": ""}
+
+            with patch.object(agent, "_is_admin", return_value=True):
+                with patch.object(agent, "_runtime_config_path", return_value=str(runtime_config_path)):
+                    with patch.object(agent, "_load_yaml_if_exists", return_value=raw_config):
+                        with patch.object(agent, "_stop_existing_service"):
+                            with patch.object(agent, "_decommission_node_from_hub", side_effect=fake_decommission):
+                                with patch.object(agent, "INSTALL_DIR", str(temp_root / "ClarixPulse" / "Agent")):
+                                    exit_code = agent.uninstall_service_command()
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(captured_config["enrollment_key"], "ENROLL-XYZ-789")
 
 
 if __name__ == "__main__":

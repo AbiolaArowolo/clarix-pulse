@@ -299,6 +299,9 @@ def check(
     allow_token_classification = allow_unscoped_tokens or _has_scope_selectors(selectors)
 
     if not allow_token_classification:
+        # Shared/unscoped logs can smear pause/exit tokens across instances.
+        # Clear any previous latch so one instance does not stay stuck on another's token.
+        _last_tokens.pop(instance_id, None)
         classified_token = None
     elif family == "admax":
         classified_token = _classify_admax_lines(new_lines, selectors)

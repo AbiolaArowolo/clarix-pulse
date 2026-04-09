@@ -16,6 +16,7 @@ export interface Observations extends Record<string, unknown> {
   // Process
   playout_process_up?: number;
   playout_window_up?: number;
+  playout_window_expected?: number;
   restart_events_15m?: number;
   playout_cpu_usage_ratio_poll?: number;
   // Log tokens (from agent deep log monitoring)
@@ -402,8 +403,9 @@ function computeBroadcast(
     return runtimeDerivedBroadcastHealth;
   }
 
-  // Window missing but process present.
-  if (obs.playout_process_up === 1 && obs.playout_window_up === 0) {
+  // Window missing should only degrade health when a window selector is configured.
+  const windowExpected = (obs.playout_window_expected ?? 0) === 1;
+  if (windowExpected && obs.playout_process_up === 1 && obs.playout_window_up === 0) {
     if (hasPlaybackCpuActivity(obs)) {
       return 'healthy';
     }

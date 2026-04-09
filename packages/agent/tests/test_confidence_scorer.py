@@ -87,6 +87,45 @@ class ConfidenceScorerTests(unittest.TestCase):
         self.assertLess(detection["confidence"], 0.85)
         self.assertIn(detection["confidence_band"], {"low", "medium"})
 
+    def test_instance_id_prefers_instance_specific_paths_over_shared_process_name(self) -> None:
+        first_player = {
+            "player_id": "node-insta-1",
+            "playout_type": "insta",
+            "running": True,
+            "paths": {
+                "instance_root": r"C:\Program Files\Indytek\Insta Playout\Settings",
+            },
+            "process_selectors": {
+                "process_names": ["Insta Playout.exe"],
+                "executable_path_contains": [r"C:\Program Files\Indytek\Insta Playout.exe"],
+            },
+            "discovery": {
+                "confidence": 0.9,
+                "evidence": ["Instance root: C:\\Program Files\\Indytek\\Insta Playout\\Settings"],
+            },
+        }
+        second_player = {
+            "player_id": "node-insta-2",
+            "playout_type": "insta",
+            "running": False,
+            "paths": {
+                "instance_root": r"C:\Program Files\Indytek\Insta Playout 2\Settings",
+            },
+            "process_selectors": {
+                "process_names": ["Insta Playout.exe"],
+                "executable_path_contains": [r"C:\Program Files\Indytek\Insta Playout.exe"],
+            },
+            "discovery": {
+                "confidence": 0.86,
+                "evidence": ["Instance root: C:\\Program Files\\Indytek\\Insta Playout 2\\Settings"],
+            },
+        }
+
+        first_detection = score_player_detection(first_player)
+        second_detection = score_player_detection(second_player)
+
+        self.assertNotEqual(first_detection["instance_id"], second_detection["instance_id"])
+
 
 if __name__ == "__main__":
     unittest.main()

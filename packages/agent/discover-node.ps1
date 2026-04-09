@@ -48,6 +48,48 @@ $ErrorActionPreference = 'Stop'
 # PS 5.1 strict mode causes crashes on empty array returns - use explicit @() wrapping instead
 if ($_psVersion -ge 7) { Set-StrictMode -Version Latest } else { Set-StrictMode -Off }
 
+function Is-PlaceholderValue {
+    param(
+        [string]$Value,
+        [ValidateSet('generic', 'url', 'enrollment')]
+        [string]$Kind = 'generic'
+    )
+
+    $trimmed = ([string]$Value).Trim()
+    if ([string]::IsNullOrWhiteSpace($trimmed)) { return $true }
+
+    $normalized = $trimmed.ToLowerInvariant()
+    $genericPatterns = @(
+        '^<.*>$',
+        '^\[.*\]$',
+        'replace',
+        'changeme',
+        '^example$',
+        'placeholder',
+        'your[_\-\s]?',
+        'to[_\-\s]?do',
+        '^xxx+$',
+        '^test$',
+        '^null$'
+    )
+    foreach ($pattern in $genericPatterns) {
+        if ($normalized -match $pattern) { return $true }
+    }
+
+    if ($Kind -eq 'url') {
+        if ($normalized -match 'monitor\.example\.com' -or $normalized -match '^https?://(example|localhost)') {
+            return $true
+        }
+    }
+
+    if ($Kind -eq 'enrollment') {
+        if ($normalized -match 'enroll' -and $normalized -match 'replace') { return $true }
+        if ($normalized -match 'replace_with_hub_enrollment_key') { return $true }
+    }
+
+    return $false
+}
+
 # -- Read pulse-account.json (injected into the bundle per-tenant) ------------
 $_accountHubUrl      = ''
 $_accountEnrollmentKey = ''
@@ -56,8 +98,12 @@ if (Test-Path -LiteralPath $_accountJsonPath -PathType Leaf) {
     try {
         $ErrorActionPreference = 'SilentlyContinue'
         $accountData = Get-Content -LiteralPath $_accountJsonPath -Raw | ConvertFrom-Json
-        if ($accountData.hubUrl)        { $_accountHubUrl        = [string]$accountData.hubUrl }
-        if ($accountData.enrollmentKey) { $_accountEnrollmentKey = [string]$accountData.enrollmentKey }
+        if ($accountData.hubUrl -and -not (Is-PlaceholderValue -Value ([string]$accountData.hubUrl) -Kind 'url')) {
+            $_accountHubUrl = [string]$accountData.hubUrl
+        }
+        if ($accountData.enrollmentKey -and -not (Is-PlaceholderValue -Value ([string]$accountData.enrollmentKey) -Kind 'enrollment')) {
+            $_accountEnrollmentKey = [string]$accountData.enrollmentKey
+        }
         $ErrorActionPreference = 'Stop'
     } catch {
         $ErrorActionPreference = 'Stop'
@@ -1075,8 +1121,13 @@ function Get-AdmaxChannelRoots {
     } catch { }
 
     # Strategy 2: named/numbered channel subdirectories with config evidence
-    $channelNamePatterns = @('Channel*', 'ch[0-9]*', 'Ch[0-9]*', 'Instance*',
-                             'Output*', 'Station*', '[0-9][0-9]*')
+    $channelNamePatterns = @('Channel*', 'ch*', 'Instance*', 'Output*', 'Station*', 'admax*')
+    $channelNameRegex = '(?i)^(channel[\s\-_]*\d+|ch\d+|instance\d+|output\d+|station\d+|admax\d+)$'
+    $ignoredLeafNames = @(
+        'bin', 'bin64', 'bin32', '64bit', '32bit',
+        'logs', 'log', 'playlist', 'playlists',
+        'playlistscan', 'fnf', 'config', 'settings', 'data'
+    )
     $configFileHints = @(
         'Settings.ini', 'admax.ini', 'config.ini', 'config.xml',
         'AdmaxBroadcast.ini', 'channel.ini', 'schedule.xml', 'admax.xml'
@@ -1084,6 +1135,12 @@ function Get-AdmaxChannelRoots {
     foreach ($dataRoot in $DataRoots) {
         foreach ($pattern in $channelNamePatterns) {
             foreach ($subDir in (Get-SafeDirectories -Path $dataRoot -Filter $pattern)) {
+                $leaf = ([string]$subDir.Name).Trim()
+                if ([string]::IsNullOrWhiteSpace($leaf)) { continue }
+                $leafLower = $leaf.ToLowerInvariant()
+                if ($ignoredLeafNames -contains $leafLower) { continue }
+                if ($leaf -notmatch $channelNameRegex) { continue }
+
                 $hasEvidence = $false
                 foreach ($hint in $configFileHints) {
                     if (Test-Path (Join-Path $subDir.FullName $hint) -PathType Leaf) {
@@ -1168,6 +1225,40 @@ function Find-AdmaxPlayers {
                 if ($chPlayoutLog)  { [void]$chEvidence.Add("Playout log: $chPlayoutLog") }
                 if ($chFnfLog)      { [void]$chEvidence.Add("FNF log: $chFnfLog") }
 
+                $channelLeaf = (Split-Path -Path $channelRoot -Leaf)
+                $channelProcessNames = @(
+                    Get-UniqueStrings -Values @(
+                        foreach ($procHint in $RunningProcesses) {
+                            $exePath = ([string]$procHint.executable_path).Trim()
+                            $name = ([string]$procHint.name).Trim()
+                            if ([string]::IsNullOrWhiteSpace($exePath) -or [string]::IsNullOrWhiteSpace($name)) { continue }
+                            if ($exePath.ToLowerInvariant().StartsWith($channelRoot.ToLowerInvariant())) {
+                                $name
+                            }
+                        }
+                    )
+                )
+                if ($channelProcessNames.Count -eq 0) {
+                    $channelProcessNames = @(Get-ProcessNamesInDirectory -DirectoryPath $channelRoot)
+                }
+                $channelCommandHints = @(
+                    Get-UniqueStrings -Values @(
+                        @($channelRoot)
+                        @($channelLeaf)
+                    )
+                )
+                $chProcessSelectors = @{
+                    executable_path_contains = @($channelRoot)
+                    command_line_contains    = $channelCommandHints
+                }
+                if ($channelProcessNames.Count -gt 0) {
+                    $chProcessSelectors.process_names = $channelProcessNames
+                }
+                [void]$chEvidence.Add("Instance selector root: $channelRoot")
+                foreach ($pn in $channelProcessNames) {
+                    [void]$chEvidence.Add("Instance process detected: $pn")
+                }
+
                 $chLabel      = 'Admax {0} Ch{1}' -f ($offset + 1), ($channelIdx + 1)
                 $chConfidence = if ($chSettingsIni -or $chPlayoutLog -or $chFnfLog) { 0.91 } else { 0.80 }
                 [void]$players.Add((New-PlayerReport -NodeId $NodeId -Index ($players.Count) `
@@ -1179,7 +1270,7 @@ function Find-AdmaxPlayers {
                         playout_log_dir       = $chPlayoutLog
                         fnf_log               = $chFnfLog
                     } `
-                    -ProcessSelectors @{ executable_path_contains = @($admaxRoot) } `
+                    -ProcessSelectors $chProcessSelectors `
                     -LogSelectors @{} `
                     -Evidence @($chEvidence) `
                     -Confidence $chConfidence))
@@ -2326,8 +2417,7 @@ function Get-PulseConfigHints {
         }
         if ([string]::IsNullOrWhiteSpace($merged.hub_url)) {
             $v = Read-TopLevelYamlScalar -Lines $lines -Key 'hub_url'
-            # Ignore the default example placeholder
-            if ($v -and $v -notmatch 'monitor\.example\.com') { $merged.hub_url = $v }
+            if ($v -and -not (Is-PlaceholderValue -Value $v -Kind 'url')) { $merged.hub_url = $v }
         }
         if ([string]::IsNullOrWhiteSpace($merged.agent_token)) {
             $v = Read-TopLevelYamlScalar -Lines $lines -Key 'agent_token'
@@ -2336,7 +2426,7 @@ function Get-PulseConfigHints {
         if ([string]::IsNullOrWhiteSpace($merged.enrollment_key)) {
             # Check active lines first, then commented lines (VPS bundles sometimes ship key commented)
             $v = Read-TopLevelYamlScalar -Lines $lines -Key 'enrollment_key' -IncludeCommented
-            if ($v) { $merged.enrollment_key = $v }
+            if ($v -and -not (Is-PlaceholderValue -Value $v -Kind 'enrollment')) { $merged.enrollment_key = $v }
         }
     }
 

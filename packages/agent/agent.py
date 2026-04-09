@@ -2768,6 +2768,84 @@ def _import_local_ui_state_from_path(import_path: str, current_state: dict[str, 
     return _import_local_ui_state(document_text, current_state)
 
 
+def _load_pulse_account_defaults(search_roots: list[str]) -> dict[str, str]:
+    candidate_paths: list[str] = []
+    for root in search_roots:
+        normalized_root = _as_str(root)
+        if not normalized_root:
+            continue
+        candidate_paths.append(os.path.join(normalized_root, "pulse-account.json"))
+
+    seen: set[str] = set()
+    for candidate in candidate_paths:
+        resolved = os.path.abspath(candidate)
+        lowered = resolved.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        if not os.path.isfile(resolved):
+            continue
+        try:
+            with open(resolved, "r", encoding="utf-8-sig") as handle:
+                document = json.load(handle)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(document, dict):
+            continue
+
+        hub_url = _as_non_placeholder_str(document.get("hubUrl") or document.get("hub_url"))
+        enrollment_key = _as_non_placeholder_str(
+            document.get("enrollmentKey") or document.get("enrollment_key")
+        )
+        if not hub_url and not enrollment_key:
+            continue
+        return {
+            "hub_url": hub_url,
+            "enrollment_key": enrollment_key,
+            "source_path": resolved,
+        }
+
+    return {}
+
+
+def _apply_pulse_account_defaults(
+    state: dict[str, Any] | None,
+    search_roots: list[str],
+) -> tuple[dict[str, Any], str | None]:
+    current = copy.deepcopy(state) if isinstance(state, dict) else {}
+    defaults = _load_pulse_account_defaults(search_roots)
+    if not defaults:
+        return current, None
+
+    applied_fields: list[str] = []
+    if defaults.get("hub_url") and not _as_non_placeholder_str(current.get("hub_url")):
+        current["hub_url"] = defaults["hub_url"]
+        applied_fields.append("hub URL")
+    if defaults.get("enrollment_key") and not _as_non_placeholder_str(current.get("enrollment_key")):
+        current["enrollment_key"] = defaults["enrollment_key"]
+        applied_fields.append("enrollment key")
+
+    if not applied_fields:
+        return current, None
+
+    source_path = defaults.get("source_path") or "pulse-account.json"
+    return current, (
+        f"Loaded {' and '.join(applied_fields)} from {source_path}."
+    )
+
+
+def _prepare_config_for_hub_decommission(raw_config: dict[str, Any] | None) -> tuple[dict[str, Any], str | None]:
+    config = copy.deepcopy(raw_config) if isinstance(raw_config, dict) else {}
+    runtime_config_path = _runtime_config_path()
+    search_roots = [
+        os.path.dirname(os.path.abspath(runtime_config_path)),
+        INSTALL_DIR,
+        _base_dir(),
+        os.getcwd(),
+    ]
+    return _apply_pulse_account_defaults(config, search_roots)
+
+
 def configure_bundle_command(import_path: str | None = None) -> int:
     try:
         config_path = _bundle_path("config.yaml")
@@ -2777,6 +2855,16 @@ def configure_bundle_command(import_path: str | None = None) -> int:
         if import_path:
             initial_state, message = _import_local_ui_state_from_path(import_path, existing)
             print(message)
+
+        initial_state, account_message = _apply_pulse_account_defaults(
+            initial_state,
+            [
+                os.path.dirname(os.path.abspath(config_path)),
+                os.getcwd(),
+            ],
+        )
+        if account_message:
+            print(account_message)
 
         configured = _run_bundle_config_editor(initial_state)
         _write_yaml(config_path, configured)
@@ -3217,12 +3305,15 @@ def uninstall_service_command() -> int:
 
     try:
         raw_config = _load_yaml_if_exists(_runtime_config_path())
-        existing_config = _config_for_hub_sync(raw_config)
+        decommission_config, account_message = _prepare_config_for_hub_decommission(raw_config)
+        if account_message:
+            print(account_message)
+        existing_config = _config_for_hub_sync(decommission_config)
         nssm_path = _installed_path("nssm.exe") if os.path.exists(_installed_path("nssm.exe")) else ""
         _stop_existing_service(nssm_path or None)
 
-        if isinstance(raw_config, dict) and raw_config:
-            cleanup_result = _decommission_node_from_hub(raw_config)
+        if isinstance(decommission_config, dict) and decommission_config:
+            cleanup_result = _decommission_node_from_hub(decommission_config)
             cleanup_ok = bool(cleanup_result.get("ok"))
             cleanup_error = _as_str(cleanup_result.get("error"))
 
@@ -3255,12 +3346,15 @@ def uninstall_service_command() -> int:
 def decommission_hub_command() -> int:
     try:
         raw_config = _load_yaml_if_exists(_runtime_config_path())
-        if not isinstance(raw_config, dict) or not raw_config:
+        decommission_config, account_message = _prepare_config_for_hub_decommission(raw_config)
+        if account_message:
+            print(account_message)
+        if not isinstance(decommission_config, dict) or not decommission_config:
             print("ERROR: No runtime config was found. Hub decommission was skipped.")
             return 1
 
-        existing_config = _config_for_hub_sync(raw_config)
-        cleanup_result = _decommission_node_from_hub(raw_config)
+        existing_config = _config_for_hub_sync(decommission_config)
+        cleanup_result = _decommission_node_from_hub(decommission_config)
         cleanup_ok = bool(cleanup_result.get("ok"))
         cleanup_error = _as_str(cleanup_result.get("error"))
 
