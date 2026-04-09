@@ -396,35 +396,69 @@ try {
     }
 
     $setupLauncherPath = Join-Path $setupSourceDir 'launcher-install.cmd'
-    @'
+@'
 @echo off
 setlocal EnableExtensions
 set "SRC_DIR=%~dp0"
-set "TARGET_DIR=C:\ClarixPulse"
-set "LOG_PATH=C:\ClarixPulse\install-launcher.log"
+pushd "%SRC_DIR%" >nul 2>nul
+if errorlevel 1 (
+    echo [%DATE% %TIME%] ClarixPulseSetup launcher started > "%TEMP%\clarixpulse-install-launcher.log"
+    echo Source folder is not accessible: %SRC_DIR% >> "%TEMP%\clarixpulse-install-launcher.log"
+    start "" "%ComSpec%" /K "echo Clarix Pulse install failed: source folder inaccessible. & echo Log: %TEMP%\clarixpulse-install-launcher.log & type ""%TEMP%\clarixpulse-install-launcher.log"""
+    exit /b 1
+)
+set "SRC_DIR=%CD%"
+popd >nul 2>nul
+set "PRIMARY_TARGET=C:\ClarixPulse"
+set "FALLBACK_TARGET=%LOCALAPPDATA%\ClarixPulse"
+set "TARGET_DIR=%PRIMARY_TARGET%"
+set "TEMP_LOG=%TEMP%\clarixpulse-install-launcher.log"
+set "LOG_PATH=%TEMP_LOG%"
+
+echo [%DATE% %TIME%] ClarixPulseSetup launcher started > "%TEMP_LOG%"
+echo Source=%SRC_DIR% >> "%TEMP_LOG%"
+echo PrimaryTarget=%PRIMARY_TARGET% >> "%TEMP_LOG%"
+echo FallbackTarget=%FALLBACK_TARGET% >> "%TEMP_LOG%"
+
+if not exist "%SRC_DIR%" (
+    echo Source folder is missing: %SRC_DIR% >> "%TEMP_LOG%"
+    start "" "%ComSpec%" /K "echo Clarix Pulse install failed: source folder missing. & echo Log: %TEMP_LOG% & type ""%TEMP_LOG%"""
+    exit /b 1
+)
 
 if not exist "%TARGET_DIR%" mkdir "%TARGET_DIR%" >nul 2>nul
+if not exist "%TARGET_DIR%" (
+    set "TARGET_DIR=%FALLBACK_TARGET%"
+    if not exist "%TARGET_DIR%" mkdir "%TARGET_DIR%" >nul 2>nul
+)
+if not exist "%TARGET_DIR%" (
+    echo Could not create install folder with current permissions. >> "%TEMP_LOG%"
+    start "" "%ComSpec%" /K "echo Clarix Pulse install failed: cannot create install folder. & echo Log: %TEMP_LOG% & type ""%TEMP_LOG%"""
+    exit /b 1
+)
 
-echo [%DATE% %TIME%] ClarixPulseSetup launcher started > "%LOG_PATH%"
-echo Source=%SRC_DIR% >> "%LOG_PATH%"
-echo Target=%TARGET_DIR% >> "%LOG_PATH%"
+set "LOG_PATH=%TARGET_DIR%\install-launcher.log"
+copy /Y "%TEMP_LOG%" "%LOG_PATH%" >nul 2>nul
+echo UsingTarget=%TARGET_DIR% >> "%LOG_PATH%"
 
 robocopy "%SRC_DIR%" "%TARGET_DIR%" *.* /E /R:2 /W:1 /NFL /NDL /NJH /NJS /XF launcher-install.cmd >> "%LOG_PATH%" 2>&1
 set "ROBO=%ERRORLEVEL%"
+echo RobocopyExit=%ROBO% >> "%LOG_PATH%"
+if not defined ROBO set "ROBO=999"
 if %ROBO% GEQ 8 (
-    echo Failed to copy Clarix Pulse files to %TARGET_DIR% (robocopy exit %ROBO%). >> "%LOG_PATH%"
-    start "" cmd.exe /K "echo Clarix Pulse install failed (copy stage). & echo Log: %LOG_PATH% & type %LOG_PATH%"
+    echo Failed to copy Clarix Pulse files to %TARGET_DIR%. Robocopy exit %ROBO%. >> "%LOG_PATH%"
+    start "" "%ComSpec%" /K "echo Clarix Pulse install failed: copy stage. & echo Log: %LOG_PATH% & type ""%LOG_PATH%"""
     exit /b 1
 )
 
 if not exist "%TARGET_DIR%\setup.bat" (
     echo setup.bat was not copied to %TARGET_DIR%. >> "%LOG_PATH%"
-    start "" cmd.exe /K "echo Clarix Pulse install failed (setup.bat missing). & echo Log: %LOG_PATH% & type %LOG_PATH%"
+    start "" "%ComSpec%" /K "echo Clarix Pulse install failed: setup.bat missing. & echo Log: %LOG_PATH% & type ""%LOG_PATH%"""
     exit /b 1
 )
 
 echo Launching setup.bat from %TARGET_DIR% >> "%LOG_PATH%"
-start "" cmd.exe /K "cd /d %TARGET_DIR% && call %TARGET_DIR%\setup.bat"
+start "" "%ComSpec%" /K "cd /d ""%TARGET_DIR%"" && call setup.bat"
 exit /b 0
 '@ | Set-Content -Path $setupLauncherPath -Encoding ASCII
 
@@ -448,18 +482,25 @@ exit /b 0
     @'
 @echo off
 setlocal EnableExtensions
-set "TARGET_DIR=C:\ClarixPulse"
-set "LOG_PATH=C:\ClarixPulse\uninstall-launcher.log"
+set "PRIMARY_TARGET=C:\ClarixPulse"
+set "FALLBACK_TARGET=%LOCALAPPDATA%\ClarixPulse"
+set "TARGET_DIR=%PRIMARY_TARGET%"
+set "LOG_PATH=%TEMP%\clarixpulse-uninstall-launcher.log"
+
+if not exist "%TARGET_DIR%\uninstall.bat" (
+    if exist "%FALLBACK_TARGET%\uninstall.bat" set "TARGET_DIR=%FALLBACK_TARGET%"
+)
 
 if not exist "%TARGET_DIR%" (
-    start "" cmd.exe /K "echo Clarix Pulse is not installed on this PC. & exit /b 0"
+    start "" "%ComSpec%" /K "echo Clarix Pulse is not installed on this PC. & exit /b 0"
     exit /b 0
 )
 
 echo [%DATE% %TIME%] Uninstall launcher started > "%LOG_PATH%"
+echo Target=%TARGET_DIR% >> "%LOG_PATH%"
 
 if exist "%TARGET_DIR%\uninstall.bat" (
-    start "" cmd.exe /K "cd /d %TARGET_DIR% && call %TARGET_DIR%\uninstall.bat"
+    start "" "%ComSpec%" /K ""%TARGET_DIR%\uninstall.bat""
     exit /b 0
 )
 

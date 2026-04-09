@@ -13,6 +13,8 @@ INSTALL (WINDOWS)
   2. Windows may ask for permission. Click Run / Yes.
   3. The installer copies files to:
        C:\ClarixPulse
+     If this account cannot write to C:\, it uses:
+       %LOCALAPPDATA%\ClarixPulse
   4. Setup menu opens automatically.
   5. In setup menu:
        - Choose [2] to scan this PC and review detected players
@@ -27,7 +29,7 @@ AFTER INSTALL
   - Temporary setup UI (during guided setup only):
       http://127.0.0.1:3211/ to http://127.0.0.1:3299/
   - Installed files:
-      C:\ClarixPulse
+      C:\ClarixPulse  or  %LOCALAPPDATA%\ClarixPulse
 
 
 UNINSTALL
