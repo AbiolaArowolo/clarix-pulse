@@ -5,7 +5,14 @@ param(
     [string]$ConfigPath = '',
     [switch]$Zip,
     [switch]$SkipVendorValidation,
-    [switch]$LegacyFlatZip
+    [switch]$LegacyFlatZip,
+    [switch]$Sign,
+    [string]$SignCertificateThumbprint = '',
+    [string]$SignCertificatePath = '',
+    [string]$SignCertificatePassword = '',
+    [string]$SignTimestampUrl = '',
+    [switch]$SignUseMachineStore,
+    [string]$SignToolPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,6 +32,14 @@ $repoDistDir = Join-Path $repoRoot 'dist'
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'pulse-vendor'
 $setupExecutableName = 'ClarixPulseSetup.exe'
 $uninstallExecutableName = 'Uninstall.exe'
+
+# Optional signing inputs (CLI or env):
+#   CLARIX_SIGN_ENABLE=true
+#   CLARIX_SIGN_CERT_THUMBPRINT=<thumbprint>  OR  CLARIX_SIGN_CERT_PATH=<path-to-pfx>
+#   CLARIX_SIGN_CERT_PASSWORD=<pfx-password>
+#   CLARIX_SIGN_TIMESTAMP_URL=http://timestamp.digicert.com
+#   CLARIX_SIGN_USE_MACHINE_STORE=true
+#   CLARIX_SIGNTOOL_PATH=<path-to-signtool.exe>
 
 function Ensure-Directory {
     param([string]$Path)
@@ -64,6 +79,110 @@ function Ensure-IExpressBinary {
         throw 'iexpress.exe was not found. This bundle build requires Windows IExpress.'
     }
     return [string]$iexpress.Source
+}
+
+function Get-BooleanValue {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
+    return @('1','true','yes','y','on') -contains $Value.Trim().ToLowerInvariant()
+}
+
+function Ensure-SignToolBinary {
+    param([string]$PreferredPath = '')
+    if (-not [string]::IsNullOrWhiteSpace($PreferredPath)) {
+        if (Test-Path -LiteralPath $PreferredPath -PathType Leaf) {
+            return [string](Resolve-Path -LiteralPath $PreferredPath).Path
+        }
+        throw "Configured signtool path not found: $PreferredPath"
+    }
+    $signtool = Get-Command 'signtool.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $signtool -or -not (Test-Path -LiteralPath $signtool.Source -PathType Leaf)) {
+        throw 'signtool.exe was not found. Install Windows SDK signing tools or set CLARIX_SIGNTOOL_PATH.'
+    }
+    return [string]$signtool.Source
+}
+
+function Resolve-SigningOptions {
+    $enabled = $Sign.IsPresent -or (Get-BooleanValue -Value ([string]$env:CLARIX_SIGN_ENABLE))
+    if (-not $enabled) {
+        return [ordered]@{ enabled = $false }
+    }
+
+    $timestampUrl = if (-not [string]::IsNullOrWhiteSpace($SignTimestampUrl)) {
+        $SignTimestampUrl
+    } elseif (-not [string]::IsNullOrWhiteSpace([string]$env:CLARIX_SIGN_TIMESTAMP_URL)) {
+        [string]$env:CLARIX_SIGN_TIMESTAMP_URL
+    } else {
+        'http://timestamp.digicert.com'
+    }
+    $thumbprint = if (-not [string]::IsNullOrWhiteSpace($SignCertificateThumbprint)) {
+        $SignCertificateThumbprint
+    } else {
+        [string]$env:CLARIX_SIGN_CERT_THUMBPRINT
+    }
+    $certPath = if (-not [string]::IsNullOrWhiteSpace($SignCertificatePath)) {
+        $SignCertificatePath
+    } else {
+        [string]$env:CLARIX_SIGN_CERT_PATH
+    }
+    $certPassword = if (-not [string]::IsNullOrWhiteSpace($SignCertificatePassword)) {
+        $SignCertificatePassword
+    } else {
+        [string]$env:CLARIX_SIGN_CERT_PASSWORD
+    }
+    $useMachineStore = $SignUseMachineStore.IsPresent -or (Get-BooleanValue -Value ([string]$env:CLARIX_SIGN_USE_MACHINE_STORE))
+
+    if ([string]::IsNullOrWhiteSpace($thumbprint) -and [string]::IsNullOrWhiteSpace($certPath)) {
+        throw 'Signing is enabled but no certificate was provided. Set thumbprint or PFX path.'
+    }
+
+    return [ordered]@{
+        enabled         = $true
+        signtool        = (Ensure-SignToolBinary -PreferredPath $(if (-not [string]::IsNullOrWhiteSpace($SignToolPath)) { $SignToolPath } else { [string]$env:CLARIX_SIGNTOOL_PATH }))
+        timestamp_url   = $timestampUrl
+        thumbprint      = $thumbprint
+        cert_path       = $certPath
+        cert_password   = $certPassword
+        machine_store   = $useMachineStore
+    }
+}
+
+function Invoke-CodeSign {
+    param(
+        [string]$FilePath,
+        [hashtable]$SigningOptions
+    )
+
+    if (-not $SigningOptions.enabled) { return }
+    if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
+        throw "Cannot sign missing file: $FilePath"
+    }
+
+    $args = @('sign', '/fd', 'SHA256', '/td', 'SHA256', '/tr', [string]$SigningOptions.timestamp_url)
+    if (-not [string]::IsNullOrWhiteSpace([string]$SigningOptions.cert_path)) {
+        $args += @('/f', [string]$SigningOptions.cert_path)
+        if (-not [string]::IsNullOrWhiteSpace([string]$SigningOptions.cert_password)) {
+            $args += @('/p', [string]$SigningOptions.cert_password)
+        }
+    } elseif (-not [string]::IsNullOrWhiteSpace([string]$SigningOptions.thumbprint)) {
+        $args += @('/sha1', [string]$SigningOptions.thumbprint, '/s', 'My')
+        if ([bool]$SigningOptions.machine_store) {
+            $args += '/sm'
+        }
+    } else {
+        $args += '/a'
+    }
+    $args += $FilePath
+
+    & ([string]$SigningOptions.signtool) @args | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "signtool sign failed for $FilePath (exit $LASTEXITCODE)."
+    }
+
+    & ([string]$SigningOptions.signtool) verify /pa /v $FilePath | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "signtool verify failed for $FilePath (exit $LASTEXITCODE)."
+    }
 }
 
 function New-IExpressPackage {
@@ -225,6 +344,7 @@ $vendorFiles = @(
 )
 
 try {
+    $signingOptions = Resolve-SigningOptions
     Ensure-NssmBinary
     Ensure-FfmpegBinaries
     Ensure-Directory -Path $OutputRoot
@@ -265,6 +385,8 @@ try {
         Copy-Item -Path (Join-Path $PSScriptRoot 'config.example.yaml') -Destination $targetConfigPath -Force
     }
 
+    Invoke-CodeSign -FilePath (Join-Path $bundleDir 'clarix-agent.exe') -SigningOptions $signingOptions
+
     $iexpressPath = Ensure-IExpressBinary
 
     $setupSourceDir = Join-Path $tempRoot ('clarix-setup-src-' + [guid]::NewGuid().ToString('N'))
@@ -291,18 +413,18 @@ robocopy "%SRC_DIR%" "%TARGET_DIR%" *.* /E /R:2 /W:1 /NFL /NDL /NJH /NJS /XF lau
 set "ROBO=%ERRORLEVEL%"
 if %ROBO% GEQ 8 (
     echo Failed to copy Clarix Pulse files to %TARGET_DIR% (robocopy exit %ROBO%). >> "%LOG_PATH%"
-    start "" cmd.exe /K "echo Clarix Pulse install failed (copy stage). & echo Log: %LOG_PATH% & type \"%LOG_PATH%\""
+    start "" cmd.exe /K "echo Clarix Pulse install failed (copy stage). & echo Log: %LOG_PATH% & type %LOG_PATH%"
     exit /b 1
 )
 
 if not exist "%TARGET_DIR%\setup.bat" (
     echo setup.bat was not copied to %TARGET_DIR%. >> "%LOG_PATH%"
-    start "" cmd.exe /K "echo Clarix Pulse install failed (setup.bat missing). & echo Log: %LOG_PATH% & type \"%LOG_PATH%\""
+    start "" cmd.exe /K "echo Clarix Pulse install failed (setup.bat missing). & echo Log: %LOG_PATH% & type %LOG_PATH%"
     exit /b 1
 )
 
 echo Launching setup.bat from %TARGET_DIR% >> "%LOG_PATH%"
-start "" cmd.exe /K "cd /d \"%TARGET_DIR%\" && call \"%TARGET_DIR%\setup.bat\""
+start "" cmd.exe /K "cd /d %TARGET_DIR% && call %TARGET_DIR%\setup.bat"
 exit /b 0
 '@ | Set-Content -Path $setupLauncherPath -Encoding ASCII
 
@@ -318,6 +440,7 @@ exit /b 0
         -AppLaunched 'launcher-install.cmd' `
         -FriendlyName 'Clarix Pulse Setup' `
         -TargetName (Join-Path $bundleDir $setupExecutableName)
+    Invoke-CodeSign -FilePath (Join-Path $bundleDir $setupExecutableName) -SigningOptions $signingOptions
 
     $uninstallSourceDir = Join-Path $tempRoot ('clarix-uninstall-src-' + [guid]::NewGuid().ToString('N'))
     Ensure-Directory -Path $uninstallSourceDir
@@ -336,7 +459,7 @@ if not exist "%TARGET_DIR%" (
 echo [%DATE% %TIME%] Uninstall launcher started > "%LOG_PATH%"
 
 if exist "%TARGET_DIR%\uninstall.bat" (
-    start "" cmd.exe /K "cd /d \"%TARGET_DIR%\" && call \"%TARGET_DIR%\uninstall.bat\""
+    start "" cmd.exe /K "cd /d %TARGET_DIR% && call %TARGET_DIR%\uninstall.bat"
     exit /b 0
 )
 
@@ -356,6 +479,7 @@ exit /b 0
         -AppLaunched 'launcher-uninstall.cmd' `
         -FriendlyName 'Clarix Pulse Uninstall' `
         -TargetName (Join-Path $bundleDir $uninstallExecutableName)
+    Invoke-CodeSign -FilePath (Join-Path $bundleDir $uninstallExecutableName) -SigningOptions $signingOptions
 
     if ($Zip) {
         $zipPath = Join-Path $OutputRoot ($effectiveBundleName + '.zip')
