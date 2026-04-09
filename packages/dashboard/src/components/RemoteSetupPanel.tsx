@@ -965,7 +965,7 @@ export function RemoteSetupPanel() {
                   </div>
 
                   <div className="mt-4 rounded-2xl border border-white/[0.08] bg-slate-950/24 p-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex flex-col gap-3">
                       <div>
                         <p className="ui-kicker-muted">UDP inputs</p>
                         <p className="mt-2 text-sm text-slate-300">
@@ -1000,7 +1000,7 @@ export function RemoteSetupPanel() {
                               : 'border-slate-700 bg-slate-900/70'
                             }`}
                           >
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex flex-col gap-3">
                               <div>
                                 <p className="text-sm font-semibold text-slate-100">Stream {udpIndex + 1}</p>
                                 <p className="mt-1 text-xs text-slate-400">

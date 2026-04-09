@@ -147,7 +147,7 @@ export function InstallWorkspacePanel({ layout = 'page' }: { layout?: 'page' | '
             </div>
             <div className="min-w-0">
               <p className="ui-kicker-muted">Workspace install</p>
-              <h3 className={`mt-3 font-semibold text-slate-50 ${isRailLayout ? 'text-2xl leading-tight sm:text-[2rem]' : 'text-2xl sm:text-3xl'}`}>
+              <h3 className={`mt-3 font-semibold text-slate-50 ${isRailLayout ? 'text-2xl leading-tight' : 'text-2xl sm:text-3xl'}`}>
                 Keep this workspace close on desktop and mobile.
               </h3>
               <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">
@@ -156,12 +156,12 @@ export function InstallWorkspacePanel({ layout = 'page' }: { layout?: 'page' | '
             </div>
           </div>
 
-          <div className={`${isRailLayout ? 'mt-5' : 'mt-6'} flex flex-col gap-3 sm:flex-row sm:flex-wrap`}>
+          <div className={isRailLayout ? 'mt-5 flex flex-col gap-3' : 'mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap'}>
             {!installed && canInstall && (
               <button
                 type="button"
                 onClick={() => void install()}
-                className="w-full rounded-[var(--radius-control)] border border-indigo-400/35 bg-indigo-400/14 px-4 py-2.5 text-sm font-semibold text-indigo-50 transition-colors hover:border-indigo-300 sm:w-auto"
+                className={`w-full rounded-[var(--radius-control)] border border-indigo-400/35 bg-indigo-400/14 px-4 py-2.5 text-sm font-semibold text-indigo-50 transition-colors hover:border-indigo-300 ${isRailLayout ? '' : 'sm:w-auto'}`}
               >
                 Install app
               </button>
@@ -171,7 +171,7 @@ export function InstallWorkspacePanel({ layout = 'page' }: { layout?: 'page' | '
               <button
                 type="button"
                 onClick={() => void share()}
-                className="w-full rounded-[var(--radius-control)] border border-slate-700 bg-slate-900/75 px-4 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white sm:w-auto"
+                className={`w-full rounded-[var(--radius-control)] border border-slate-700 bg-slate-900/75 px-4 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white ${isRailLayout ? '' : 'sm:w-auto'}`}
               >
                 Share link
               </button>
@@ -180,7 +180,7 @@ export function InstallWorkspacePanel({ layout = 'page' }: { layout?: 'page' | '
             <button
               type="button"
               onClick={() => void copyLink()}
-              className="w-full rounded-[var(--radius-control)] border border-slate-700 bg-slate-900/75 px-4 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white sm:w-auto"
+              className={`w-full rounded-[var(--radius-control)] border border-slate-700 bg-slate-900/75 px-4 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-slate-500 hover:text-white ${isRailLayout ? '' : 'sm:w-auto'}`}
             >
               {copied ? 'Copied' : 'Copy link'}
             </button>

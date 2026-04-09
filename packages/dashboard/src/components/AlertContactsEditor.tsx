@@ -316,7 +316,7 @@ export function AlertContactsEditor() {
             <>
               <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
                 <div className="flex h-full flex-col rounded-2xl border border-slate-800 bg-slate-950/45 p-3">
-                  <div className="mb-3 flex min-h-10 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="mb-3 flex min-h-10 flex-col gap-2">
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Email Recipients</p>
                     <button
                       type="button"
@@ -345,9 +345,9 @@ export function AlertContactsEditor() {
                 </div>
 
                 <div className="flex h-full flex-col rounded-2xl border border-slate-800 bg-slate-950/45 p-3">
-                  <div className="mb-3 flex min-h-10 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="mb-3 flex min-h-10 flex-col gap-2">
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Telegram Recipients</p>
-                    <div className="flex flex-wrap gap-2 sm:justify-end">
+                    <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
                         onClick={() => updateToggle('telegramEnabled', !draft.telegramEnabled)}
@@ -408,7 +408,7 @@ export function AlertContactsEditor() {
                 </div>
 
                 <div className="flex h-full flex-col rounded-2xl border border-slate-800 bg-slate-950/45 p-3">
-                  <div className="mb-3 flex min-h-10 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="mb-3 flex min-h-10 flex-col gap-2">
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Phone Contacts</p>
                     <button
                       type="button"
@@ -453,7 +453,7 @@ export function AlertContactsEditor() {
                   type="button"
                   onClick={() => void saveSettings()}
                   disabled={saving}
-                  className="w-full rounded-xl border border-yellow-600/60 bg-yellow-500/15 px-4 py-2 text-sm font-semibold text-yellow-100 transition-colors hover:border-yellow-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                  className="w-full rounded-xl border border-yellow-600/60 bg-yellow-500/15 px-4 py-2 text-sm font-semibold text-yellow-100 transition-colors hover:border-yellow-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {saving ? 'Saving...' : 'Apply alert contacts'}
                 </button>
