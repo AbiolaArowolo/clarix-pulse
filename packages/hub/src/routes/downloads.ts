@@ -13,7 +13,7 @@ import { getTenantAccessSummary, getTenantEnrollmentKey } from '../store/auth';
 import { getMirroredNodeConfig } from '../store/nodeConfigMirror';
 import { getActiveAgentToken, getNode } from '../store/registry';
 
-const repoRoot = path.resolve(__dirname, '../../..');
+const repoRoot = path.resolve(__dirname, '../../../..');
 
 function resolveBundlePath(): { path: string; fileName: string } {
   const configuredPath = (process.env.PULSE_DOWNLOAD_BUNDLE_PATH ?? '').trim();
