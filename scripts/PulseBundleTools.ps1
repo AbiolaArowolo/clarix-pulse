@@ -30,8 +30,14 @@ function Get-PulseBundleSourcePaths {
 
     foreach ($path in @(
         (Join-Path $RepoRoot 'packages\agent\build-node-bundle.ps1'),
+        (Join-Path $RepoRoot 'packages\agent\agent.py'),
         (Join-Path $RepoRoot 'packages\agent\setup.bat'),
+        (Join-Path $RepoRoot 'packages\agent\uninstall.bat'),
+        (Join-Path $RepoRoot 'packages\agent\remove-pulse-agent.ps1'),
         (Join-Path $RepoRoot 'packages\agent\discover-node.ps1'),
+        (Join-Path $RepoRoot 'packages\agent\confidence_scorer.py'),
+        (Join-Path $RepoRoot 'packages\agent\learning_store.py'),
+        (Join-Path $RepoRoot 'packages\agent\fingerprint_manifest.json'),
         (Join-Path $RepoRoot 'packages\agent\README.txt')
     )) {
         [void]$candidates.Add($path)
