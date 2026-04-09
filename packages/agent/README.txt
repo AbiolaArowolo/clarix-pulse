@@ -19,7 +19,8 @@ STEP 1 - Download and extract
   2. Go to Account > Downloads and click  Download Clarix Pulse
   3. Save the .zip file to your Desktop
   4. Right-click the zip and choose  Extract All
-  5. Extract to:  C:\ClarixPulse
+  5. Extract to any folder you can write to, for example:
+       %USERPROFILE%\Downloads\ClarixPulse
   6. Open the extracted Clarix Pulse folder and confirm these files are there:
        setup.bat, configure.bat, install.bat, uninstall.bat,
        clarix-agent.exe, discover-node.ps1, show-discovery-summary.ps1,
@@ -27,7 +28,7 @@ STEP 1 - Download and extract
 
 STEP 2 - Scan and review temporary local setup
   1. Double-click  setup.bat
-     - If Windows asks for permission, click Yes
+     - No Administrator access is needed for the scan or temporary local setup UI
   2. Press  2  then Enter:
        [2]  Run discovery scan and open local setup UI
   3. The scan runs automatically (under 60 seconds)
@@ -92,9 +93,10 @@ Browser opens but the form is empty:
       Run setup.bat > choose [3] to save the report file
       Go to dashboard > Onboarding > Remote Setup
       Click Upload discovery report and select:
-        C:\ClarixPulse\pulse-node-discovery-report.json
+        %USERPROFILE%\Downloads\ClarixPulse\pulse-node-discovery-report.json
 
 PowerShell says scripts are disabled:
+  - Open the extracted Clarix Pulse folder
   - Right-click  discover-node.ps1  and choose Properties
   - Look for an Unblock checkbox at the bottom - tick it and click OK
   - Run setup.bat and choose [2] again
@@ -102,6 +104,10 @@ PowerShell says scripts are disabled:
 Wrong players detected:
   - In the local setup UI, edit the detected players before saving
   - Or use the dashboard fallback above if you prefer remote provisioning
+
+Install fails because this PC blocks Administrator approval:
+  - Option [2] Scan + setup still works without admin rights
+  - Ask local IT to run option [1] once with Administrator approval
 
 Install fails even as Administrator:
   - Run setup.bat and choose [4] to fully uninstall first

@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { Pool, PoolClient, QueryResultRow } from 'pg';
 
-const repoRoot = path.resolve(__dirname, '../../../..');
+const repoRoot = path.resolve(__dirname, '../../..');
 dotenv.config({ path: path.join(repoRoot, '.env') });
 dotenv.config({ path: path.join(repoRoot, '.env.local'), override: true });
 

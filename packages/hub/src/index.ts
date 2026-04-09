@@ -1,3 +1,4 @@
+import fs from 'fs';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
@@ -24,9 +25,11 @@ import { getPlayer, initRegistry } from './store/registry';
 import { clearStateCacheForInstances, getAllStates, initState, markInstanceOffline, setConnectivity } from './store/state';
 import { checkThumbnailStoreHealth, getThumbnailStorePath } from './store/thumbnails';
 
-const repoRoot = path.resolve(__dirname, '../../../..');
+const repoRoot = path.resolve(__dirname, '../../..');
 dotenv.config({ path: path.join(repoRoot, '.env') });
 dotenv.config({ path: path.join(repoRoot, '.env.local'), override: true });
+const dashboardDist = path.join(repoRoot, 'packages/dashboard/dist');
+const dashboardIndex = path.join(dashboardDist, 'index.html');
 
 const PORT = Number(process.env.HUB_PORT ?? 3001);
 
@@ -85,6 +88,23 @@ app.get('/api/health', async (_req, res) => {
   });
 });
 app.get('/api/version', (_req, res) => res.json(readBuildInfo()));
+
+if (fs.existsSync(dashboardIndex)) {
+  app.use(express.static(dashboardDist, { index: false }));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
+      next();
+      return;
+    }
+
+    if (path.extname(req.path)) {
+      next();
+      return;
+    }
+
+    res.sendFile(dashboardIndex);
+  });
+}
 
 io.use(async (socket, next) => {
   const sessionToken = readCookie(socket.handshake.headers.cookie, SESSION_COOKIE_NAME);

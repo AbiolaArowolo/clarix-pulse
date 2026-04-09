@@ -1495,6 +1495,47 @@ function Get-PlayerIdentitySignature {
     return ($parts -join '|')
 }
 
+function Get-DistinctInstanceLabel {
+    param(
+        [string]$BaseLabel,
+        [string]$CommandLineSelector = '',
+        [string]$WindowTitle = '',
+        [string]$ServiceName = '',
+        [string]$DisplayName = '',
+        [int]$FallbackNumber = 1
+    )
+    $base = ([string]$BaseLabel).Trim()
+    if ([string]::IsNullOrWhiteSpace($base)) { $base = 'Player' }
+
+    foreach ($candidate in @($WindowTitle, $DisplayName)) {
+        $trimmed = ([string]$candidate).Trim()
+        if ([string]::IsNullOrWhiteSpace($trimmed)) { continue }
+        if ($trimmed -match [regex]::Escape($base)) { return $trimmed }
+        return ('{0} - {1}' -f $base, $trimmed)
+    }
+
+    $commandHint = ([string]$CommandLineSelector).Trim()
+    if (-not [string]::IsNullOrWhiteSpace($commandHint)) {
+        if ($commandHint -match '(?i)(?:^|\s)--?channel(?:=|\s+)([^ ]+)') {
+            return ('{0} Channel {1}' -f $base, $matches[1])
+        }
+        if ($commandHint -match '(?i)(?:^|\s)--?instance(?:=|\s+)([^ ]+)') {
+            return ('{0} Instance {1}' -f $base, $matches[1])
+        }
+        if ($commandHint -match '(?i)(?:^|\s)--?service(?:=|\s+)([^ ]+)') {
+            return ('{0} Service {1}' -f $base, $matches[1])
+        }
+        return ('{0} - {1}' -f $base, $commandHint)
+    }
+
+    $serviceHint = ([string]$ServiceName).Trim()
+    if (-not [string]::IsNullOrWhiteSpace($serviceHint)) {
+        return ('{0} - {1}' -f $base, $serviceHint)
+    }
+
+    return ('{0} {1}' -f $base, $FallbackNumber)
+}
+
 function Get-DedupedPlayers {
     param([object[]]$Players)
     $deduped = New-Object System.Collections.Generic.List[object]
@@ -1577,7 +1618,8 @@ function Find-GenericProfilePlayers {
         $confidence = if ($matchedLog -or $configHint) { 0.74 } else { 0.62 }
         if ($descriptor.id -eq 'generic_windows') { $confidence = if ($matchedLog -or $configHint) { 0.6 } else { 0.47 } }
 
-        [void]$players.Add((New-PlayerReport -NodeId $NodeId -Index $nextIndex -PlayoutType $descriptor.id -Label ('{0} {1}' -f $descriptor.label, $labelNumber) -Paths $paths -ProcessSelectors $processSelectors -LogSelectors @{} -Evidence @($evidence) -Confidence $confidence -Running $true))
+        $label = Get-DistinctInstanceLabel -BaseLabel ([string]$descriptor.label) -CommandLineSelector $commandLineSelector -WindowTitle $windowTitle -FallbackNumber $labelNumber
+        [void]$players.Add((New-PlayerReport -NodeId $NodeId -Index $nextIndex -PlayoutType $descriptor.id -Label $label -Paths $paths -ProcessSelectors $processSelectors -LogSelectors @{} -Evidence @($evidence) -Confidence $confidence -Running $true))
         $nextIndex += 1
     }
 
@@ -1637,7 +1679,8 @@ function Find-GenericProfilePlayers {
         if (-not $running -and $service.state -match 'running') { $running = $true }
         $confidence = if ($running) { 0.83 } elseif ($matchedLog -or $configHint) { 0.71 } else { 0.64 }
 
-        [void]$players.Add((New-PlayerReport -NodeId $NodeId -Index $nextIndex -PlayoutType $descriptor.id -Label ('{0} {1}' -f $descriptor.label, $labelNumber) -Paths $paths -ProcessSelectors $processSelectors -LogSelectors @{} -Evidence @($evidence) -Confidence $confidence -Running $running))
+        $label = Get-DistinctInstanceLabel -BaseLabel ([string]$descriptor.label) -CommandLineSelector $commandLineSelector -WindowTitle $windowTitle -ServiceName $serviceName -DisplayName $displayName -FallbackNumber $labelNumber
+        [void]$players.Add((New-PlayerReport -NodeId $NodeId -Index $nextIndex -PlayoutType $descriptor.id -Label $label -Paths $paths -ProcessSelectors $processSelectors -LogSelectors @{} -Evidence @($evidence) -Confidence $confidence -Running $running))
         $nextIndex += 1
     }
 
@@ -1683,7 +1726,8 @@ function Find-GenericProfilePlayers {
         if ($configHint) { $paths.config_path = $configHint }
 
         $confidence = if ($matchedLog -or $configHint) { 0.68 } else { 0.57 }
-        [void]$players.Add((New-PlayerReport -NodeId $NodeId -Index $nextIndex -PlayoutType $descriptor.id -Label ('{0} {1}' -f $descriptor.label, $labelNumber) -Paths $paths -ProcessSelectors $processSelectors -LogSelectors @{} -Evidence @($evidence) -Confidence $confidence -Running $false))
+        $label = Get-DistinctInstanceLabel -BaseLabel ([string]$descriptor.label) -CommandLineSelector $commandLineSelector -ServiceName $name -FallbackNumber $labelNumber
+        [void]$players.Add((New-PlayerReport -NodeId $NodeId -Index $nextIndex -PlayoutType $descriptor.id -Label $label -Paths $paths -ProcessSelectors $processSelectors -LogSelectors @{} -Evidence @($evidence) -Confidence $confidence -Running $false))
         $nextIndex += 1
     }
 
@@ -1730,7 +1774,8 @@ function Find-GenericProfilePlayers {
         if ($configHint) { $paths.config_path = $configHint }
 
         $confidence = if ($matchedLog -or $configHint) { 0.66 } else { 0.55 }
-        [void]$players.Add((New-PlayerReport -NodeId $NodeId -Index $nextIndex -PlayoutType $descriptor.id -Label ('{0} {1}' -f $descriptor.label, $labelNumber) -Paths $paths -ProcessSelectors $processSelectors -LogSelectors @{} -Evidence @($evidence) -Confidence $confidence -Running $false))
+        $label = Get-DistinctInstanceLabel -BaseLabel ([string]$descriptor.label) -CommandLineSelector $commandLineSelector -ServiceName $taskName -FallbackNumber $labelNumber
+        [void]$players.Add((New-PlayerReport -NodeId $NodeId -Index $nextIndex -PlayoutType $descriptor.id -Label $label -Paths $paths -ProcessSelectors $processSelectors -LogSelectors @{} -Evidence @($evidence) -Confidence $confidence -Running $false))
         $nextIndex += 1
     }
 
@@ -1858,11 +1903,20 @@ function Find-GenericBroadcastFromFolders {
                 if ($hasService) { $processSelectors.service_names = @([string]$matchedService.Name) }
 
                 $confidence = if ($hasProcess -and $hasService) { 0.68 } elseif ($hasProcess) { 0.58 } else { 0.52 }
+                $labelBase = if ($hasService -and -not [string]::IsNullOrWhiteSpace([string]$matchedService.DisplayName)) {
+                    [string]$matchedService.DisplayName
+                } elseif ($hasService -and -not [string]::IsNullOrWhiteSpace([string]$matchedService.Name)) {
+                    [string]$matchedService.Name
+                } elseif ($uniqueNames.Count -gt 0) {
+                    [string]$uniqueNames[0]
+                } else {
+                    'Broadcast Software'
+                }
                 [void]$players.Add((New-PlayerReport `
                     -NodeId $NodeId `
                     -Index $nextIndex `
                     -PlayoutType 'generic_windows' `
-                    -Label ('Broadcast Software {0}' -f ($nextIndex + 1)) `
+                    -Label (Get-DistinctInstanceLabel -BaseLabel $labelBase -ServiceName ([string]$matchedService.Name) -DisplayName ([string]$matchedService.DisplayName) -FallbackNumber ($nextIndex + 1)) `
                     -Paths @{ install_dir = $dirPath } `
                     -ProcessSelectors $processSelectors `
                     -LogSelectors @{} `

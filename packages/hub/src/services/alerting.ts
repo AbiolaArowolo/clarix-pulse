@@ -439,7 +439,7 @@ function buildAlertMessage(
   `, accentColor);
 
   return {
-    subject: `${prefix}: ${ctx.instanceLabel} [${nodeId}]`,
+    subject: `${prefix}: ${ctx.instanceLabel} [${nodeId} | ${playerId}]`,
     body: bodyLines.join('\n'),
     html,
   };

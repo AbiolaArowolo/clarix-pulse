@@ -198,9 +198,14 @@ export function InstanceCard({ instance }: Props) {
         <div className="min-w-0">
           <h3 className="text-sm font-semibold leading-tight text-slate-100">{instance.label}</h3>
           <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">{instance.playoutType}</p>
-          <p className="mt-2 text-[11px] text-slate-500">
-            Node: {instance.nodeId} | Player: {instance.playerId}
-          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <span className="rounded-full border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+              Instance {instance.playerId}
+            </span>
+            <span className="rounded-full border border-slate-800 bg-slate-950/70 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-500">
+              Node {instance.nodeId}
+            </span>
+          </div>
         </div>
         <StatusBadge
           color={headline.color}

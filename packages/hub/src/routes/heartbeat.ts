@@ -85,7 +85,7 @@ export function createHeartbeatRouter(io: SocketServer): Router {
           players: mirroredConfig.players.map((player) => ({
             playerId: player.playerId,
             playoutType: player.playoutType,
-            label: `${mirroredConfig!.nodeName} - ${player.playerId}`,
+            label: player.label || `${mirroredConfig!.nodeName} - ${player.playerId}`,
           })),
         });
         emitRemovedPlayers(io, tenantId, nodeId, syncResult.removedPlayerIds);

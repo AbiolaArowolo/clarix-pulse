@@ -1,10 +1,13 @@
 import { Request, Response, Router } from 'express';
 import { requireSession } from '../serverAuth';
 import {
+  shouldSendEmailAlerts,
+  shouldSendTelegramAlerts,
   getAlertDeliveryHealth,
   sendTenantEmail,
   sendTenantTelegram,
 } from '../services/alerting';
+import { getAlertSettings } from '../store/alertSettings';
 import { sendPushToTenant } from './push';
 
 type AlertChannel = 'email' | 'telegram' | 'push';
@@ -34,6 +37,21 @@ export function createAlertTestRouter(): Router {
     const tenantId = session.tenantId;
     const subject = 'TEST ALERT -- Clarix Pulse';
     const body = `This is a test alert from Clarix Pulse. Your ${channel} alerting is working correctly. Time: ${new Date().toISOString()}`;
+    const settings = await getAlertSettings(tenantId);
+
+    if (channel === 'email' && !shouldSendEmailAlerts(settings)) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Email alerts are disabled or not fully configured for this account.',
+      });
+    }
+
+    if (channel === 'telegram' && !shouldSendTelegramAlerts(settings)) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Telegram alerts are disabled or not fully configured for this account.',
+      });
+    }
 
     try {
       if (channel === 'email') {

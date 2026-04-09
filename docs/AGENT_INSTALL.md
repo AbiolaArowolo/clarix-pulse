@@ -124,7 +124,7 @@ Important:
 Suggested working folder:
 
 ```text
-C:\clarix-pulse\
+%LOCALAPPDATA%\ClarixPulse\Bundles\
 ```
 
 ### 3. Start the monitored application if possible

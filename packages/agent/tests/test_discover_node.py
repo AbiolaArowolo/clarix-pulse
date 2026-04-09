@@ -527,6 +527,10 @@ class DiscoverNodeScriptTests(unittest.TestCase):
         }
         self.assertIn(("--channel=1 --service=playout",), command_line_selectors)
         self.assertIn(("--channel=2 --service=playout",), command_line_selectors)
+        self.assertEqual(
+            {player["label"] for player in players},
+            {"PlayBox AirBox Channel 1", "PlayBox AirBox Channel 2"},
+        )
 
     def test_generic_discovery_keeps_service_hosted_instances_separate(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -625,6 +629,10 @@ class DiscoverNodeScriptTests(unittest.TestCase):
                 ("--channel=1",),
                 ("--channel=2",),
             },
+        )
+        self.assertEqual(
+            {player["label"] for player in players},
+            {"PlayBox AirBox Channel 1", "PlayBox AirBox Channel 2"},
         )
 
     def test_generic_discovery_uses_startup_commands_when_process_is_not_running(self) -> None:

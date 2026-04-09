@@ -88,6 +88,8 @@ function Get-CanonicalBundleSourceFiles {
         @{ RelativePath = 'configure.bat'; SourcePath = (Join-Path $agentRoot 'configure.bat') },
         @{ RelativePath = 'install.bat'; SourcePath = (Join-Path $agentRoot 'install.bat') },
         @{ RelativePath = 'uninstall.bat'; SourcePath = (Join-Path $agentRoot 'uninstall.bat') },
+        @{ RelativePath = 'install-from-url.ps1'; SourcePath = (Join-Path $agentRoot 'install-from-url.ps1') },
+        @{ RelativePath = 'config.example.yaml'; SourcePath = (Join-Path $agentRoot 'config.example.yaml') },
         @{ RelativePath = 'discover-node.ps1'; SourcePath = (Join-Path $agentRoot 'discover-node.ps1') },
         @{ RelativePath = 'show-discovery-summary.ps1'; SourcePath = (Join-Path $agentRoot 'show-discovery-summary.ps1') },
         @{ RelativePath = 'README.txt'; SourcePath = (Join-Path $agentRoot 'README.txt') }

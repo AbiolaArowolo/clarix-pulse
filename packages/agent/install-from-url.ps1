@@ -1,13 +1,22 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$BundleUrl,
-    [string]$DestinationRoot = 'C:\pulse-node-bundle',
+    [string]$DestinationRoot = '',
     [string]$ExpectedSha256 = '',
     [switch]$RunInstall
 )
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+
+if ([string]::IsNullOrWhiteSpace($DestinationRoot)) {
+    $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
+    if (-not [string]::IsNullOrWhiteSpace($localAppData)) {
+        $DestinationRoot = Join-Path $localAppData 'ClarixPulse\Bundles'
+    } else {
+        $DestinationRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'ClarixPulse\Bundles'
+    }
+}
 
 function Ensure-Directory {
     param([string]$Path)

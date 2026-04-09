@@ -12,6 +12,9 @@ interface Props {
 export function AlarmBanner({ sites, muted, audioBlocked, onToggleMute, onEnableSound }: Props) {
   const alarmInstances = sites.flatMap((site) => site.instances.filter(isAlarmState));
   if (alarmInstances.length === 0) return null;
+  const alarmSummary = alarmInstances
+    .map((instance) => `${instance.label} [${instance.playerId}]`)
+    .join(' | ');
 
   return (
     <div className="fixed left-0 right-0 top-0 z-50 border-b-2 border-red-500 bg-red-700 shadow-lg">
@@ -25,7 +28,7 @@ export function AlarmBanner({ sites, muted, audioBlocked, onToggleMute, onEnable
               OFF AIR | {alarmInstances.length} instance{alarmInstances.length > 1 ? 's' : ''}
             </p>
             <p className="truncate text-xs text-red-100">
-              {alarmInstances.map((instance) => instance.label).join(' | ')}
+              {alarmSummary}
             </p>
           </div>
         </div>

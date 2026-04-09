@@ -34,9 +34,9 @@ Work through every step in order. Do not skip any step.
 
 1. Locate the `.zip` file you just downloaded.
 2. Right-click it and choose **Extract All...**.
-3. When asked where to extract, type:
+3. When asked where to extract, choose any folder you can write to, for example:
    ```
-   C:\ClarixPulse
+   %USERPROFILE%\Downloads\ClarixPulse
    ```
 4. Click **Extract**.
 5. Open the extracted Clarix Pulse folder. You should see these files inside:
@@ -60,7 +60,7 @@ setup UI with the detected details pre-filled.
 
 1. Open the extracted Clarix Pulse folder.
 2. Double-click `setup.bat`.
-   - If Windows asks "Do you want to allow this app to make changes?", click **Yes**.
+   - No Administrator access is needed for the discovery scan or temporary local setup UI.
 3. A menu appears with numbered options. Press **2** and then **Enter**:
    ```
    [2]  Run discovery scan and open local setup UI
@@ -78,7 +78,7 @@ setup UI with the detected details pre-filled.
 > You can still run `configure.bat` later to re-open the installed local UI.
 > If you prefer the remote dashboard flow, you can still run the scan manually
 > (option 3 in the menu) and upload the `pulse-node-discovery-report.json`
-> file from `C:\ClarixPulse` via the Remote Setup tab.
+> file from your extracted Clarix Pulse folder via the Remote Setup tab.
 
 ---
 
@@ -123,7 +123,7 @@ every time this computer boots - you do not need to do anything else.
 
 This is a Windows security setting that blocked the scan script.
 
-1. Open `C:\ClarixPulse`.
+1. Open the extracted Clarix Pulse folder.
 2. Right-click `discover-node.ps1` and choose **Properties**.
 3. At the bottom of the Properties window, look for a checkbox or button
    labelled **Unblock**. Tick it (or click it) and then click **OK**.
@@ -147,6 +147,11 @@ The dashboard lets you add or edit players manually:
 
 1. In the local setup UI, edit the detected player list before saving.
 2. If you prefer the remote provisioning flow, use the manual fallback above.
+
+### This PC blocks Administrator approval
+
+- Option **2** from `setup.bat` still works without admin rights for discovery and setup.
+- Ask local IT or an administrator to run option **1** once to install the background Windows service.
 
 ### Need more help?
 

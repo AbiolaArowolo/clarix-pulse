@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
-import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching';
+import { cleanupOutdatedCaches, createHandlerBoundToURL, precacheAndRoute } from 'workbox-precaching';
 import { clientsClaim } from 'workbox-core';
+import { NavigationRoute, registerRoute } from 'workbox-routing';
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -10,6 +11,17 @@ cleanupOutdatedCaches();
 
 // Injected by vite-plugin-pwa at build time
 precacheAndRoute(self.__WB_MANIFEST);
+
+// Keep SPA deep links alive inside the installed PWA so /app and its child
+// routes resolve to the app shell instead of blanking on direct open/refresh.
+const navigationHandler = createHandlerBoundToURL('/index.html');
+registerRoute(new NavigationRoute(navigationHandler, {
+  denylist: [
+    /^\/api(?:\/|$)/,
+    /^\/socket\.io(?:\/|$)/,
+    /\/[^/?]+\.[^/]+$/,
+  ],
+}));
 
 // Push notification handler
 self.addEventListener('push', (event: PushEvent) => {

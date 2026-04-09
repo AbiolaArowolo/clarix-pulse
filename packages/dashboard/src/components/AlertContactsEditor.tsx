@@ -100,11 +100,11 @@ export function AlertContactsEditor() {
   const [draft, setDraft] = useState<ContactDraft>({
     emailRecipients: [...EMPTY_CONTACTS],
     telegramChatIds: [...EMPTY_CONTACTS],
-      phoneNumbers: [...EMPTY_CONTACTS],
-      emailEnabled: true,
-      telegramEnabled: true,
-      phoneEnabled: false,
-    });
+    phoneNumbers: [...EMPTY_CONTACTS],
+    emailEnabled: true,
+    telegramEnabled: true,
+    phoneEnabled: false,
+  });
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [capabilities, setCapabilities] = useState<AlertSettingsPayload['capabilities']>({
     emailDeliveryConfigured: false,
@@ -184,7 +184,9 @@ export function AlertContactsEditor() {
         phoneNumbers: padContacts(payload.settings.phoneNumbers ?? []),
         emailEnabled: payload.settings.emailEnabled ?? true,
         telegramEnabled: payload.settings.telegramEnabled ?? true,
-        phoneEnabled: payload.settings.phoneEnabled ?? false,
+        phoneEnabled: payload.capabilities.phoneDeliveryConfigured
+          ? (payload.settings.phoneEnabled ?? false)
+          : false,
       });
       setUpdatedAt(payload.settings.updatedAt ?? null);
       setCapabilities(payload.capabilities);
@@ -224,7 +226,7 @@ export function AlertContactsEditor() {
           phoneNumbers: normalizeDraft(draft.phoneNumbers),
           emailEnabled: draft.emailEnabled,
           telegramEnabled: draft.telegramEnabled,
-          phoneEnabled: draft.phoneEnabled,
+          phoneEnabled: capabilities.phoneDeliveryConfigured ? draft.phoneEnabled : false,
         }),
       });
       const payload = await readJsonResponse<AlertSettingsPayload>(
@@ -241,7 +243,9 @@ export function AlertContactsEditor() {
         phoneNumbers: padContacts(payload.settings.phoneNumbers ?? []),
         emailEnabled: payload.settings.emailEnabled ?? true,
         telegramEnabled: payload.settings.telegramEnabled ?? true,
-        phoneEnabled: payload.settings.phoneEnabled ?? false,
+        phoneEnabled: payload.capabilities.phoneDeliveryConfigured
+          ? (payload.settings.phoneEnabled ?? false)
+          : false,
       });
       setUpdatedAt(payload.settings.updatedAt ?? new Date().toISOString());
       setCapabilities(payload.capabilities);
@@ -411,15 +415,25 @@ export function AlertContactsEditor() {
                     <button
                       type="button"
                       onClick={() => updateToggle('phoneEnabled', !draft.phoneEnabled)}
+                      disabled={!capabilities.phoneDeliveryConfigured}
                       className={`rounded-full border px-3 py-1 text-[11px] font-medium transition-colors ${
-                        draft.phoneEnabled
+                        !capabilities.phoneDeliveryConfigured
+                          ? 'cursor-not-allowed border-slate-800 text-slate-600'
+                          : draft.phoneEnabled
                           ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
                           : 'border-slate-700 text-slate-400'
                       }`}
                     >
-                      {draft.phoneEnabled ? 'Enabled' : 'Disabled'}
+                      {capabilities.phoneDeliveryConfigured
+                        ? (draft.phoneEnabled ? 'Enabled' : 'Disabled')
+                        : 'Unavailable'}
                     </button>
                   </div>
+                  {!capabilities.phoneDeliveryConfigured && (
+                    <p className="mb-3 text-[11px] text-slate-500">
+                      SMS delivery is not wired on this server yet, so no texts will be sent from these contacts.
+                    </p>
+                  )}
                   <div className="space-y-2">
                     {draft.phoneNumbers.map((value, index) => (
                       <input
@@ -428,6 +442,7 @@ export function AlertContactsEditor() {
                         value={value}
                         onChange={(event) => updateField('phoneNumbers', index, event.target.value)}
                         placeholder={`Phone ${index + 1}`}
+                        disabled={!capabilities.phoneDeliveryConfigured}
                         className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-teal-500"
                       />
                     ))}
