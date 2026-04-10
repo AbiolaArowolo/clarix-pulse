@@ -62,13 +62,15 @@ registerHooks({
   },
 });
 
-test('/api/downloads/bundle/windows/latest injects pulse-account.json for the authenticated tenant', async () => {
+test('/api/downloads/bundle/windows/latest injects tenant defaults into README without extra files', async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pulse-download-test-'));
   const bundlePath = path.join(tempRoot, 'clarix-pulse-test.zip');
 
   try {
     const zip = new AdmZip();
-    zip.addFile('setup.bat', Buffer.from('@echo off\r\necho test\r\n', 'utf8'));
+    zip.addFile('ClarixPulseSetup.exe', Buffer.from('setup', 'utf8'));
+    zip.addFile('Uninstall.exe', Buffer.from('uninstall', 'utf8'));
+    zip.addFile('README.txt', Buffer.from('Original readme content.\r\n', 'utf8'));
     zip.writeZip(bundlePath);
 
     process.env.PULSE_DOWNLOAD_BUNDLE_PATH = bundlePath;
@@ -82,6 +84,7 @@ test('/api/downloads/bundle/windows/latest injects pulse-account.json for the au
 
     const server = app.listen(0);
     try {
+      await new Promise<void>((resolve) => server.on('listening', () => resolve()));
       const address = server.address();
       assert.ok(address && typeof address === 'object');
       const response = await fetch(`http://127.0.0.1:${address.port}/api/downloads/bundle/windows/latest`);
@@ -90,10 +93,19 @@ test('/api/downloads/bundle/windows/latest injects pulse-account.json for the au
 
       const buffer = Buffer.from(await response.arrayBuffer());
       const extracted = new AdmZip(buffer);
-      const accountFile = extracted.getEntry('pulse-account.json');
-      assert.ok(accountFile, 'pulse-account.json should be included in the bundle');
+      assert.equal(
+        extracted.getEntries().map((entry) => entry.entryName).sort().join(','),
+        'ClarixPulseSetup.exe,README.txt,Uninstall.exe',
+      );
+      assert.equal(extracted.getEntry('pulse-account.json'), null);
 
-      const accountConfig = JSON.parse(accountFile!.getData().toString('utf8')) as {
+      const readmeEntry = extracted.getEntry('README.txt');
+      assert.ok(readmeEntry, 'README.txt should be included in the bundle');
+      const readmeText = readmeEntry!.getData().toString('utf8');
+      const markerMatch = readmeText.match(/\[PULSE_ACCOUNT_JSON_START\]\s*(\{[\s\S]*?\})\s*\[PULSE_ACCOUNT_JSON_END\]/);
+      assert.ok(markerMatch, 'README should contain embedded tenant account block');
+
+      const accountConfig = JSON.parse(markerMatch![1]) as {
         hubUrl: string;
         hub_url: string;
         enrollmentKey: string;

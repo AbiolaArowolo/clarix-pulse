@@ -669,6 +669,39 @@ class HubDecommissionTests(unittest.TestCase):
         self.assertEqual(prepared["enrollment_key"], "ENROLL-ABC-123")
         self.assertIn("enrollment key", (message or "").lower())
 
+    def test_prepare_config_for_hub_decommission_loads_defaults_from_readme_account_block(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            runtime_config_path = temp_root / "config.yaml"
+            (temp_root / "README.txt").write_text(
+                "\n".join(
+                    [
+                        "Clarix Pulse",
+                        "",
+                        "[PULSE_ACCOUNT_JSON_START]",
+                        '{"hubUrl":"https://pulse.example.com","enrollmentKey":"ENROLL-README-123"}',
+                        "[PULSE_ACCOUNT_JSON_END]",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            raw_config = {
+                "node_id": "studio-a",
+                "node_name": "Studio A",
+                "site_id": "studio-a",
+                "hub_url": "",
+                "players": [],
+            }
+
+            with patch.object(agent, "_runtime_config_path", return_value=str(runtime_config_path)):
+                with patch.object(agent, "INSTALL_DIR", str(temp_root)):
+                    prepared, message = agent._prepare_config_for_hub_decommission(raw_config)
+
+        self.assertEqual(prepared["hub_url"], "https://pulse.example.com")
+        self.assertEqual(prepared["enrollment_key"], "ENROLL-README-123")
+        self.assertIn("readme.txt", (message or "").lower())
+
     def test_prepare_config_for_hub_decommission_loads_missing_fields_from_nearby_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

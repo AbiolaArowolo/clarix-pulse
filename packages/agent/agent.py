@@ -13,6 +13,7 @@ import os
 import sys
 import time
 import glob
+import re
 import logging
 import shutil
 import socket
@@ -2867,15 +2868,43 @@ def _import_local_ui_state_from_path(import_path: str, current_state: dict[str, 
 
 
 def _load_pulse_account_defaults(search_roots: list[str]) -> dict[str, str]:
-    candidate_paths: list[str] = []
+    def _extract_from_document(document: dict[str, Any]) -> dict[str, str]:
+        hub_url = _as_non_placeholder_str(document.get("hubUrl") or document.get("hub_url"))
+        enrollment_key = _as_non_placeholder_str(
+            document.get("enrollmentKey") or document.get("enrollment_key")
+        )
+        if not hub_url and not enrollment_key:
+            return {}
+        return {
+            "hub_url": hub_url,
+            "enrollment_key": enrollment_key,
+        }
+
+    def _extract_from_readme(readme_text: str) -> dict[str, str]:
+        match = re.search(
+            r"\[PULSE_ACCOUNT_JSON_START\]\s*(\{[\s\S]*?\})\s*\[PULSE_ACCOUNT_JSON_END\]",
+            readme_text,
+        )
+        if not match:
+            return {}
+        try:
+            parsed = json.loads(match.group(1))
+        except ValueError:
+            return {}
+        if not isinstance(parsed, dict):
+            return {}
+        return _extract_from_document(parsed)
+
+    candidate_paths: list[tuple[str, str]] = []
     for root in search_roots:
         normalized_root = _as_str(root)
         if not normalized_root:
             continue
-        candidate_paths.append(os.path.join(normalized_root, "pulse-account.json"))
+        candidate_paths.append((os.path.join(normalized_root, "pulse-account.json"), "json"))
+        candidate_paths.append((os.path.join(normalized_root, "README.txt"), "readme"))
 
     seen: set[str] = set()
-    for candidate in candidate_paths:
+    for candidate, candidate_kind in candidate_paths:
         resolved = os.path.abspath(candidate)
         lowered = resolved.lower()
         if lowered in seen:
@@ -2885,21 +2914,27 @@ def _load_pulse_account_defaults(search_roots: list[str]) -> dict[str, str]:
             continue
         try:
             with open(resolved, "r", encoding="utf-8-sig") as handle:
-                document = json.load(handle)
+                content = handle.read()
         except (OSError, ValueError):
             continue
-        if not isinstance(document, dict):
-            continue
 
-        hub_url = _as_non_placeholder_str(document.get("hubUrl") or document.get("hub_url"))
-        enrollment_key = _as_non_placeholder_str(
-            document.get("enrollmentKey") or document.get("enrollment_key")
-        )
-        if not hub_url and not enrollment_key:
+        defaults: dict[str, str]
+        if candidate_kind == "json":
+            try:
+                document = json.loads(content)
+            except ValueError:
+                continue
+            if not isinstance(document, dict):
+                continue
+            defaults = _extract_from_document(document)
+        else:
+            defaults = _extract_from_readme(content)
+
+        if not defaults:
             continue
         return {
-            "hub_url": hub_url,
-            "enrollment_key": enrollment_key,
+            "hub_url": defaults.get("hub_url", ""),
+            "enrollment_key": defaults.get("enrollment_key", ""),
             "source_path": resolved,
         }
 

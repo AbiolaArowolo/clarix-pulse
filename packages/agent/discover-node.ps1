@@ -90,7 +90,7 @@ function Is-PlaceholderValue {
     return $false
 }
 
-# -- Read pulse-account.json (injected into the bundle per-tenant) ------------
+# -- Read tenant defaults from pulse-account.json or README markers ------------
 $_accountHubUrl      = ''
 $_accountEnrollmentKey = ''
 $_accountJsonPath = Join-Path $_scriptDir 'pulse-account.json'
@@ -109,6 +109,35 @@ if (Test-Path -LiteralPath $_accountJsonPath -PathType Leaf) {
         $ErrorActionPreference = 'Stop'
     } catch {
         $ErrorActionPreference = 'Stop'
+    }
+}
+
+if ([string]::IsNullOrWhiteSpace($_accountHubUrl) -or [string]::IsNullOrWhiteSpace($_accountEnrollmentKey)) {
+    $_readmePath = Join-Path $_scriptDir 'README.txt'
+    if (Test-Path -LiteralPath $_readmePath -PathType Leaf) {
+        try {
+            $ErrorActionPreference = 'SilentlyContinue'
+            $_readmeText = Get-Content -LiteralPath $_readmePath -Raw
+            $_markerPattern = '\[PULSE_ACCOUNT_JSON_START\]\s*(\{[\s\S]*?\})\s*\[PULSE_ACCOUNT_JSON_END\]'
+            if ($_readmeText -match $_markerPattern) {
+                $accountData = $Matches[1] | ConvertFrom-Json
+                if ([string]::IsNullOrWhiteSpace($_accountHubUrl)) {
+                    $accountHubCandidate = if ($accountData.hubUrl) { [string]$accountData.hubUrl } elseif ($accountData.hub_url) { [string]$accountData.hub_url } else { '' }
+                    if ($accountHubCandidate -and -not (Is-PlaceholderValue -Value $accountHubCandidate -Kind 'url')) {
+                        $_accountHubUrl = $accountHubCandidate
+                    }
+                }
+                if ([string]::IsNullOrWhiteSpace($_accountEnrollmentKey)) {
+                    $accountEnrollmentCandidate = if ($accountData.enrollmentKey) { [string]$accountData.enrollmentKey } elseif ($accountData.enrollment_key) { [string]$accountData.enrollment_key } else { '' }
+                    if ($accountEnrollmentCandidate -and -not (Is-PlaceholderValue -Value $accountEnrollmentCandidate -Kind 'enrollment')) {
+                        $_accountEnrollmentKey = $accountEnrollmentCandidate
+                    }
+                }
+            }
+            $ErrorActionPreference = 'Stop'
+        } catch {
+            $ErrorActionPreference = 'Stop'
+        }
     }
 }
 

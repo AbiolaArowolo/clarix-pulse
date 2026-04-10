@@ -59,19 +59,33 @@ export function buildTenantBundleBuffer(input: {
   hubUrl: string;
   enrollmentKey: string;
 }): Buffer {
-  const accountConfig = JSON.stringify(
-    {
-      hubUrl: input.hubUrl,
-      hub_url: input.hubUrl,
-      enrollmentKey: input.enrollmentKey,
-      enrollment_key: input.enrollmentKey,
-    },
-    null,
-    2,
-  );
+  const accountConfig = {
+    hubUrl: input.hubUrl,
+    hub_url: input.hubUrl,
+    enrollmentKey: input.enrollmentKey,
+    enrollment_key: input.enrollmentKey,
+  };
+  const accountConfigJson = JSON.stringify(accountConfig);
+  const markerStart = '[PULSE_ACCOUNT_JSON_START]';
+  const markerEnd = '[PULSE_ACCOUNT_JSON_END]';
 
   const zip = new AdmZip(input.bundlePath);
-  zip.addFile('pulse-account.json', Buffer.from(accountConfig, 'utf8'));
+
+  const readmeEntry = zip.getEntry('README.txt');
+  const readmeRaw = readmeEntry ? readmeEntry.getData().toString('utf8') : '';
+  const markerPattern = /\[PULSE_ACCOUNT_JSON_START\][\s\S]*?\[PULSE_ACCOUNT_JSON_END\]\s*/g;
+  const readmeBase = readmeRaw.replace(markerPattern, '').trimEnd();
+  const readmeAugmented = `${readmeBase}\r\n\r\n${markerStart}\r\n${accountConfigJson}\r\n${markerEnd}\r\n`;
+
+  if (readmeEntry) {
+    zip.deleteFile('README.txt');
+  }
+  zip.addFile('README.txt', Buffer.from(readmeAugmented, 'utf8'));
+
+  if (zip.getEntry('pulse-account.json')) {
+    zip.deleteFile('pulse-account.json');
+  }
+
   return zip.toBuffer();
 }
 
