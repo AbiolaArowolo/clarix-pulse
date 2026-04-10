@@ -1,6 +1,8 @@
 import sys
 import tempfile
 import unittest
+from datetime import datetime
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -109,6 +111,45 @@ class ProcessSelectorTests(unittest.TestCase):
 
         self.assertEqual(observation["playout_process_up"], 1)
         self.assertEqual(observation["playout_service_up"], 1)
+
+
+class ProcessCpuUsageTests(unittest.TestCase):
+    def setUp(self) -> None:
+        process_monitor._restart_events.clear()
+        process_monitor._last_process_up.clear()
+        process_monitor._prev_cpu_total.clear()
+        process_monitor._prev_cpu_ts.clear()
+
+    @patch.object(process_monitor, "_iter_matching_services", return_value=[])
+    @patch.object(process_monitor, "_iter_matching_processes")
+    @patch.object(process_monitor.psutil, "cpu_count", return_value=4)
+    @patch.object(process_monitor, "datetime")
+    def test_check_reports_normalized_cpu_percent(
+        self,
+        mock_datetime: Mock,
+        _mock_cpu_count: Mock,
+        mock_iter_matching_processes: Mock,
+        _mock_iter_matching_services: Mock,
+    ) -> None:
+        proc = Mock()
+        proc.pid = 4321
+        proc.cpu_times.side_effect = [
+            SimpleNamespace(user=10.0, system=2.0),
+            SimpleNamespace(user=12.0, system=4.0),
+        ]
+        mock_iter_matching_processes.return_value = [proc]
+
+        t0 = datetime(2026, 4, 10, 12, 0, 0)
+        t1 = datetime(2026, 4, 10, 12, 0, 2)
+        mock_datetime.now.side_effect = [t0, t0, t1, t1]
+
+        first = process_monitor.check("studio-a-insta-1", "insta")
+        second = process_monitor.check("studio-a-insta-1", "insta")
+
+        self.assertIsNone(first["playout_cpu_usage_ratio_poll"])
+        self.assertIsNone(first["playout_cpu_usage_percent_poll"])
+        self.assertEqual(second["playout_cpu_usage_ratio_poll"], 2.0)
+        self.assertEqual(second["playout_cpu_usage_percent_poll"], 50.0)
 
 
 if __name__ == "__main__":

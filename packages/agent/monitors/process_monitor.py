@@ -338,6 +338,18 @@ def _total_cpu_seconds(processes: list[psutil.Process]) -> float | None:
     return total
 
 
+def _logical_cpu_count() -> int:
+    try:
+        count = psutil.cpu_count(logical=True)
+    except Exception:
+        count = None
+
+    try:
+        return max(1, int(count or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
 def check(instance_id: str, playout_type: str, selectors: dict | None = None) -> dict:
     selectors = selectors or {}
     window_expected = _has_window_selectors(selectors)
@@ -369,11 +381,13 @@ def check(instance_id: str, playout_type: str, selectors: dict | None = None) ->
     current_cpu_total = _total_cpu_seconds(matching_processes) if process_up else None
     previous_cpu_total = _prev_cpu_total.get(instance_id)
     previous_cpu_ts = _prev_cpu_ts.get(instance_id)
+    cpu_usage_percent_poll = None
     if current_cpu_total is not None:
         if previous_cpu_total is not None and previous_cpu_ts is not None:
             elapsed_seconds = max(0.001, (now - previous_cpu_ts).total_seconds())
             cpu_delta = max(0.0, current_cpu_total - previous_cpu_total)
             cpu_usage_ratio_poll = cpu_delta / elapsed_seconds
+            cpu_usage_percent_poll = cpu_usage_ratio_poll * 100.0 / _logical_cpu_count()
         _prev_cpu_total[instance_id] = current_cpu_total
         _prev_cpu_ts[instance_id] = now
     else:
@@ -396,4 +410,5 @@ def check(instance_id: str, playout_type: str, selectors: dict | None = None) ->
         "playout_window_expected": 1 if window_expected else 0,
         "restart_events_15m": restart_count,
         "playout_cpu_usage_ratio_poll": round(cpu_usage_ratio_poll, 3) if cpu_usage_ratio_poll is not None else None,
+        "playout_cpu_usage_percent_poll": round(cpu_usage_percent_poll, 3) if cpu_usage_percent_poll is not None else None,
     }

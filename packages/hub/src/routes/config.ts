@@ -332,6 +332,9 @@ export function createConfigRouter(io: SocketServer): Router {
     }
 
     const removal = await removeNode(nodeId, tenantId);
+    if (!removal.removed) {
+      return res.status(409).json({ error: 'Failed to remove node from hub records.' });
+    }
     emitRemovedPlayers(io, tenantId, nodeId, removal.removedPlayerIds);
     emitNodeRemoved(io, tenantId, nodeId);
 

@@ -100,6 +100,147 @@ function Get-ServiceProcessId {
     return $null
 }
 
+function Get-ClarixProcessIds {
+    $candidateIds = [System.Collections.Generic.HashSet[int]]::new()
+    $currentPid = $PID
+
+    $processes = Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue
+    foreach ($proc in $processes) {
+        try {
+            $pid = [int]$proc.ProcessId
+            if ($pid -le 0 -or $pid -eq $currentPid) {
+                continue
+            }
+
+            $name = [string]$proc.Name
+            $exePath = [string]$proc.ExecutablePath
+            $cmdLine = [string]$proc.CommandLine
+            $haystack = "$name $exePath $cmdLine".ToLowerInvariant()
+            if ($haystack -notmatch 'clarix-agent|clarixpulse') {
+                continue
+            }
+
+            [void]$candidateIds.Add($pid)
+        } catch {
+            continue
+        }
+    }
+
+    return @($candidateIds | Sort-Object)
+}
+
+function Stop-ClarixProcesses {
+    param([switch]$WhatIf)
+
+    $candidateIds = Get-ClarixProcessIds
+    if (-not $candidateIds) {
+        Write-Skip "No Clarix agent processes found"
+        return $false
+    }
+
+    if ($WhatIf) {
+        Write-Info "WhatIf: Would Stop-Process -Id $($candidateIds -join ', ') -Force"
+        return $true
+    }
+
+    Stop-Process -Id $candidateIds -Force -ErrorAction SilentlyContinue
+    Write-Ok "Killed $($candidateIds.Count) Clarix agent process(es)"
+    return $true
+}
+
+function Remove-ClarixStartupRemnants {
+    $removedAny = $false
+
+    $registryTargets = @(
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce',
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\RunServices',
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\RunServicesOnce',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\RunServices',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\RunServicesOnce',
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run',
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32'
+    )
+
+    foreach ($keyPath in $registryTargets) {
+        try {
+            if (-not (Test-Path $keyPath)) {
+                continue
+            }
+
+            $props = Get-ItemProperty -LiteralPath $keyPath -ErrorAction Stop
+            $valueNames = $props.PSObject.Properties |
+                Where-Object { $_.Name -notmatch '^PS' } |
+                Select-Object -ExpandProperty Name
+
+            foreach ($valueName in $valueNames) {
+                $value = $props.$valueName
+                $valueText = if ($null -ne $value) { [string]$value } else { '' }
+                if (
+                    $valueName -notmatch '(?i)clarix|pulse' -and
+                    $valueText -notmatch '(?i)clarix|pulse|clarix-agent'
+                ) {
+                    continue
+                }
+
+                if ($WhatIf) {
+                    Write-Info "WhatIf: Would remove autorun entry '$keyPath\$valueName'"
+                    $removedAny = $true
+                    continue
+                }
+
+                Remove-ItemProperty -LiteralPath $keyPath -Name $valueName -ErrorAction Stop
+                Write-Ok "Removed autorun entry: $keyPath\$valueName"
+                $removedAny = $true
+            }
+        } catch {
+            Write-Skip "Could not inspect autorun key '$keyPath': $_"
+        }
+    }
+
+    $startupRoots = @(
+        (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'),
+        (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Startup')
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+    foreach ($root in $startupRoots) {
+        if (-not (Test-Path $root)) {
+            continue
+        }
+
+        try {
+            foreach ($entry in Get-ChildItem -LiteralPath $root -Force -ErrorAction SilentlyContinue) {
+                if ($entry.Name -notmatch '(?i)clarix|pulse') {
+                    continue
+                }
+
+                if ($WhatIf) {
+                    Write-Info "WhatIf: Would remove startup item '$($entry.FullName)'"
+                    $removedAny = $true
+                    continue
+                }
+
+                Remove-Item -LiteralPath $entry.FullName -Recurse -Force -ErrorAction Stop
+                Write-Ok "Removed startup item: $($entry.FullName)"
+                $removedAny = $true
+            }
+        } catch {
+            Write-Skip "Could not inspect startup folder '$root': $_"
+        }
+    }
+
+    if (-not $removedAny) {
+        Write-Skip "No startup remnants found"
+        return $false
+    }
+
+    return $true
+}
+
 # ============================================================================
 # BANNER
 # ============================================================================
@@ -125,6 +266,23 @@ Invoke-Step "Notify hub node decommission" {
         Write-Info "WhatIf: Would request hub decommission using clarix-agent.exe --decommission-hub"
         return $true
     }
+
+    # Stop any running service first so the node cannot re-register while
+    # decommission is in flight.
+    foreach ($svcName in @('ClarixPulseAgent', 'clarix-pulse-agent')) {
+        try {
+            $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+            if ($svc -and $svc.Status -ne 'Stopped') {
+                Write-Info "Stopping service '$svcName' before hub decommission"
+                & sc.exe stop $svcName 2>&1 | Out-Null
+                Start-Sleep -Milliseconds 800
+            }
+        } catch {
+            Write-Skip "Could not pre-stop service '$svcName' before decommission: $_"
+        }
+    }
+
+    $null = Stop-ClarixProcesses -WhatIf:$WhatIf
 
     $agentCandidates = @(
         (Join-Path $_scriptDir 'clarix-agent.exe'),
@@ -267,33 +425,7 @@ Write-Host ""
 Write-Host "-- 2. Running Processes ------------------------------------" -ForegroundColor White
 
 Invoke-Step "Kill Clarix agent process(es)" {
-    $candidateIds = @()
-    $namedProcesses = Get-Process -Name 'clarix-agent' -ErrorAction SilentlyContinue
-    if ($namedProcesses) {
-        $candidateIds += $namedProcesses | Select-Object -ExpandProperty Id
-    }
-
-    $clarixProcesses = Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-        $_.Name -eq 'clarix-agent.exe' -or
-        $_.ExecutablePath -like '*ClarixPulse*' -or
-        $_.CommandLine -like '*clarix-agent*'
-    }
-    if ($clarixProcesses) {
-        $candidateIds += $clarixProcesses | Select-Object -ExpandProperty ProcessId
-    }
-
-    $candidateIds = $candidateIds | Where-Object { $_ -gt 0 } | Sort-Object -Unique
-    if (-not $candidateIds) {
-        Write-Skip "No Clarix agent processes found"
-        return $false
-    }
-    if ($WhatIf) {
-        Write-Info "WhatIf: Would Stop-Process -Id $($candidateIds -join ', ') -Force"
-        return $true
-    }
-    Stop-Process -Id $candidateIds -Force -ErrorAction SilentlyContinue
-    Write-Ok "Killed $($candidateIds.Count) Clarix agent process(es)"
-    return $true
+    Stop-ClarixProcesses -WhatIf:$WhatIf
 }
 
 # ============================================================================
@@ -412,7 +544,7 @@ $regKeys = @(
 )
 
 foreach ($key in $regKeys) {
-    Invoke-Step "Remove registry key '$key'" {
+Invoke-Step "Remove registry key '$key'" {
         if (-not (Test-Path $key)) {
             Write-Skip "Registry key not found: $key"
             return $false
@@ -425,6 +557,17 @@ foreach ($key in $regKeys) {
         Write-Ok "Removed registry key: $key"
         return $true
     }
+}
+
+# ============================================================================
+# 6. REMOVE STARTUP REMNANTS
+# ============================================================================
+
+Write-Host ""
+Write-Host "-- 6. Startup Remnants -------------------------------------" -ForegroundColor White
+
+Invoke-Step "Remove startup autorun remnants" {
+    Remove-ClarixStartupRemnants
 }
 
 # ============================================================================
@@ -472,3 +615,9 @@ if (-not $script:isAdmin) {
     Write-Host "  Administrator approval is still required to remove the Windows service and protected ClarixPulse folders on locked-down PCs." -ForegroundColor Yellow
 }
 Write-Host ""
+
+if ($script:failedItems.Count -gt 0) {
+    exit 1
+}
+
+exit 0

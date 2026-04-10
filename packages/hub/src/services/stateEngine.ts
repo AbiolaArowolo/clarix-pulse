@@ -18,7 +18,9 @@ export interface Observations extends Record<string, unknown> {
   playout_window_up?: number;
   playout_window_expected?: number;
   restart_events_15m?: number;
+  // Core-equivalent ratio used for playback health. Reporting can use the normalized percent field below.
   playout_cpu_usage_ratio_poll?: number;
+  playout_cpu_usage_percent_poll?: number;
   // Log tokens (from agent deep log monitoring)
   log_last_token?: string | null;
   log_last_token_fresh?: number;
@@ -128,6 +130,14 @@ function computePersistedUdpFaultAgeSeconds(context: HealthComputationContext): 
   if (context.previousBroadcastHealth !== 'degraded' && context.previousBroadcastHealth !== 'off_air_confirmed') {
     return 0;
   }
+  // Avoid carrying UDP-fault age across runtime-driven degraded incidents.
+  if (
+    context.previousRuntimeHealth
+    && context.previousRuntimeHealth !== 'healthy'
+    && context.previousRuntimeHealth !== 'unknown'
+  ) {
+    return 0;
+  }
 
   const currentTimeMs = (context.currentTime ?? new Date()).getTime();
   const previousStartMs = Date.parse(context.previousBroadcastStartedAt);
@@ -139,7 +149,7 @@ function computePersistedUdpFaultAgeSeconds(context: HealthComputationContext): 
 }
 
 function computePersistedRuntimeFaultAgeSeconds(context: HealthComputationContext): number {
-  if (!context.previousBroadcastStartedAt) {
+  if (!context.previousRuntimeStartedAt) {
     return 0;
   }
 
@@ -152,7 +162,7 @@ function computePersistedRuntimeFaultAgeSeconds(context: HealthComputationContex
   }
 
   const currentTimeMs = (context.currentTime ?? new Date()).getTime();
-  const previousStartMs = Date.parse(context.previousBroadcastStartedAt);
+  const previousStartMs = Date.parse(context.previousRuntimeStartedAt);
   if (Number.isNaN(previousStartMs)) {
     return 0;
   }
@@ -294,15 +304,19 @@ function computeRuntime(obs: Observations, context: HealthComputationContext): R
     && !healthyPlaybackProven
     && context.previousRuntimeHealth === 'paused';
 
-  if (explicitStoppedInsta) {
+  if (explicitStoppedInsta && !healthyPlaybackProven) {
     return 'stopped';
   }
 
-  if (logToken === 'paused' && logTokenFresh) {
+  if (logToken === 'paused' && logTokenFresh && !healthyPlaybackProven) {
     return 'paused';
   }
 
-  if (logToken === 'stopxxx2' && (logTokenFresh || (context.previousRuntimeHealth === 'paused' && !healthyPlaybackProven))) {
+  if (
+    logToken === 'stopxxx2'
+    && !healthyPlaybackProven
+    && (logTokenFresh || (context.previousRuntimeHealth === 'paused' && !healthyPlaybackProven))
+  ) {
     return 'paused';
   }
 
@@ -310,7 +324,7 @@ function computeRuntime(obs: Observations, context: HealthComputationContext): R
     return 'stopped';
   }
 
-  if (explicitPausedInsta) {
+  if (explicitPausedInsta && !healthyPlaybackProven) {
     return 'paused';
   }
 

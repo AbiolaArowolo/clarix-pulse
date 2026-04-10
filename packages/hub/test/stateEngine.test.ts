@@ -152,3 +152,76 @@ test('computeHealth ignores stale app_exited token once process is back up', () 
   assert.equal(result.runtimeHealth, 'healthy');
   assert.equal(result.broadcastHealth, 'healthy');
 });
+
+test('computeHealth keeps fresh pause token from forcing paused when CPU proves active playback', () => {
+  const result = computeHealth(
+    {
+      playout_process_up: 1,
+      log_last_token: 'paused',
+      log_last_token_fresh: 1,
+      playout_cpu_usage_ratio_poll: 1.1,
+    },
+    false,
+  );
+
+  assert.equal(result.runtimeHealth, 'healthy');
+  assert.equal(result.broadcastHealth, 'healthy');
+});
+
+test('computeHealth keeps stale running flag from forcing stopped when CPU proves active playback', () => {
+  const result = computeHealth(
+    {
+      playout_process_up: 1,
+      insta_running_flag: 0,
+      playout_cpu_usage_ratio_poll: 1.2,
+    },
+    false,
+  );
+
+  assert.equal(result.runtimeHealth, 'healthy');
+  assert.equal(result.broadcastHealth, 'healthy');
+});
+
+test('computeHealth does not use previous broadcast age to escalate a newly paused runtime to off-air', () => {
+  const now = new Date('2026-04-06T14:00:00.000Z');
+  const result = computeHealth(
+    {
+      playout_process_up: 1,
+      insta_pause_flag: 1,
+      insta_runtime_state: 'paused',
+    },
+    false,
+    {
+      currentTime: now,
+      previousRuntimeHealth: 'paused',
+      previousRuntimeStartedAt: '2026-04-06T13:59:50.000Z',
+      previousBroadcastHealth: 'degraded',
+      previousBroadcastStartedAt: '2026-04-06T13:49:50.000Z',
+    },
+  );
+
+  assert.equal(result.runtimeHealth, 'paused');
+  assert.equal(result.broadcastHealth, 'degraded');
+});
+
+test('computeHealth does not escalate first UDP fault to confirmed when previous degraded state was runtime-driven', () => {
+  const now = new Date('2026-04-06T14:00:00.000Z');
+  const result = computeHealth(
+    {
+      playout_process_up: 1,
+      filebar_position_delta_poll: 1,
+      output_signal_present: 0,
+    },
+    true,
+    {
+      currentTime: now,
+      previousRuntimeHealth: 'paused',
+      previousRuntimeStartedAt: '2026-04-06T13:50:00.000Z',
+      previousBroadcastHealth: 'degraded',
+      previousBroadcastStartedAt: '2026-04-06T13:50:00.000Z',
+    },
+  );
+
+  assert.equal(result.runtimeHealth, 'healthy');
+  assert.equal(result.broadcastHealth, 'degraded');
+});

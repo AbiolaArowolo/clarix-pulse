@@ -25,7 +25,6 @@ export function useAlarm(sites: SiteState[]) {
       return false;
     }
   });
-  const [alarmActive, setAlarmActive] = useState(false);
   const [audioBlocked, setAudioBlocked] = useState(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
@@ -33,12 +32,13 @@ export function useAlarm(sites: SiteState[]) {
   const freqIntervalRef = useRef<number | null>(null);
   const vibrationTimerRef = useRef<number | null>(null);
   const interactionUnlockedRef = useRef(false);
+  const startInFlightRef = useRef(false);
+  const startGenerationRef = useRef(0);
+  const desiredAlarmRef = useRef(false);
 
   const hasAlarm = sites.some((site) => site.instances.some(isAlarmState));
-
-  useEffect(() => {
-    setAlarmActive(hasAlarm);
-  }, [hasAlarm]);
+  const alarmActive = hasAlarm;
+  desiredAlarmRef.current = alarmActive && !muted;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -80,6 +80,9 @@ export function useAlarm(sites: SiteState[]) {
   }, [ensureAudioContext]);
 
   const stopAlarm = useCallback(() => {
+    startGenerationRef.current += 1;
+    startInFlightRef.current = false;
+
     if (freqIntervalRef.current !== null) {
       window.clearInterval(freqIntervalRef.current);
       freqIntervalRef.current = null;
@@ -102,36 +105,46 @@ export function useAlarm(sites: SiteState[]) {
   }, []);
 
   const startAlarm = useCallback(async () => {
-    if (oscillatorRef.current) return;
+    if (oscillatorRef.current || startInFlightRef.current) return;
+    if (!desiredAlarmRef.current) return;
 
-    const ready = await unlockAudio();
-    if (!ready) return;
+    startInFlightRef.current = true;
+    const generation = startGenerationRef.current;
+    try {
+      const ready = await unlockAudio();
+      if (!ready) return;
+      if (generation !== startGenerationRef.current || !desiredAlarmRef.current || oscillatorRef.current) {
+        return;
+      }
 
-    const ctx = audioCtxRef.current;
-    if (!ctx) return;
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
 
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.24, ctx.currentTime + 0.04);
-    gain.connect(ctx.destination);
-    gainRef.current = gain;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.24, ctx.currentTime + 0.04);
+      gain.connect(ctx.destination);
+      gainRef.current = gain;
 
-    const osc = ctx.createOscillator();
-    osc.type = 'square';
-    osc.frequency.setValueAtTime(880, ctx.currentTime);
+      const osc = ctx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
 
-    let toggle = false;
-    const interval = window.setInterval(() => {
-      if (audioCtxRef.current?.state !== 'running') return;
-      toggle = !toggle;
-      osc.frequency.setValueAtTime(toggle ? 660 : 880, audioCtxRef.current.currentTime);
-    }, 500);
+      let toggle = false;
+      const interval = window.setInterval(() => {
+        if (audioCtxRef.current?.state !== 'running') return;
+        toggle = !toggle;
+        osc.frequency.setValueAtTime(toggle ? 660 : 880, audioCtxRef.current.currentTime);
+      }, 500);
 
-    osc.connect(gain);
-    osc.start();
-    oscillatorRef.current = osc;
-    freqIntervalRef.current = interval;
-    setAudioBlocked(false);
+      osc.connect(gain);
+      osc.start();
+      oscillatorRef.current = osc;
+      freqIntervalRef.current = interval;
+      setAudioBlocked(false);
+    } finally {
+      startInFlightRef.current = false;
+    }
   }, [unlockAudio]);
 
   const startVibration = useCallback(() => {

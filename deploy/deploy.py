@@ -7,9 +7,13 @@ Uploads hub and dashboard dist files, restarts PM2, and verifies.
 import os
 import sys
 import io
+import json
+import hashlib
 import re
 import posixpath
+import subprocess
 from pathlib import Path
+from datetime import datetime, timezone
 import paramiko
 import time
 
@@ -24,6 +28,9 @@ PORT = 22
 LOCAL_HUB_DIST = r"D:\monitoring\packages\hub\dist"
 LOCAL_DASHBOARD_DIST = r"D:\monitoring\packages\dashboard\dist"
 LOCAL_RELEASE_ROOT = Path(r"D:\monitoring\packages\agent\release")
+REPO_ROOT = Path(r"D:\monitoring")
+REMOTE_REPO_ROOT = "/var/www/clarix-pulse"
+REMOTE_REVISION_PATH = f"{REMOTE_REPO_ROOT}/DEPLOYED_REVISION.json"
 
 
 def parse_bundle_version(name):
@@ -49,6 +56,45 @@ def resolve_latest_bundle_paths():
 
     remote_zip = f"/var/www/clarix-pulse/packages/agent/release/{zip_path.name}"
     return str(bundle_dir), str(zip_path), remote_zip
+
+
+def get_git_revision():
+    try:
+        full_revision = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=REPO_ROOT,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        status = subprocess.check_output(
+            ["git", "status", "--porcelain"],
+            cwd=REPO_ROOT,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except Exception:
+        return None, None
+
+    return full_revision, bool(status.strip())
+
+
+def sha256_file(file_path):
+    digest = hashlib.sha256()
+    with open(file_path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build_revision_metadata(local_installer_zip):
+    revision, source_dirty = get_git_revision()
+    return {
+        "revision": revision,
+        "builtAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "archiveName": Path(local_installer_zip).name,
+        "archiveSha256": sha256_file(local_installer_zip),
+        "sourceDirty": source_dirty,
+    }
 
 
 def safe_print(text):
@@ -107,6 +153,8 @@ def main():
     print("Connected.")
 
     _, local_installer_zip, remote_installer_zip = resolve_latest_bundle_paths()
+    revision_metadata = build_revision_metadata(local_installer_zip)
+    revision_payload = json.dumps(revision_metadata, indent=2, sort_keys=True) + "\n"
 
     # -- Step 1: Discover PM2 hub entry point ---------------------------------
     print("\n" + "=" * 60)
@@ -266,6 +314,10 @@ def main():
     safe_print(f"  copying to downloads dir: {remote_dl_zip}")
     sftp.put(local_installer_zip, remote_dl_zip)
 
+    safe_print(f"  writing live build metadata: {REMOTE_REVISION_PATH}")
+    with sftp.open(REMOTE_REVISION_PATH, "w") as handle:
+        handle.write(revision_payload)
+
     sftp.close()
     safe_print("Installer ZIP upload complete.")
 
@@ -294,6 +346,9 @@ def main():
     print("STEP 6: Test live hub API")
     print("=" * 60)
 
+    version_out, _, _ = ssh_run(client,
+        "curl -s http://localhost:3001/api/version | head -c 500",
+        "curl /api/version")
     api_out, _, code = ssh_run(client,
         "curl -s http://localhost:3001/api/auth/session | head -c 300",
         "curl /api/auth/session")
@@ -306,6 +361,12 @@ def main():
     print(f"Hub dist uploaded to:       {remote_hub_dist}")
     print(f"Dashboard dist uploaded to: {remote_dashboard}")
     print(f"Installer ZIP uploaded to:  {remote_installer_zip}")
+    print(f"Live revision metadata:     {REMOTE_REVISION_PATH}")
+    print(f"Download bundle name:       {revision_metadata['archiveName']}")
+    print(f"Download bundle sha256:     {revision_metadata['archiveSha256']}")
+    print(f"Source revision:            {revision_metadata['revision'] or 'unknown'}")
+    print(f"Source dirty:               {revision_metadata['sourceDirty']}")
+    print(f"/api/version response:      {version_out[:200]}")
     print(f"API response snippet:       {api_out[:200]}")
 
     if "authenticated" in api_out or "{" in api_out:

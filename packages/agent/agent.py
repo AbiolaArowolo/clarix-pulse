@@ -1881,24 +1881,145 @@ def _stop_existing_service(nssm_path: str | None = None) -> None:
         subprocess.run(["sc", "stop", SERVICE_NAME], capture_output=True, text=True)
         subprocess.run(["sc", "delete", SERVICE_NAME], capture_output=True, text=True)
 
-    installed_exe = os.path.abspath(_installed_path("clarix-agent.exe"))
     current_pid = os.getpid()
-    for proc in psutil.process_iter(["pid", "name", "exe"]):
+    for proc in psutil.process_iter(["pid", "name", "exe", "cmdline"]):
         try:
             pid = int(proc.info.get("pid") or 0)
             if pid == current_pid:
                 continue
             name = str(proc.info.get("name") or "").lower()
-            exe_path = os.path.abspath(str(proc.info.get("exe") or ""))
-            if name not in {"clarix-agent.exe", "clarix-agent"}:
-                continue
-            if exe_path and exe_path != installed_exe:
+            exe_path = str(proc.info.get("exe") or "").lower()
+            cmdline = " ".join(str(part) for part in (proc.info.get("cmdline") or [])).lower()
+            haystack = " ".join(part for part in (name, exe_path, cmdline) if part)
+            if "clarix-agent" not in haystack and "clarixpulse" not in haystack:
                 continue
             proc.kill()
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError, ValueError):
             continue
 
     time.sleep(2)
+
+
+def _remove_path_best_effort(path: str) -> bool:
+    normalized = os.path.abspath(path)
+    if not path or not os.path.exists(normalized):
+        return False
+
+    try:
+        if os.path.isdir(normalized) and not os.path.islink(normalized):
+            shutil.rmtree(normalized)
+        else:
+            os.remove(normalized)
+        log.info(f"Removed Pulse artifact: {normalized}")
+        return True
+    except Exception as exc:
+        log.warning(f"Could not remove Pulse artifact '{normalized}': {exc}")
+        return False
+
+
+def _remove_windows_autorun_entries() -> None:
+    try:
+        import winreg  # type: ignore
+    except ImportError:
+        return
+
+    targets = [
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run"),
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\RunOnce"),
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\RunServices"),
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\RunServicesOnce"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Run"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\RunOnce"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\RunServices"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\RunServicesOnce"),
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"),
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32"),
+    ]
+
+    for root, subkey in targets:
+        try:
+            with winreg.OpenKey(root, subkey, 0, winreg.KEY_READ | winreg.KEY_WRITE) as key:
+                value_count = winreg.QueryInfoKey(key)[1]
+                candidate_names: list[str] = []
+                for index in range(value_count):
+                    value_name, value_data, _ = winreg.EnumValue(key, index)
+                    value_text = f"{value_name} {value_data}".lower()
+                    if "clarix" in value_text or "pulse" in value_text or "clarix-agent" in value_text:
+                        candidate_names.append(value_name)
+                for value_name in candidate_names:
+                    try:
+                        winreg.DeleteValue(key, value_name)
+                        log.info(f"Removed startup entry: {subkey}\\{value_name}")
+                    except FileNotFoundError:
+                        continue
+                    except OSError as exc:
+                        log.warning(f"Could not remove startup entry '{subkey}\\{value_name}': {exc}")
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            log.debug(f"Could not inspect startup registry key '{subkey}': {exc}")
+
+
+def _remove_startup_folder_remnants() -> None:
+    startup_roots = []
+    app_data = os.environ.get("APPDATA")
+    program_data = os.environ.get("PROGRAMDATA")
+    if app_data:
+        startup_roots.append(os.path.join(app_data, r"Microsoft\Windows\Start Menu\Programs\Startup"))
+    if program_data:
+        startup_roots.append(os.path.join(program_data, r"Microsoft\Windows\Start Menu\Programs\Startup"))
+
+    for root in startup_roots:
+        if not os.path.isdir(root):
+            continue
+        try:
+            for entry in os.scandir(root):
+                if any(token in entry.name.lower() for token in ("clarix", "pulse")):
+                    _remove_path_best_effort(entry.path)
+        except OSError as exc:
+            log.debug(f"Could not inspect startup folder '{root}': {exc}")
+
+
+def _cleanup_uninstall_artifacts() -> None:
+    install_root = os.path.abspath(os.path.join(INSTALL_DIR, os.pardir))
+    candidate_paths = [
+        INSTALL_DIR,
+        install_root,
+        r"C:\pulse-node-bundle",
+        r"C:\Program Files\ClarixPulse",
+        r"C:\Program Files (x86)\ClarixPulse",
+    ]
+
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        candidate_paths.extend(
+            [
+                os.path.join(local_app_data, "ClarixPulse"),
+                os.path.join(local_app_data, "ClarixPulse", "Bundles"),
+            ]
+        )
+
+    temp_dir = tempfile.gettempdir()
+    if temp_dir:
+        candidate_paths.extend(
+            [
+                os.path.join(temp_dir, "ClarixPulse"),
+                os.path.join(temp_dir, "ClarixPulse", "Bundles"),
+            ]
+        )
+
+    base_dir = os.path.abspath(_base_dir())
+    if base_dir and base_dir not in {os.path.abspath(INSTALL_DIR), os.path.abspath(os.environ.get("ProgramData", r"C:\ProgramData"))}:
+        if any(token in os.path.basename(base_dir).lower() for token in ("clarix", "pulse")):
+            candidate_paths.append(base_dir)
+
+    for path in candidate_paths:
+        _remove_path_best_effort(path)
+
+    _remove_windows_autorun_entries()
+    _remove_startup_folder_remnants()
 
 
 def _write_yaml(path: str, data: dict[str, Any]) -> None:
@@ -2731,7 +2852,14 @@ def _run_local_config_ui(
     existing: dict[str, Any] | None = None,
     preferred_ports: range | list[int] | tuple[int, ...] | None = None,
 ) -> dict[str, Any]:
-    initial_config = _config_for_local_ui(existing)
+    defaults_search_roots = [
+        _base_dir(),
+        _bundle_path(""),
+        _installed_path(""),
+        os.path.dirname(_runtime_config_path()),
+    ]
+    prepared_existing, _ = _apply_pulse_account_defaults(existing, defaults_search_roots)
+    initial_config = _config_for_local_ui(prepared_existing)
     html = _render_local_config_ui_html(initial_config)
     result: dict[str, Any] = {}
     saved = threading.Event()
@@ -2794,7 +2922,7 @@ def _run_local_config_ui(
                     self._send_json(200, {"ok": True, "config": initial_config, "message": message})
                     return
 
-                config = _materialize_local_ui_config(payload, existing)
+                config = _materialize_local_ui_config(payload, prepared_existing)
             except Exception as exc:
                 self._send_json(400, {"error": str(exc)})
                 return
@@ -2911,6 +3039,11 @@ def _load_pulse_account_defaults(search_roots: list[str]) -> dict[str, str]:
         candidate_paths.append((os.path.join(normalized_root, "pulse-account.json"), "json"))
         candidate_paths.append((os.path.join(normalized_root, "README.txt"), "readme"))
 
+    merged_defaults = {
+        "hub_url": "",
+        "enrollment_key": "",
+        "source_path": "",
+    }
     seen: set[str] = set()
     for candidate, candidate_kind in candidate_paths:
         resolved = os.path.abspath(candidate)
@@ -2940,13 +3073,21 @@ def _load_pulse_account_defaults(search_roots: list[str]) -> dict[str, str]:
 
         if not defaults:
             continue
-        return {
-            "hub_url": defaults.get("hub_url", ""),
-            "enrollment_key": defaults.get("enrollment_key", ""),
-            "source_path": resolved,
-        }
 
-    return {}
+        if defaults.get("hub_url") and not merged_defaults["hub_url"]:
+            merged_defaults["hub_url"] = defaults["hub_url"]
+        if defaults.get("enrollment_key") and not merged_defaults["enrollment_key"]:
+            merged_defaults["enrollment_key"] = defaults["enrollment_key"]
+        if not merged_defaults["source_path"]:
+            merged_defaults["source_path"] = resolved
+
+        if merged_defaults["hub_url"] and merged_defaults["enrollment_key"]:
+            break
+
+    if not merged_defaults["hub_url"] and not merged_defaults["enrollment_key"]:
+        return {}
+
+    return merged_defaults
 
 
 def _apply_pulse_account_defaults(
@@ -3448,6 +3589,8 @@ def _stage_runtime_files() -> str:
         "configure.bat",
         "uninstall.bat",
         "config.example.yaml",
+        "pulse-account.json",
+        "README.txt",
         "confidence_scorer.py",
         "learning_store.py",
         "fingerprint_manifest.json",
@@ -3627,9 +3770,16 @@ def uninstall_service_command() -> int:
 
             # Older hubs may not have /api/config/node/decommission yet.
             if not cleanup_ok and existing_config is not None and cleanup_error.startswith("HTTP 404"):
-                cleanup_result = _sync_node_config_mirror_to_hub(existing_config, players_override=[])
-                cleanup_ok = bool(cleanup_result.get("ok"))
-                cleanup_error = _as_str(cleanup_result.get("error"))
+                mirror_result = _sync_node_config_mirror_to_hub(existing_config, players_override=[])
+                mirror_ok = bool(mirror_result.get("ok"))
+                mirror_error = _as_str(mirror_result.get("error"))
+                if mirror_ok:
+                    cleanup_error = (
+                        "Hub decommission endpoint unavailable (HTTP 404). "
+                        "Player records were synced for cleanup, but node removal is not supported by this hub."
+                    )
+                elif mirror_error:
+                    cleanup_error = mirror_error
 
             if cleanup_ok:
                 removed_count = len(cleanup_result.get("removed_player_ids", []))
@@ -3641,8 +3791,7 @@ def uninstall_service_command() -> int:
                     f"{cleanup_error}. Remove the stale node from Dashboard > Remote Setup > Hub cleanup."
                 )
 
-        if os.path.exists(INSTALL_DIR) and _prompt_yes_no(f"Delete installed files from {INSTALL_DIR}", False):
-            shutil.rmtree(INSTALL_DIR, ignore_errors=True)
+        _cleanup_uninstall_artifacts()
 
         print("Pulse uninstalled.")
         return 0
@@ -3681,9 +3830,16 @@ def decommission_hub_command() -> int:
 
         # Older hubs may not have /api/config/node/decommission yet.
         if not cleanup_ok and existing_config is not None and cleanup_error.startswith("HTTP 404"):
-            cleanup_result = _sync_node_config_mirror_to_hub(existing_config, players_override=[])
-            cleanup_ok = bool(cleanup_result.get("ok"))
-            cleanup_error = _as_str(cleanup_result.get("error"))
+            mirror_result = _sync_node_config_mirror_to_hub(existing_config, players_override=[])
+            mirror_ok = bool(mirror_result.get("ok"))
+            mirror_error = _as_str(mirror_result.get("error"))
+            if mirror_ok:
+                cleanup_error = (
+                    "Hub decommission endpoint unavailable (HTTP 404). "
+                    "Player records were synced for cleanup, but node removal is not supported by this hub."
+                )
+            elif mirror_error:
+                cleanup_error = mirror_error
 
         if cleanup_ok:
             removed_count = len(cleanup_result.get("removed_player_ids", []))
