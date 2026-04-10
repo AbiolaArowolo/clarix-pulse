@@ -257,7 +257,7 @@ export async function updateMirroredPlayerStreamUrl(
       ...player,
       udpInputs: player.udpInputs.map((u, ui) => {
         if (ui !== inputIndex) return u;
-        return { ...u, streamUrl };
+        return { ...u, streamUrl, enabled: true };
       }),
     };
   });

@@ -85,6 +85,7 @@ export function buildTenantBundleBuffer(input: {
   if (zip.getEntry('pulse-account.json')) {
     zip.deleteFile('pulse-account.json');
   }
+  zip.addFile('pulse-account.json', Buffer.from(`${accountConfigJson}\n`, 'utf8'));
 
   return zip.toBuffer();
 }

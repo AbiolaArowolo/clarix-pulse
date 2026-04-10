@@ -907,7 +907,15 @@ LOCAL_CONFIG_UI_TEMPLATE = r"""<!doctype html>
       },
       updateUdp(playerIndex, udpIndex, key, value) {
         const udp = state.players[playerIndex].udp_inputs[udpIndex];
-        udp[key] = key === "thumbnail_interval_s" ? Number(value) : value;
+        const normalizedValue = key === "thumbnail_interval_s" ? Number(value) : value;
+        udp[key] = normalizedValue;
+        if (key === "stream_url") {
+          const hasStream = String(normalizedValue || "").trim().length > 0;
+          if (hasStream && !udp.enabled) {
+            udp.enabled = true;
+            renderPlayers();
+          }
+        }
       },
       async importFile(event) {
         showMessage("", "");

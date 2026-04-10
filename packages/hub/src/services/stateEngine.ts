@@ -285,13 +285,13 @@ function computeRuntime(obs: Observations, context: HealthComputationContext): R
   const keepPausedWhileStatic = context.previousRuntimeHealth === 'paused'
     && obs.playout_process_up === 1
     && !explicitStoppedInsta
-    && !pauseRecoveryProven;
+    && !healthyPlaybackProven;
   const keepStoppedWhileStatic = context.previousRuntimeHealth === 'stopped'
     && obs.playout_process_up === 1
     && !healthyPlaybackProven;
   const stalePauseShouldWin = logToken === 'paused'
     && !logTokenFresh
-    && !pauseRecoveryProven
+    && !healthyPlaybackProven
     && context.previousRuntimeHealth === 'paused';
 
   if (explicitStoppedInsta) {
@@ -302,7 +302,7 @@ function computeRuntime(obs: Observations, context: HealthComputationContext): R
     return 'paused';
   }
 
-  if (logToken === 'stopxxx2' && (logTokenFresh || (context.previousRuntimeHealth === 'paused' && !pauseRecoveryProven))) {
+  if (logToken === 'stopxxx2' && (logTokenFresh || (context.previousRuntimeHealth === 'paused' && !healthyPlaybackProven))) {
     return 'paused';
   }
 
@@ -314,7 +314,7 @@ function computeRuntime(obs: Observations, context: HealthComputationContext): R
     return 'paused';
   }
 
-  if (repeatedStaticPosition && !pauseRecoveryProven) {
+  if (repeatedStaticPosition && !healthyPlaybackProven) {
     return 'paused';
   }
 

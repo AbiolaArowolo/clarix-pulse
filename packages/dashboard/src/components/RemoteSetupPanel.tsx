@@ -441,9 +441,14 @@ export function RemoteSetupPanel() {
         return {
           ...player,
           udpInputsText: serializeUdpInputs(
-            inputs.map((udpInput, currentIndex) => (
-              currentIndex === udpIndex ? { ...udpInput, ...patch } : udpInput
-            )),
+            inputs.map((udpInput, currentIndex) => {
+              if (currentIndex !== udpIndex) return udpInput;
+              const nextUdpInput = { ...udpInput, ...patch };
+              if (typeof patch.streamUrl === 'string' && patch.streamUrl.trim() && patch.enabled === undefined) {
+                nextUdpInput.enabled = true;
+              }
+              return nextUdpInput;
+            }),
           ),
         };
       }),

@@ -54,6 +54,49 @@ test('computeHealth classifies repeated static native position polls as paused b
   assert.equal(result.broadcastHealth, 'degraded');
 });
 
+test('computeHealth clears paused latch when static position persists but CPU activity proves playback resumed', () => {
+  const result = computeHealth(
+    {
+      playout_process_up: 1,
+      position_signal_present: 1,
+      position_static_polls: 250,
+      filebar_position_delta_poll: 0,
+      playout_cpu_usage_ratio_poll: 1.2,
+    },
+    false,
+    {
+      previousRuntimeHealth: 'paused',
+      previousRuntimeStartedAt: '2026-04-06T13:58:50.000Z',
+      previousBroadcastHealth: 'degraded',
+      previousBroadcastStartedAt: '2026-04-06T13:58:50.000Z',
+    },
+  );
+
+  assert.equal(result.runtimeHealth, 'healthy');
+  assert.equal(result.broadcastHealth, 'healthy');
+});
+
+test('computeHealth clears stale stop token pause when CPU activity proves playback resumed', () => {
+  const result = computeHealth(
+    {
+      playout_process_up: 1,
+      log_last_token: 'stopxxx2',
+      log_last_token_fresh: 0,
+      playout_cpu_usage_ratio_poll: 1.1,
+    },
+    false,
+    {
+      previousRuntimeHealth: 'paused',
+      previousRuntimeStartedAt: '2026-04-06T13:58:50.000Z',
+      previousBroadcastHealth: 'degraded',
+      previousBroadcastStartedAt: '2026-04-06T13:58:50.000Z',
+    },
+  );
+
+  assert.equal(result.runtimeHealth, 'healthy');
+  assert.equal(result.broadcastHealth, 'healthy');
+});
+
 test('computeHealth keeps player health separate from a network outage reported by the node', () => {
   const result = computeHealth(
     {
