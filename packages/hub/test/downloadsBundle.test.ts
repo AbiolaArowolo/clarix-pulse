@@ -62,7 +62,7 @@ registerHooks({
   },
 });
 
-test('/api/downloads/bundle/windows/latest injects tenant defaults into README and pulse-account.json', async () => {
+test('/api/downloads/bundle/windows/latest keeps compact 3-file bundle with tenant defaults embedded in README', async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pulse-download-test-'));
   const bundlePath = path.join(tempRoot, 'clarix-pulse-test.zip');
 
@@ -95,16 +95,8 @@ test('/api/downloads/bundle/windows/latest injects tenant defaults into README a
       const extracted = new AdmZip(buffer);
       assert.equal(
         extracted.getEntries().map((entry) => entry.entryName).sort().join(','),
-        'ClarixPulseSetup.exe,README.txt,Uninstall.exe,pulse-account.json',
+        'ClarixPulseSetup.exe,README.txt,Uninstall.exe',
       );
-      const accountEntry = extracted.getEntry('pulse-account.json');
-      assert.ok(accountEntry, 'pulse-account.json should be included in the bundle');
-      const accountFile = JSON.parse(accountEntry!.getData().toString('utf8')) as {
-        hubUrl: string;
-        hub_url: string;
-        enrollmentKey: string;
-        enrollment_key: string;
-      };
 
       const readmeEntry = extracted.getEntry('README.txt');
       assert.ok(readmeEntry, 'README.txt should be included in the bundle');
@@ -123,10 +115,6 @@ test('/api/downloads/bundle/windows/latest injects tenant defaults into README a
       assert.equal(accountConfig.hub_url, 'https://pulse.example.com');
       assert.equal(accountConfig.enrollmentKey, mockedEnrollmentKey);
       assert.equal(accountConfig.enrollment_key, mockedEnrollmentKey);
-      assert.equal(accountFile.hubUrl, 'https://pulse.example.com');
-      assert.equal(accountFile.hub_url, 'https://pulse.example.com');
-      assert.equal(accountFile.enrollmentKey, mockedEnrollmentKey);
-      assert.equal(accountFile.enrollment_key, mockedEnrollmentKey);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

@@ -453,6 +453,13 @@ if %ROBO% GEQ 8 (
     exit /b 1
 )
 
+if exist "%ORIGIN_CWD%\README.txt" (
+    copy /Y "%ORIGIN_CWD%\README.txt" "%TARGET_DIR%\README.txt" >nul 2>nul
+    if not errorlevel 1 (
+        echo CopiedReadme=%ORIGIN_CWD%\README.txt >> "%LOG_PATH%"
+    )
+)
+
 if exist "%ORIGIN_CWD%\pulse-account.json" (
     copy /Y "%ORIGIN_CWD%\pulse-account.json" "%TARGET_DIR%\pulse-account.json" >nul 2>nul
     if not errorlevel 1 (
