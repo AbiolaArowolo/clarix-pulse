@@ -498,16 +498,26 @@ exit /b 0
 @'
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-set "PRIMARY_TARGET=C:\ClarixPulse"
-set "FALLBACK_TARGET=%LOCALAPPDATA%\ClarixPulse"
-set "TARGET_DIR=%PRIMARY_TARGET%"
 set "LOG_PATH=%TEMP%\clarixpulse-uninstall-launcher.log"
+set "PROGRAM_DATA_ROOT=%ProgramData%"
+if not defined PROGRAM_DATA_ROOT set "PROGRAM_DATA_ROOT=C:\ProgramData"
+set "TARGET_DIR="
 
-if not exist "%TARGET_DIR%\uninstall.bat" (
-    if exist "%FALLBACK_TARGET%\uninstall.bat" set "TARGET_DIR=%FALLBACK_TARGET%"
+for %%D in ("%PROGRAM_DATA_ROOT%\ClarixPulse\Agent" "C:\ClarixPulse" "%LOCALAPPDATA%\ClarixPulse" "%APPDATA%\ClarixPulse") do (
+    if not defined TARGET_DIR if exist "%%~fD\uninstall.bat" set "TARGET_DIR=%%~fD"
 )
 
-if not exist "%TARGET_DIR%" (
+if not defined TARGET_DIR (
+    for %%D in ("%PROGRAM_DATA_ROOT%\ClarixPulse\Agent" "C:\ClarixPulse" "%LOCALAPPDATA%\ClarixPulse" "%APPDATA%\ClarixPulse") do (
+        if not defined TARGET_DIR if exist "%%~fD\clarix-agent.exe" set "TARGET_DIR=%%~fD"
+    )
+)
+
+if not defined TARGET_DIR call :ResolveFromService "ClarixPulseAgent"
+if not defined TARGET_DIR call :ResolveFromService "clarix-pulse-agent"
+
+if not defined TARGET_DIR (
+    echo [%DATE% %TIME%] Uninstall launcher could not find an installed target > "%LOG_PATH%"
     start "" "%ComSpec%" /K "echo Clarix Pulse is not installed on this PC. & exit /b 0"
     exit /b 0
 )
@@ -535,6 +545,25 @@ if exist "%TARGET_DIR%\remove-pulse-agent.ps1" (
 )
 if not defined UNINSTALL_EXIT set "UNINSTALL_EXIT=1"
 exit /b !UNINSTALL_EXIT!
+
+:ResolveFromService
+set "SERVICE_NAME=%~1"
+set "SERVICE_BINLINE="
+set "SERVICE_BIN="
+set "SERVICE_DIR="
+for /f "tokens=3,*" %%A in ('sc.exe qc "%SERVICE_NAME%" 2^>nul ^| findstr /I "BINARY_PATH_NAME"') do (
+    set "SERVICE_BINLINE=%%A %%B"
+)
+if not defined SERVICE_BINLINE goto :eof
+set "SERVICE_BINLINE=!SERVICE_BINLINE:"=!"
+for /f "tokens=1 delims= " %%P in ("!SERVICE_BINLINE!") do set "SERVICE_BIN=%%P"
+if not defined SERVICE_BIN goto :eof
+for %%F in ("!SERVICE_BIN!") do set "SERVICE_DIR=%%~dpF"
+if not defined SERVICE_DIR goto :eof
+if "!SERVICE_DIR:~-1!"=="\" set "SERVICE_DIR=!SERVICE_DIR:~0,-1!"
+if exist "!SERVICE_DIR!\uninstall.bat" set "TARGET_DIR=!SERVICE_DIR!"
+if not defined TARGET_DIR if exist "!SERVICE_DIR!\clarix-agent.exe" set "TARGET_DIR=!SERVICE_DIR!"
+goto :eof
 '@ | Set-Content -Path $uninstallLauncherPath -Encoding ASCII
 
     New-IExpressPackage `
