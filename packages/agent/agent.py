@@ -95,6 +95,7 @@ LOG_SELECTOR_KEYS = {
 INSTALL_DIR = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "ClarixPulse", "Agent")
 SERVICE_NAME = "ClarixPulseAgent"
 SERVICE_DISPLAY_NAME = "Pulse Agent"
+WINDOWS_UNINSTALL_REG_PATH = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\ClarixPulse"
 DEFAULT_HUB_URL = "https://pulse.clarixtech.com"
 LOCAL_UI_HOST = "127.0.0.1"
 LOCAL_UI_PORT = 3210
@@ -1752,16 +1753,42 @@ def _is_admin() -> bool:
 
 
 def _relaunch_as_admin(args: list[str]) -> int:
-    executable = sys.executable
-    parameters = subprocess.list2cmdline(args)
-    if not getattr(sys, "frozen", False):
-        parameters = subprocess.list2cmdline([os.path.abspath(__file__), *args])
-
-    result = ctypes.windll.shell32.ShellExecuteW(None, "runas", executable, parameters, None, 1)
-    if result <= 32:
-        print("ERROR: Unable to request Administrator privileges.")
+    if os.name != "nt":
+        print("ERROR: Administrator privileges are required on Windows.")
         return 1
-    return 0
+
+    executable = sys.executable
+    child_args = list(args)
+    if not getattr(sys, "frozen", False):
+        child_args = [os.path.abspath(__file__), *child_args]
+
+    try:
+        import base64
+
+        script = "\n".join(
+            [
+                "$ErrorActionPreference = 'Stop'",
+                f"$exe = {json.dumps(executable)}",
+                f"$argList = @({', '.join(json.dumps(arg) for arg in child_args)})",
+                "$process = Start-Process -FilePath $exe -ArgumentList $argList -Verb RunAs -Wait -PassThru",
+                "exit $process.ExitCode",
+            ]
+        )
+        encoded_script = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded_script],
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            stderr = completed.stderr.strip()
+            stdout = completed.stdout.strip()
+            details = stderr or stdout or f"exit code {completed.returncode}"
+            print(f"ERROR: Unable to request Administrator privileges. {details}")
+        return completed.returncode
+    except Exception as exc:
+        print(f"ERROR: Unable to request Administrator privileges. {exc}")
+        return 1
 
 
 def _run_command(command: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -1799,6 +1826,172 @@ def _copy_if_exists(source: str, destination: str) -> None:
         _ensure_directory(os.path.dirname(destination))
         if os.path.abspath(source) != os.path.abspath(destination):
             shutil.copy2(source, destination)
+
+
+def _write_config_like_file(path: str, data: dict[str, Any]) -> None:
+    if path.lower().endswith(".json"):
+        _ensure_directory(os.path.dirname(path))
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        return
+    _write_yaml(path, data)
+
+
+def _strip_local_enrollment_credentials(raw: dict[str, Any] | None) -> dict[str, Any]:
+    cleaned = copy.deepcopy(raw) if isinstance(raw, dict) else {}
+    for key in ("agent_token", "enrollment_key", "agentToken", "enrollmentKey"):
+        cleaned.pop(key, None)
+    return cleaned
+
+
+def _detect_bundle_version() -> str:
+    base_name = os.path.basename(_base_dir()).strip()
+    if base_name.lower().startswith("clarix-pulse-"):
+        return base_name[len("clarix-pulse-") :]
+
+    parent_name = os.path.basename(os.path.dirname(_base_dir())).strip()
+    if parent_name.lower().startswith("clarix-pulse-"):
+        return parent_name[len("clarix-pulse-") :]
+
+    return ""
+
+
+def _windows_uninstall_registry_values(install_dir: str) -> dict[str, Any]:
+    uninstall_exe = os.path.abspath(os.path.join(install_dir, "clarix-agent.exe"))
+    uninstall_bat = os.path.abspath(os.path.join(install_dir, "uninstall.bat"))
+    comspec = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "cmd.exe")
+    uninstall_string = subprocess.list2cmdline([comspec, "/c", uninstall_bat])
+    values: dict[str, Any] = {
+        "DisplayName": "Clarix Pulse",
+        "Publisher": "Clarix Pulse",
+        "InstallLocation": os.path.abspath(install_dir),
+        "InstallSource": os.path.abspath(_base_dir()),
+        "UninstallString": uninstall_string,
+        "QuietUninstallString": uninstall_string,
+        "DisplayIcon": uninstall_exe,
+        "NoModify": 1,
+        "NoRepair": 1,
+        "InstallDate": datetime.now().strftime("%Y%m%d"),
+        "WindowsInstaller": 0,
+    }
+    version = _detect_bundle_version()
+    if version:
+        values["DisplayVersion"] = version
+    return values
+
+
+def _write_windows_uninstall_registration(install_dir: str) -> None:
+    if os.name != "nt":
+        return
+
+    try:
+        import winreg  # type: ignore
+    except ImportError:
+        return
+
+    _delete_windows_registry_tree(winreg.HKEY_LOCAL_MACHINE, WINDOWS_UNINSTALL_REG_PATH)
+    values = _windows_uninstall_registry_values(install_dir)
+    try:
+        with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, WINDOWS_UNINSTALL_REG_PATH, 0, winreg.KEY_WRITE) as key:
+            for name, value in values.items():
+                if isinstance(value, int):
+                    winreg.SetValueEx(key, name, 0, winreg.REG_DWORD, value)
+                else:
+                    winreg.SetValueEx(key, name, 0, winreg.REG_SZ, str(value))
+    except OSError as exc:
+        log.warning(f"Could not write Windows uninstall registration: {exc}")
+
+
+def _delete_windows_registry_tree(root: Any, subkey: str) -> None:
+    try:
+        import winreg  # type: ignore
+    except ImportError:
+        return
+
+    try:
+        with winreg.OpenKey(root, subkey, 0, winreg.KEY_READ | winreg.KEY_WRITE) as key:
+            child_keys: list[str] = []
+            index = 0
+            while True:
+                try:
+                    child_keys.append(winreg.EnumKey(key, index))
+                    index += 1
+                except OSError:
+                    break
+
+            for child_key in child_keys:
+                _delete_windows_registry_tree(root, f"{subkey}\\{child_key}")
+
+            value_names: list[str] = []
+            index = 0
+            while True:
+                try:
+                    value_names.append(winreg.EnumValue(key, index)[0])
+                    index += 1
+                except OSError:
+                    break
+
+            for value_name in value_names:
+                try:
+                    winreg.DeleteValue(key, value_name)
+                except FileNotFoundError:
+                    continue
+                except OSError as exc:
+                    log.warning(f"Could not remove uninstall registration value '{value_name}': {exc}")
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        log.warning(f"Could not open uninstall registration key '{subkey}': {exc}")
+        return
+
+    try:
+        winreg.DeleteKey(root, subkey)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        log.warning(f"Could not remove uninstall registration key '{subkey}': {exc}")
+
+
+def _remove_windows_uninstall_registration() -> None:
+    if os.name != "nt":
+        return
+
+    try:
+        import winreg  # type: ignore
+    except ImportError:
+        return
+
+    _delete_windows_registry_tree(winreg.HKEY_LOCAL_MACHINE, WINDOWS_UNINSTALL_REG_PATH)
+
+
+def _sanitize_local_enrollment_credentials() -> None:
+    candidate_paths = [
+        _runtime_config_path(),
+        _installed_path("config.yaml"),
+        _installed_path("pulse-account.json"),
+        _bundle_path("config.yaml"),
+        _bundle_path("pulse-account.json"),
+    ]
+
+    seen: set[str] = set()
+    for path in candidate_paths:
+        normalized = os.path.abspath(path)
+        if normalized in seen or not os.path.exists(normalized):
+            continue
+        seen.add(normalized)
+
+        try:
+            existing = _load_yaml_if_exists(normalized)
+            if not isinstance(existing, dict):
+                continue
+
+            sanitized = _strip_local_enrollment_credentials(existing)
+            if sanitized != existing:
+                _write_config_like_file(normalized, sanitized)
+                log.info(f"Removed local enrollment credentials from {normalized}")
+        except Exception as exc:
+            log.warning(f"Could not sanitize local enrollment credentials in {normalized}: {exc}")
 
 
 def _download_file(url: str, destination: str) -> None:
@@ -1905,16 +2098,31 @@ def _remove_path_best_effort(path: str) -> bool:
     if not path or not os.path.exists(normalized):
         return False
 
-    try:
-        if os.path.isdir(normalized) and not os.path.islink(normalized):
-            shutil.rmtree(normalized)
-        else:
-            os.remove(normalized)
-        log.info(f"Removed Pulse artifact: {normalized}")
-        return True
-    except Exception as exc:
-        log.warning(f"Could not remove Pulse artifact '{normalized}': {exc}")
-        return False
+    for attempt in range(1, 7):
+        try:
+            if os.path.isdir(normalized) and not os.path.islink(normalized):
+                shutil.rmtree(normalized)
+            else:
+                os.remove(normalized)
+        except FileNotFoundError:
+            log.info(f"Removed Pulse artifact: {normalized}")
+            return True
+        except Exception as exc:
+            if attempt < 6:
+                time.sleep(0.35)
+                continue
+            log.warning(f"Could not remove Pulse artifact '{normalized}': {exc}")
+            return False
+
+        if not os.path.exists(normalized):
+            log.info(f"Removed Pulse artifact: {normalized}")
+            return True
+
+        if attempt < 6:
+            time.sleep(0.35)
+
+    log.warning(f"Could not remove Pulse artifact '{normalized}': path is still present.")
+    return False
 
 
 def _remove_windows_autorun_entries() -> None:
@@ -1982,7 +2190,7 @@ def _remove_startup_folder_remnants() -> None:
             log.debug(f"Could not inspect startup folder '{root}': {exc}")
 
 
-def _cleanup_uninstall_artifacts() -> None:
+def _cleanup_uninstall_artifacts() -> bool:
     install_root = os.path.abspath(os.path.join(INSTALL_DIR, os.pardir))
     candidate_paths = [
         INSTALL_DIR,
@@ -2015,11 +2223,16 @@ def _cleanup_uninstall_artifacts() -> None:
         if any(token in os.path.basename(base_dir).lower() for token in ("clarix", "pulse")):
             candidate_paths.append(base_dir)
 
+    cleanup_incomplete = False
     for path in candidate_paths:
-        _remove_path_best_effort(path)
+        removed = _remove_path_best_effort(path)
+        if not removed and os.path.exists(os.path.abspath(path)):
+            cleanup_incomplete = True
 
     _remove_windows_autorun_entries()
     _remove_startup_folder_remnants()
+    _remove_windows_uninstall_registration()
+    return cleanup_incomplete
 
 
 def _write_yaml(path: str, data: dict[str, Any]) -> None:
@@ -3588,6 +3801,7 @@ def _stage_runtime_files() -> str:
         "install.bat",
         "configure.bat",
         "uninstall.bat",
+        "remove-pulse-agent.ps1",
         "config.example.yaml",
         "pulse-account.json",
         "README.txt",
@@ -3712,6 +3926,7 @@ def install_service_admin_command() -> int:
         _run_command([nssm_path, "set", SERVICE_NAME, "Start", "SERVICE_AUTO_START"])
         _run_command(["sc", "description", SERVICE_NAME, "Pulse local node monitoring agent"])
         _run_command([nssm_path, "start", SERVICE_NAME])
+        _write_windows_uninstall_registration(INSTALL_DIR)
 
         print()
         print("Pulse installation complete.")
@@ -3763,6 +3978,8 @@ def uninstall_service_command() -> int:
         decommission_config, account_message = _prepare_config_for_hub_decommission(raw_config)
         if account_message:
             print(account_message)
+        _sanitize_local_enrollment_credentials()
+        _remove_windows_uninstall_registration()
         existing_config = _config_for_hub_sync(decommission_config)
         nssm_path = _installed_path("nssm.exe") if os.path.exists(_installed_path("nssm.exe")) else ""
         _stop_existing_service(nssm_path or None)
@@ -3808,7 +4025,12 @@ def uninstall_service_command() -> int:
                     f"{cleanup_error}. Remove the stale node from Dashboard > Remote Setup > Hub cleanup."
                 )
 
-        _cleanup_uninstall_artifacts()
+        cleanup_incomplete = _cleanup_uninstall_artifacts()
+
+        if cleanup_incomplete:
+            print("ERROR: Pulse uninstall could not remove all local artifacts.")
+            print("Close any Clarix/Pulse processes and run uninstall again.")
+            return 1
 
         print("Pulse uninstalled.")
         return 0

@@ -2,6 +2,8 @@ import sys
 import tempfile
 import unittest
 import subprocess
+import json
+import os
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -47,6 +49,101 @@ class PostJsonWithRetryTests(unittest.TestCase):
         self.assertIs(returned, response)
         post_mock.assert_called_once()
         sleep_mock.assert_not_called()
+
+
+class UninstallHardeningTests(unittest.TestCase):
+    def test_strip_local_enrollment_credentials_removes_sensitive_keys(self) -> None:
+        raw = {
+            "node_id": "studio-a",
+            "agent_token": "TOKEN-123",
+            "enrollment_key": "ENROLL-123",
+            "agentToken": "TOKEN-ALT",
+            "enrollmentKey": "ENROLL-ALT",
+        }
+
+        cleaned = agent._strip_local_enrollment_credentials(raw)
+
+        self.assertEqual(cleaned["node_id"], "studio-a")
+        self.assertNotIn("agent_token", cleaned)
+        self.assertNotIn("enrollment_key", cleaned)
+        self.assertNotIn("agentToken", cleaned)
+        self.assertNotIn("enrollmentKey", cleaned)
+        self.assertIn("agent_token", raw)
+
+    def test_sanitize_local_enrollment_credentials_wipes_yaml_and_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            runtime_config = temp_root / "config.yaml"
+            installed_account = temp_root / "pulse-account.json"
+
+            runtime_config.write_text(
+                "\n".join(
+                    [
+                        "node_id: studio-a",
+                        "agent_token: TOKEN-123",
+                        "enrollment_key: ENROLL-123",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            installed_account.write_text(
+                json.dumps(
+                    {
+                        "hubUrl": "https://pulse.example.com",
+                        "enrollmentKey": "ENROLL-123",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(agent, "_runtime_config_path", return_value=str(runtime_config)):
+                with patch.object(agent, "_installed_path", side_effect=lambda name: str(temp_root / name)):
+                    with patch.object(agent, "_bundle_path", side_effect=lambda name: str(temp_root / name)):
+                        agent._sanitize_local_enrollment_credentials()
+
+            sanitized_yaml = agent._load_yaml_if_exists(str(runtime_config))
+            sanitized_json = agent._load_yaml_if_exists(str(installed_account))
+
+        self.assertEqual(sanitized_yaml["node_id"], "studio-a")
+        self.assertNotIn("agent_token", sanitized_yaml)
+        self.assertNotIn("enrollment_key", sanitized_yaml)
+        self.assertEqual(sanitized_json["hubUrl"], "https://pulse.example.com")
+        self.assertNotIn("enrollmentKey", sanitized_json)
+
+    def test_windows_uninstall_registry_values_point_to_agent_uninstall_command(self) -> None:
+        values = agent._windows_uninstall_registry_values(r"C:\Program Files\Clarix Pulse\Agent")
+        expected_command = subprocess.list2cmdline(
+            [
+                os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "cmd.exe"),
+                "/c",
+                r"C:\Program Files\Clarix Pulse\Agent\uninstall.bat",
+            ]
+        )
+
+        self.assertEqual(values["DisplayName"], "Clarix Pulse")
+        self.assertEqual(values["InstallLocation"], r"C:\Program Files\Clarix Pulse\Agent")
+        self.assertEqual(values["UninstallString"], expected_command)
+        self.assertEqual(values["QuietUninstallString"], values["UninstallString"])
+        self.assertEqual(values["NoModify"], 1)
+        self.assertEqual(values["NoRepair"], 1)
+        self.assertRegex(values["InstallDate"], r"^\d{8}$")
+
+    def test_stage_runtime_files_includes_remove_pulse_agent_helper(self) -> None:
+        copied_targets: list[str] = []
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            with patch.object(agent, "_ensure_directory"):
+                with patch.object(agent, "_current_executable_path", return_value=str(temp_root / "clarix-agent.exe")):
+                    with patch.object(agent, "_installed_path", side_effect=lambda name: str(temp_root / name)):
+                        with patch.object(agent, "_bundle_path", side_effect=lambda name: str(temp_root / name)):
+                            with patch.object(agent, "_copy_if_exists", side_effect=lambda source, destination: copied_targets.append(Path(destination).name)):
+                                staged = agent._stage_runtime_files()
+
+        self.assertEqual(staged, str(temp_root / "clarix-agent.exe"))
+        self.assertIn("remove-pulse-agent.ps1", copied_targets)
+        self.assertIn("uninstall.bat", copied_targets)
 
 
 class ConfigureBundleCommandTests(unittest.TestCase):

@@ -504,12 +504,12 @@ if not defined PROGRAM_DATA_ROOT set "PROGRAM_DATA_ROOT=C:\ProgramData"
 set "TARGET_DIR="
 
 for %%D in ("%PROGRAM_DATA_ROOT%\ClarixPulse\Agent" "C:\ClarixPulse" "%LOCALAPPDATA%\ClarixPulse" "%APPDATA%\ClarixPulse") do (
-    if not defined TARGET_DIR if exist "%%~fD\uninstall.bat" set "TARGET_DIR=%%~fD"
+    if not defined TARGET_DIR if exist "%%~fD\clarix-agent.exe" set "TARGET_DIR=%%~fD"
 )
 
 if not defined TARGET_DIR (
     for %%D in ("%PROGRAM_DATA_ROOT%\ClarixPulse\Agent" "C:\ClarixPulse" "%LOCALAPPDATA%\ClarixPulse" "%APPDATA%\ClarixPulse") do (
-        if not defined TARGET_DIR if exist "%%~fD\clarix-agent.exe" set "TARGET_DIR=%%~fD"
+        if not defined TARGET_DIR if exist "%%~fD\uninstall.bat" set "TARGET_DIR=%%~fD"
     )
 )
 
@@ -525,23 +525,39 @@ if not defined TARGET_DIR (
 echo [%DATE% %TIME%] Uninstall launcher started > "%LOG_PATH%"
 echo Target=%TARGET_DIR% >> "%LOG_PATH%"
 
+set "UNINSTALL_EXIT=1"
 if exist "%TARGET_DIR%\uninstall.bat" (
     pushd "%TARGET_DIR%" >nul 2>&1
     call uninstall.bat
     set "UNINSTALL_EXIT=!ERRORLEVEL!"
     popd >nul 2>&1
     if not defined UNINSTALL_EXIT set "UNINSTALL_EXIT=1"
-    exit /b !UNINSTALL_EXIT!
+    if "!UNINSTALL_EXIT!"=="0" exit /b 0
 )
 
-set "UNINSTALL_EXIT=0"
 if exist "%TARGET_DIR%\clarix-agent.exe" (
     "%TARGET_DIR%\clarix-agent.exe" --uninstall-service >> "%LOG_PATH%" 2>&1
     set "UNINSTALL_EXIT=!ERRORLEVEL!"
+    if "!UNINSTALL_EXIT!"=="0" exit /b 0
 )
+
+if exist "%TARGET_DIR%\uninstall.bat" (
+    exit /b !UNINSTALL_EXIT!
+)
+
 if exist "%TARGET_DIR%\remove-pulse-agent.ps1" (
-    powershell -ExecutionPolicy Bypass -NoProfile -File "%TARGET_DIR%\remove-pulse-agent.ps1" >> "%LOG_PATH%" 2>&1
+    set "TEMP_SCRIPT=%TEMP%\clarix-pulse-uninstall-%RANDOM%%RANDOM%.ps1"
+    copy /Y "%TARGET_DIR%\remove-pulse-agent.ps1" "%TEMP_SCRIPT%" >> "%LOG_PATH%" 2>&1
+    if errorlevel 1 (
+        echo [%DATE% %TIME%] Failed to copy remove-pulse-agent.ps1 to temp. >> "%LOG_PATH%"
+        set "UNINSTALL_EXIT=1"
+        exit /b !UNINSTALL_EXIT!
+    )
+    set "CLARIX_INSTALL_ROOT=%TARGET_DIR%"
+    powershell -ExecutionPolicy Bypass -NoProfile -File "%TEMP_SCRIPT%" -InstallRoot "%TARGET_DIR%" >> "%LOG_PATH%" 2>&1
     set "UNINSTALL_EXIT=!ERRORLEVEL!"
+    del /f /q "%TEMP_SCRIPT%" >> "%LOG_PATH%" 2>&1
+    set "CLARIX_INSTALL_ROOT="
 )
 if not defined UNINSTALL_EXIT set "UNINSTALL_EXIT=1"
 exit /b !UNINSTALL_EXIT!

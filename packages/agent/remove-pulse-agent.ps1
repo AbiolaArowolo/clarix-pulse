@@ -36,6 +36,16 @@ $_scriptDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
     (Get-Location).Path
 }
 
+$script:SelfPath = if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+    $PSCommandPath
+} elseif (-not [string]::IsNullOrWhiteSpace($MyInvocation.MyCommand.Path)) {
+    $MyInvocation.MyCommand.Path
+} elseif (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+    Join-Path $PSScriptRoot 'remove-pulse-agent.ps1'
+} else {
+    $null
+}
+
 $script:NormalizedInstallRoot = ''
 if (-not [string]::IsNullOrWhiteSpace($InstallRoot)) {
     try {
@@ -45,18 +55,33 @@ if (-not [string]::IsNullOrWhiteSpace($InstallRoot)) {
     }
 }
 
+function Get-ScriptPath {
+    if (-not [string]::IsNullOrWhiteSpace($script:SelfPath)) {
+        return $script:SelfPath
+    }
+
+    return (Get-Location).Path
+}
+
 # -- Self-elevate to Administrator if not already ----------------------------
 $script:isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
 if (-not $script:isAdmin) {
-    $scriptPath = $MyInvocation.MyCommand.Definition
+    $scriptPath = Get-ScriptPath
     $psExe = if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell.exe' }
-    $whatIfArg = if ($WhatIf) { ' -WhatIf' } else { '' }
     try {
-        Start-Process $psExe -ArgumentList "-ExecutionPolicy Bypass -NoProfile -File `"$scriptPath`"$whatIfArg" -Verb RunAs -ErrorAction Stop
-        exit
+        $args = @('-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', $scriptPath)
+        if ($WhatIf) {
+            $args += '-WhatIf'
+        }
+        if (-not [string]::IsNullOrWhiteSpace($InstallRoot)) {
+            $args += @('-InstallRoot', $InstallRoot)
+        }
+        $proc = Start-Process -FilePath $psExe -ArgumentList $args -Verb RunAs -Wait -PassThru -ErrorAction Stop
+        exit $proc.ExitCode
     } catch {
-        Write-Warning "Could not elevate to Administrator. Continuing without elevation - some steps may fail."
+        Write-Error "Administrator approval is required to uninstall Pulse. $($_.Exception.Message)"
+        exit 1
     }
 }
 
@@ -72,6 +97,82 @@ function Write-Ok   { param([string]$Msg) Write-Host "  [OK]      $Msg" -Foregro
 function Write-Skip { param([string]$Msg) Write-Host "  [SKIP]    $Msg" -ForegroundColor Yellow }
 function Write-Fail { param([string]$Msg) Write-Host "  [ERROR]   $Msg" -ForegroundColor Red    }
 function Write-Info { param([string]$Msg) Write-Host "  $Msg"           -ForegroundColor Cyan   }
+
+function Remove-PathBestEffort {
+    param(
+        [string]$Path,
+        [int]$MaxAttempts = 6,
+        [int]$DelayMilliseconds = 400
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $false
+    }
+
+    try {
+        $normalized = [System.IO.Path]::GetFullPath($Path)
+    } catch {
+        $normalized = $Path.Trim()
+    }
+
+    if ([string]::IsNullOrWhiteSpace($normalized) -or -not (Test-Path -LiteralPath $normalized)) {
+        return $false
+    }
+
+    for ($attempt = 1; $attempt -le [Math]::Max(1, $MaxAttempts); $attempt++) {
+        try {
+            if (Test-Path -LiteralPath $normalized -PathType Container) {
+                Remove-Item -LiteralPath $normalized -Recurse -Force -ErrorAction Stop
+            } else {
+                Remove-Item -LiteralPath $normalized -Force -ErrorAction Stop
+            }
+        } catch {
+            if ($attempt -lt $MaxAttempts) {
+                Start-Sleep -Milliseconds ([Math]::Max(100, $DelayMilliseconds))
+                continue
+            }
+
+            Write-Warning "Could not remove '$normalized': $_"
+            return $false
+        }
+
+        if (-not (Test-Path -LiteralPath $normalized)) {
+            Write-Ok "Removed path: $normalized"
+            return $true
+        }
+
+        if ($attempt -lt $MaxAttempts) {
+            Start-Sleep -Milliseconds ([Math]::Max(100, $DelayMilliseconds))
+        }
+    }
+
+    Write-Warning "Could not remove '$normalized': path is still present."
+    return $false
+}
+
+function Test-ServiceRemoved {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ServiceName,
+        [int]$TimeoutSeconds = 10
+    )
+
+    $deadline = (Get-Date).AddSeconds([Math]::Max(1, $TimeoutSeconds))
+    do {
+        $queryOutput = & sc.exe query $ServiceName 2>&1
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -eq 1060 -or ($queryOutput -match '1060')) {
+            return $true
+        }
+        if ($exitCode -eq 1072 -or ($queryOutput -match 'marked for deletion')) {
+            Start-Sleep -Milliseconds 750
+            continue
+        }
+        Start-Sleep -Milliseconds 750
+    } while ((Get-Date) -lt $deadline)
+
+    return $false
+}
 
 function Invoke-Step {
     <#
@@ -271,8 +372,11 @@ function Remove-ClarixStartupRemnants {
                     continue
                 }
 
-                Remove-Item -LiteralPath $entry.FullName -Recurse -Force -ErrorAction Stop
-                Write-Ok "Removed startup item: $($entry.FullName)"
+                if (Remove-PathBestEffort -Path $entry.FullName) {
+                    Write-Ok "Removed startup item: $($entry.FullName)"
+                } else {
+                    throw "Could not remove startup item '$($entry.FullName)'"
+                }
                 $removedAny = $true
             }
         } catch {
@@ -413,15 +517,19 @@ foreach ($svcName in $serviceNames) {
         return $true
     }
 
-    Invoke-Step "Delete service '$svcName'" {
-        $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
-        if (-not $svc) {
-            Write-Skip "Service '$svcName' not found - skipping delete"
-            return $false
-        }
+Invoke-Step "Delete service '$svcName'" {
         if ($WhatIf) {
             Write-Info "WhatIf: Would delete service '$svcName' via sc.exe delete"
             return $true
+        }
+        $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+        if (-not $svc) {
+            $scQuery = & sc.exe query $svcName 2>&1
+            if ($LASTEXITCODE -eq 1060 -or ($scQuery -match '1060')) {
+                Write-Skip "Service '$svcName' not found - already deleted"
+                return $false
+            }
+            Write-Skip "Service '$svcName' not found by Get-Service, but sc.exe query still sees it"
         }
         $out = & sc.exe delete $svcName 2>&1
         if ($LASTEXITCODE -eq 0) {
@@ -429,6 +537,10 @@ foreach ($svcName in $serviceNames) {
         } else {
             Write-Fail "sc.exe delete '$svcName' returned $LASTEXITCODE - $out"
             $script:failedItems.Add("sc.exe delete $svcName") | Out-Null
+        }
+
+        if (-not (Test-ServiceRemoved -ServiceName $svcName -TimeoutSeconds 30)) {
+            throw "Service '$svcName' is still registered after delete attempt"
         }
         return $true
     }
@@ -455,6 +567,9 @@ Invoke-Step "NSSM service removal" {
         & $nssmPath stop   $svcName confirm 2>&1 | Out-Null
         & $nssmPath remove $svcName confirm 2>&1 | Out-Null
         Write-Ok "Removed service '$svcName' via NSSM"
+        if (-not (Test-ServiceRemoved -ServiceName $svcName -TimeoutSeconds 30)) {
+            throw "Service '$svcName' is still registered after NSSM removal"
+        }
         $removedViaNssm = $true
     }
     if (-not $removedViaNssm) {
@@ -476,11 +591,59 @@ Invoke-Step "Kill Clarix agent process(es)" {
 }
 
 # ============================================================================
-# 3. REMOVE DIRECTORIES
+# 3. REMOVE LOCAL CREDENTIALS
 # ============================================================================
 
 Write-Host ""
-Write-Host "-- 3. Directories ------------------------------------------" -ForegroundColor White
+Write-Host "-- 3. Local Credentials ------------------------------------" -ForegroundColor White
+
+Invoke-Step "Remove local config and credentials" {
+    $credentialPaths = @()
+    if (-not [string]::IsNullOrWhiteSpace($script:NormalizedInstallRoot)) {
+        $credentialPaths += @(
+            (Join-Path $script:NormalizedInstallRoot 'config.yaml'),
+            (Join-Path $script:NormalizedInstallRoot 'pulse-account.json')
+        )
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:ProgramData)) {
+        $credentialPaths += @(
+            (Join-Path $env:ProgramData 'ClarixPulse\Agent\config.yaml'),
+            (Join-Path $env:ProgramData 'ClarixPulse\Agent\pulse-account.json')
+        )
+    }
+    if (-not [string]::IsNullOrWhiteSpace($_scriptDir)) {
+        $credentialPaths += @(
+            (Join-Path $_scriptDir 'config.yaml'),
+            (Join-Path $_scriptDir 'pulse-account.json')
+        )
+    }
+    $credentialPaths = $credentialPaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+    $removedAny = $false
+    foreach ($path in $credentialPaths) {
+        if (-not (Test-Path -LiteralPath $path)) {
+            continue
+        }
+        if (-not (Remove-PathBestEffort -Path $path)) {
+            throw "Failed to remove credential file: $path"
+        }
+        $removedAny = $true
+    }
+
+    if (-not $removedAny) {
+        Write-Skip "No local credential files found"
+        return $false
+    }
+
+    return $true
+}
+
+# ============================================================================
+# 4. REMOVE DIRECTORIES
+# ============================================================================
+
+Write-Host ""
+Write-Host "-- 4. Directories ------------------------------------------" -ForegroundColor White
 
 $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
 if ([string]::IsNullOrWhiteSpace($localAppData)) {
@@ -519,7 +682,9 @@ foreach ($dir in $dirsToRemove) {
             Write-Info "WhatIf: Would Remove-Item -Recurse -Force '$dir'"
             return $true
         }
-        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction Stop
+        if (-not (Remove-PathBestEffort -Path $dir)) {
+            throw "Failed to remove directory '$dir'"
+        }
         Write-Ok "Removed directory: $dir"
         return $true
     }
@@ -545,18 +710,20 @@ foreach ($fullPath in $relativeDirs) {
             Write-Info "WhatIf: Would Remove-Item -Recurse -Force '$fullPath'"
             return $true
         }
-        Remove-Item -LiteralPath $fullPath -Recurse -Force -ErrorAction Stop
+        if (-not (Remove-PathBestEffort -Path $fullPath)) {
+            throw "Failed to remove directory '$fullPath'"
+        }
         Write-Ok "Removed directory: $fullPath"
         return $true
     }
 }
 
 # ============================================================================
-# 4. REMOVE SCHEDULED TASKS
+# 5. REMOVE SCHEDULED TASKS
 # ============================================================================
 
 Write-Host ""
-Write-Host "-- 4. Scheduled Tasks --------------------------------------" -ForegroundColor White
+Write-Host "-- 5. Scheduled Tasks --------------------------------------" -ForegroundColor White
 
 Invoke-Step "Remove ClarixPulse / clarix scheduled tasks" {
     $tasks = Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
@@ -583,11 +750,11 @@ Invoke-Step "Remove ClarixPulse / clarix scheduled tasks" {
 }
 
 # ============================================================================
-# 5. REMOVE REGISTRY KEYS
+# 6. REMOVE REGISTRY KEYS
 # ============================================================================
 
 Write-Host ""
-Write-Host "-- 5. Registry Keys ----------------------------------------" -ForegroundColor White
+Write-Host "-- 6. Registry Keys ----------------------------------------" -ForegroundColor White
 
 $regKeys = @(
     'HKLM:\SOFTWARE\ClarixPulse',
@@ -595,7 +762,7 @@ $regKeys = @(
 )
 
 foreach ($key in $regKeys) {
-Invoke-Step "Remove registry key '$key'" {
+    Invoke-Step "Remove registry key '$key'" {
         if (-not (Test-Path $key)) {
             Write-Skip "Registry key not found: $key"
             return $false
@@ -611,22 +778,22 @@ Invoke-Step "Remove registry key '$key'" {
 }
 
 # ============================================================================
-# 6. REMOVE STARTUP REMNANTS
+# 7. REMOVE STARTUP REMNANTS
 # ============================================================================
 
 Write-Host ""
-Write-Host "-- 6. Startup Remnants -------------------------------------" -ForegroundColor White
+Write-Host "-- 7. Startup Remnants -------------------------------------" -ForegroundColor White
 
 Invoke-Step "Remove startup autorun remnants" {
     Remove-ClarixStartupRemnants
 }
 
 # ============================================================================
-# 7. FINAL PROCESS SWEEP
+# 8. FINAL PROCESS SWEEP
 # ============================================================================
 
 Write-Host ""
-Write-Host "-- 7. Final Process Sweep ----------------------------------" -ForegroundColor White
+Write-Host "-- 8. Final Process Sweep ----------------------------------" -ForegroundColor White
 
 Invoke-Step "Ensure no Clarix process is still running" {
     Stop-ClarixProcesses -WhatIf:$WhatIf -MaxAttempts 5 -DelayMilliseconds 1200
@@ -672,9 +839,6 @@ if ($WhatIf) {
     Write-Host "  Clarix Pulse Agent cleanup complete." -ForegroundColor Green
 } else {
     Write-Host "  Clarix Pulse Agent cleanup finished with $($script:failedItems.Count) error(s)." -ForegroundColor Yellow
-}
-if (-not $script:isAdmin) {
-    Write-Host "  Administrator approval is still required to remove the Windows service and protected ClarixPulse folders on locked-down PCs." -ForegroundColor Yellow
 }
 Write-Host ""
 
