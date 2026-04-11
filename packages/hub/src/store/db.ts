@@ -495,6 +495,27 @@ export async function initDb(): Promise<void> {
     `, [], client);
 
     await exec(`
+      CREATE TABLE IF NOT EXISTS node_decommission_locks (
+        node_id           TEXT PRIMARY KEY,
+        tenant_id         TEXT NOT NULL REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+        locked_until      TIMESTAMPTZ NOT NULL,
+        reason            TEXT,
+        created_at        TIMESTAMPTZ NOT NULL,
+        updated_at        TIMESTAMPTZ NOT NULL
+      );
+    `, [], client);
+
+    await exec(`
+      CREATE INDEX IF NOT EXISTS idx_node_decommission_locks_tenant_id
+      ON node_decommission_locks(tenant_id);
+    `, [], client);
+
+    await exec(`
+      CREATE INDEX IF NOT EXISTS idx_node_decommission_locks_locked_until
+      ON node_decommission_locks(locked_until);
+    `, [], client);
+
+    await exec(`
       CREATE TABLE IF NOT EXISTS instance_state (
         instance_id           TEXT PRIMARY KEY REFERENCES players(player_id) ON DELETE CASCADE,
         agent_id              TEXT NOT NULL,

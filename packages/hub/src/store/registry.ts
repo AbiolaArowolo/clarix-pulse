@@ -48,6 +48,7 @@ export interface EnrollmentInput {
   nodeId: string;
   nodeName: string;
   siteId: string;
+  ignoreDecommissionLock?: boolean;
   players: Array<{
     playerId: string;
     playoutType: string;
@@ -103,6 +104,7 @@ interface PlayerRow extends QueryResultRow {
 
 const DEFAULT_LOCAL_UI_URL = 'http://127.0.0.1:3210/';
 const LEGACY_TENANT_ID = 'legacy-hub';
+const NODE_REENROLL_LOCK_MINUTES = Number(process.env.PULSE_NODE_REENROLL_LOCK_MINUTES ?? 180);
 const LEGACY_SITE_NAME_MAP = new Map(SITES.map((site) => [site.id, site.name]));
 
 function normalizePlayerId(value: string): string {
@@ -515,6 +517,70 @@ export async function getActiveAgentToken(nodeId: string, tenantId: string): Pro
   return row?.token ?? null;
 }
 
+interface NodeDecommissionLockRow extends QueryResultRow {
+  node_id: string;
+  tenant_id: string;
+  locked_until: Date | string;
+}
+
+async function getActiveNodeDecommissionLock(
+  nodeId: string,
+  tenantId: string,
+  client?: Parameters<typeof queryOne>[2],
+): Promise<NodeDecommissionLockRow | null> {
+  return queryOne<NodeDecommissionLockRow>(`
+    SELECT node_id, tenant_id, locked_until
+    FROM node_decommission_locks
+    WHERE node_id = $1
+      AND tenant_id = $2
+      AND locked_until > NOW()
+  `, [nodeId, tenantId], client);
+}
+
+async function setNodeDecommissionLock(
+  nodeId: string,
+  tenantId: string,
+  reason: string,
+  client?: Parameters<typeof exec>[2],
+): Promise<void> {
+  if (!Number.isFinite(NODE_REENROLL_LOCK_MINUTES) || NODE_REENROLL_LOCK_MINUTES <= 0) {
+    return;
+  }
+
+  const now = new Date();
+  const lockedUntil = new Date(now.getTime() + NODE_REENROLL_LOCK_MINUTES * 60_000).toISOString();
+  const timestamp = now.toISOString();
+
+  await exec(`
+    INSERT INTO node_decommission_locks (
+      node_id,
+      tenant_id,
+      locked_until,
+      reason,
+      created_at,
+      updated_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $5)
+    ON CONFLICT (node_id) DO UPDATE SET
+      tenant_id = EXCLUDED.tenant_id,
+      locked_until = EXCLUDED.locked_until,
+      reason = EXCLUDED.reason,
+      updated_at = EXCLUDED.updated_at
+  `, [nodeId, tenantId, lockedUntil, reason, timestamp], client);
+}
+
+async function clearNodeDecommissionLock(
+  nodeId: string,
+  tenantId: string,
+  client?: Parameters<typeof exec>[2],
+): Promise<void> {
+  await exec(`
+    DELETE FROM node_decommission_locks
+    WHERE node_id = $1
+      AND tenant_id = $2
+  `, [nodeId, tenantId], client);
+}
+
 export async function upsertSite(input: { tenantId: string; siteId: string; siteName?: string }): Promise<SiteRecord> {
   const timestamp = new Date().toISOString();
   const siteName = normalizeSiteName(input.siteId, input.siteName);
@@ -713,8 +779,12 @@ export async function removeNode(nodeId: string, tenantId: string): Promise<{
   `, [tenantId]);
 
   const stillExists = await getNode(tenantId, nodeId);
+  const removed = !stillExists;
+  if (removed) {
+    await setNodeDecommissionLock(nodeId, tenantId, 'node_decommissioned');
+  }
   return {
-    removed: !stillExists,
+    removed,
     removedPlayerIds,
   };
 }
@@ -807,6 +877,17 @@ export async function enrollNode(input: EnrollmentInput): Promise<EnrollmentResu
   const updatedAt = new Date().toISOString();
   const token = crypto.randomBytes(24).toString('hex');
 
+  if (!input.ignoreDecommissionLock) {
+    const lock = await getActiveNodeDecommissionLock(nodeId, input.tenantId);
+    if (lock) {
+      const lockedUntil = toIso(lock.locked_until) ?? String(lock.locked_until);
+      throw new Error(
+        `Node "${nodeId}" was recently decommissioned and is temporarily blocked from auto re-enrollment until ${lockedUntil}. ` +
+        'Provision this node from Remote Setup to restore it intentionally.',
+      );
+    }
+  }
+
   await upsertSite({
     tenantId: input.tenantId,
     siteId,
@@ -833,6 +914,8 @@ export async function enrollNode(input: EnrollmentInput): Promise<EnrollmentResu
       INSERT INTO agent_tokens (token, node_id, description, active, created_at, updated_at)
       VALUES ($1, $2, 'Created by enrollment', TRUE, $3, $3)
     `, [token, nodeId, updatedAt], client);
+
+    await clearNodeDecommissionLock(nodeId, input.tenantId, client);
   });
 
   for (const player of input.players) {

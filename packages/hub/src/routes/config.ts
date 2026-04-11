@@ -705,6 +705,7 @@ export function createConfigRouter(io: SocketServer): Router {
 
       const enrollment = await enrollNode({
         tenantId: req.auth!.tenantId,
+        ignoreDecommissionLock: true,
         ...buildEnrollmentInput(draft),
       });
       const mirroredUpdate = await updateMirroredNodeConfig(req.auth!.tenantId, draft.nodeId, buildMirrorPayload(draft));
