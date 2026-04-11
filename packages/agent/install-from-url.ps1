@@ -79,15 +79,33 @@ Write-Host "Extracting bundle to $extractPath"
 Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
 
 $installBat = Join-Path $extractPath 'install.bat'
-if (-not (Test-Path -LiteralPath $installBat)) {
-    throw "install.bat not found in extracted bundle at $extractPath"
+$setupExe = Join-Path $extractPath 'ClarixPulseSetup.exe'
+$launcherPath = ''
+
+if (Test-Path -LiteralPath $installBat) {
+    $launcherPath = $installBat
+} elseif (Test-Path -LiteralPath $setupExe) {
+    $launcherPath = $setupExe
+} else {
+    throw "Neither install.bat nor ClarixPulseSetup.exe was found in extracted bundle at $extractPath"
 }
 
 Write-Host ''
 Write-Host "Bundle ready at $extractPath"
-Write-Host "Install script: $installBat"
+Write-Host "Launcher: $launcherPath"
 
 if ($RunInstall) {
-    Write-Host 'Launching install.bat'
-    & $installBat
+    if ($launcherPath -ieq $installBat) {
+        Write-Host 'Launching install.bat'
+        & $installBat
+    } else {
+        Write-Host 'Launching ClarixPulseSetup.exe'
+        # Run from extracted bundle folder so README/pulse-account.json are discoverable.
+        Push-Location $extractPath
+        try {
+            & $setupExe
+        } finally {
+            Pop-Location
+        }
+    }
 }

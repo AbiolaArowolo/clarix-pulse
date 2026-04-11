@@ -338,26 +338,73 @@ def _as_sequence(value: Any) -> list[Any]:
     return [value]
 
 
+def _candidate_probe_urls(stream_url: str) -> list[str]:
+    candidates = _probe_url_candidates(stream_url)
+    if candidates:
+        return candidates
+    normalized = normalize_stream_url(stream_url)
+    return [normalized] if normalized else []
+
+
+def _ffprobe_has_stream(probe_url: str) -> bool:
+    rc, stdout, _ = _run(
+        [
+            FFPROBE,
+            "-v",
+            "error",
+            "-rw_timeout",
+            "5000000",
+            "-analyzeduration",
+            "3000000",
+            "-probesize",
+            "3000000",
+            "-show_streams",
+            "-of",
+            "json",
+            "-timeout",
+            "5000000",
+            probe_url,
+        ],
+        timeout=PROBE_TIMEOUT,
+    )
+    if rc != 0:
+        return False
+    return '"codec_type"' in (stdout or "")
+
+
+def _ffmpeg_can_decode_frame(probe_url: str) -> bool:
+    rc, _, _ = _run(
+        [
+            FFMPEG,
+            "-v",
+            "error",
+            "-rw_timeout",
+            "5000000",
+            "-i",
+            probe_url,
+            "-frames:v",
+            "1",
+            "-an",
+            "-f",
+            "null",
+            "-",
+        ],
+        timeout=PROBE_TIMEOUT,
+    )
+    return rc == 0
+
+
 def check_presence(stream_url: str) -> int:
     """Return 1 if stream is present, 0 otherwise."""
-    for probe_url in _probe_url_candidates(stream_url):
-        rc, stdout, _ = _run(
-            [
-                FFPROBE,
-                "-v",
-                "error",
-                "-show_streams",
-                "-of",
-                "json",
-                "-timeout",
-                "5000000",
-                probe_url,
-            ],
-            timeout=PROBE_TIMEOUT,
-        )
-        if rc != 0:
-            continue
-        if '"codec_type"' in (stdout or ""):
+    for probe_url in _candidate_probe_urls(stream_url):
+        if _ffprobe_has_stream(probe_url):
+            return 1
+
+    # Some multicast feeds are readable by ffmpeg even when ffprobe stream
+    # introspection fails. Use a lightweight decode fallback before declaring
+    # the feed absent.
+    for probe_url in _candidate_probe_urls(stream_url):
+        if _ffmpeg_can_decode_frame(probe_url):
             return 1
 
     return 0
@@ -365,77 +412,83 @@ def check_presence(stream_url: str) -> int:
 
 def check_freeze(stream_url: str, duration: int = 10) -> float:
     """Return seconds of freeze detected in the last `duration` seconds of stream."""
-    candidates = _probe_url_candidates(stream_url)
-    probe_url = candidates[0] if candidates else stream_url
-    _, _, stderr = _run(
-        [
-            FFMPEG,
-            "-i",
-            probe_url,
-            "-t",
-            str(duration),
-            "-vf",
-            "freezedetect=noise=0.001:duration=2",
-            "-an",
-            "-f",
-            "null",
-            "-",
-        ],
-        timeout=duration + PROBE_TIMEOUT,
-    )
+    for probe_url in _candidate_probe_urls(stream_url):
+        rc, _, stderr = _run(
+            [
+                FFMPEG,
+                "-i",
+                probe_url,
+                "-t",
+                str(duration),
+                "-vf",
+                "freezedetect=noise=0.001:duration=2",
+                "-an",
+                "-f",
+                "null",
+                "-",
+            ],
+            timeout=duration + PROBE_TIMEOUT,
+        )
+        if rc != 0:
+            continue
+        match = re.search(r"freeze_duration:(\d+\.?\d*)", stderr)
+        return float(match.group(1)) if match else 0.0
 
-    match = re.search(r"freeze_duration:(\d+\.?\d*)", stderr)
-    return float(match.group(1)) if match else 0.0
+    return 0.0
 
 
 def check_black(stream_url: str, duration: int = 10) -> float:
     """Return black ratio (0.0 to 1.0) over the last `duration` seconds."""
-    candidates = _probe_url_candidates(stream_url)
-    probe_url = candidates[0] if candidates else stream_url
-    _, _, stderr = _run(
-        [
-            FFMPEG,
-            "-i",
-            probe_url,
-            "-t",
-            str(duration),
-            "-vf",
-            "blackdetect=d=0.1:pix_th=0.1",
-            "-an",
-            "-f",
-            "null",
-            "-",
-        ],
-        timeout=duration + PROBE_TIMEOUT,
-    )
+    for probe_url in _candidate_probe_urls(stream_url):
+        rc, _, stderr = _run(
+            [
+                FFMPEG,
+                "-i",
+                probe_url,
+                "-t",
+                str(duration),
+                "-vf",
+                "blackdetect=d=0.1:pix_th=0.1",
+                "-an",
+                "-f",
+                "null",
+                "-",
+            ],
+            timeout=duration + PROBE_TIMEOUT,
+        )
+        if rc != 0:
+            continue
+        total_black = sum(float(m) for m in re.findall(r"black_duration:(\d+\.?\d*)", stderr))
+        return min(1.0, round(total_black / max(duration, 1), 3))
 
-    total_black = sum(float(m) for m in re.findall(r"black_duration:(\d+\.?\d*)", stderr))
-    return min(1.0, round(total_black / max(duration, 1), 3))
+    return 0.0
 
 
 def check_silence(stream_url: str, duration: int = 10) -> float:
     """Return seconds of audio silence in the last `duration` seconds."""
-    candidates = _probe_url_candidates(stream_url)
-    probe_url = candidates[0] if candidates else stream_url
-    _, _, stderr = _run(
-        [
-            FFMPEG,
-            "-i",
-            probe_url,
-            "-t",
-            str(duration),
-            "-vn",
-            "-af",
-            "silencedetect=noise=-50dB:d=2",
-            "-f",
-            "null",
-            "-",
-        ],
-        timeout=duration + PROBE_TIMEOUT,
-    )
+    for probe_url in _candidate_probe_urls(stream_url):
+        rc, _, stderr = _run(
+            [
+                FFMPEG,
+                "-i",
+                probe_url,
+                "-t",
+                str(duration),
+                "-vn",
+                "-af",
+                "silencedetect=noise=-50dB:d=2",
+                "-f",
+                "null",
+                "-",
+            ],
+            timeout=duration + PROBE_TIMEOUT,
+        )
+        if rc != 0:
+            continue
+        total = sum(float(m) for m in re.findall(r"silence_duration: (\d+\.?\d*)", stderr))
+        return round(total, 1)
 
-    total = sum(float(m) for m in re.findall(r"silence_duration: (\d+\.?\d*)", stderr))
-    return round(total, 1)
+    return 0.0
 
 
 def _capture_thumbnail_url(stream_url: str) -> Optional[str]:
@@ -444,30 +497,33 @@ def _capture_thumbnail_url(stream_url: str) -> Optional[str]:
     Returns base64 data URL string, or None on failure.
     """
     tmp_path = None
-    candidates = _probe_url_candidates(stream_url)
-    probe_url = candidates[0] if candidates else stream_url
     try:
         from PIL import Image
 
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
             tmp_path = tmp.name
 
-        rc, _, _ = _run(
-            [
-                FFMPEG,
-                "-i",
-                probe_url,
-                "-frames:v",
-                "1",
-                "-q:v",
-                "5",
-                "-y",
-                tmp_path,
-            ],
-            timeout=PROBE_TIMEOUT,
-        )
+        captured = False
+        for probe_url in _candidate_probe_urls(stream_url):
+            rc, _, _ = _run(
+                [
+                    FFMPEG,
+                    "-i",
+                    probe_url,
+                    "-frames:v",
+                    "1",
+                    "-q:v",
+                    "5",
+                    "-y",
+                    tmp_path,
+                ],
+                timeout=PROBE_TIMEOUT,
+            )
+            if rc == 0 and tmp_path and os.path.exists(tmp_path):
+                captured = True
+                break
 
-        if rc != 0 or not tmp_path or not os.path.exists(tmp_path):
+        if not captured:
             return None
 
         img = Image.open(tmp_path).convert("RGB")

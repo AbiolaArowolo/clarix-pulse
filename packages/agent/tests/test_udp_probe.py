@@ -46,7 +46,29 @@ class UdpProbePresenceTests(unittest.TestCase):
         self.assertEqual(udp_probe.check_presence("udp://@239.205.128.199:10000"), 1)
         self.assertEqual(mock_run.call_count, 2)
 
+    @patch.object(udp_probe, "_run")
+    def test_check_presence_uses_ffmpeg_decode_fallback(self, mock_run) -> None:
+        mock_run.side_effect = [
+            (-1, "", "ffprobe failed"),
+            (0, "", ""),
+        ]
+
+        self.assertEqual(udp_probe.check_presence("udp://239.205.128.199:10000"), 1)
+        self.assertEqual(mock_run.call_count, 2)
+
+
+class UdpProbeMetricFallbackTests(unittest.TestCase):
+    @patch.object(udp_probe, "_run")
+    def test_check_freeze_uses_second_candidate_when_first_fails(self, mock_run) -> None:
+        mock_run.side_effect = [
+            (-1, "", "first failed"),
+            (0, "", "freeze_duration:2.5"),
+        ]
+
+        freeze = udp_probe.check_freeze("udp://@239.205.128.199:10000", duration=10)
+        self.assertEqual(freeze, 2.5)
+        self.assertEqual(mock_run.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
-

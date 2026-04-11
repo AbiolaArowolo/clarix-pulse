@@ -37,7 +37,7 @@ const localInstallChecklist = [
   'Upload the discovery report in the dashboard remote setup panel.',
   'Provision the node to generate the tenant-scoped config.yaml.',
   'Pull that config into the local Pulse UI and save the local settings.',
-  'Run install.bat to install the service and confirm the node appears on the dashboard.',
+  'Run ClarixPulseSetup.exe (or setup.bat in C:\\ClarixPulse) to install the service and confirm the node appears on the dashboard.',
 ] as const;
 
 const preparationNotes = [
