@@ -62,7 +62,7 @@ registerHooks({
   },
 });
 
-test('/api/downloads/bundle/windows/latest keeps compact 3-file bundle with tenant defaults embedded in README', async () => {
+test('/api/downloads/bundle/windows/latest includes tenant key file and README defaults', async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pulse-download-test-'));
   const bundlePath = path.join(tempRoot, 'clarix-pulse-test.zip');
 
@@ -95,7 +95,7 @@ test('/api/downloads/bundle/windows/latest keeps compact 3-file bundle with tena
       const extracted = new AdmZip(buffer);
       assert.equal(
         extracted.getEntries().map((entry) => entry.entryName).sort().join(','),
-        'ClarixPulseSetup.exe,README.txt,Uninstall.exe',
+        'ClarixPulseSetup.exe,README.txt,Uninstall.exe,pulse-account.json',
       );
 
       const readmeEntry = extracted.getEntry('README.txt');
@@ -115,6 +115,19 @@ test('/api/downloads/bundle/windows/latest keeps compact 3-file bundle with tena
       assert.equal(accountConfig.hub_url, 'https://pulse.example.com');
       assert.equal(accountConfig.enrollmentKey, mockedEnrollmentKey);
       assert.equal(accountConfig.enrollment_key, mockedEnrollmentKey);
+
+      const accountEntry = extracted.getEntry('pulse-account.json');
+      assert.ok(accountEntry, 'pulse-account.json should be included in the bundle');
+      const accountJson = JSON.parse(accountEntry!.getData().toString('utf8')) as {
+        hubUrl: string;
+        hub_url: string;
+        enrollmentKey: string;
+        enrollment_key: string;
+      };
+      assert.equal(accountJson.hubUrl, 'https://pulse.example.com');
+      assert.equal(accountJson.hub_url, 'https://pulse.example.com');
+      assert.equal(accountJson.enrollmentKey, mockedEnrollmentKey);
+      assert.equal(accountJson.enrollment_key, mockedEnrollmentKey);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

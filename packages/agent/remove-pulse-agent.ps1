@@ -16,8 +16,13 @@
     .\remove-pulse-agent.ps1 -WhatIf
 #>
 param(
-    [switch]$WhatIf
+    [switch]$WhatIf,
+    [string]$InstallRoot = ''
 )
+
+if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
+    $InstallRoot = [string]$env:CLARIX_INSTALL_ROOT
+}
 
 $ErrorActionPreference = 'Continue'
 
@@ -29,6 +34,15 @@ $_scriptDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
     Split-Path -Parent $MyInvocation.MyCommand.Definition
 } else {
     (Get-Location).Path
+}
+
+$script:NormalizedInstallRoot = ''
+if (-not [string]::IsNullOrWhiteSpace($InstallRoot)) {
+    try {
+        $script:NormalizedInstallRoot = [System.IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
+    } catch {
+        $script:NormalizedInstallRoot = $InstallRoot.Trim()
+    }
 }
 
 # -- Self-elevate to Administrator if not already ----------------------------
@@ -116,7 +130,22 @@ function Get-ClarixProcessIds {
             $exePath = [string]$proc.ExecutablePath
             $cmdLine = [string]$proc.CommandLine
             $haystack = "$name $exePath $cmdLine".ToLowerInvariant()
-            if ($haystack -notmatch 'clarix-agent|clarixpulse') {
+
+            $isClarixProcess = $haystack -match 'clarix-agent|clarixpulse'
+            if (-not $isClarixProcess) {
+                $baseName = ([System.IO.Path]::GetFileName($name)).ToLowerInvariant()
+                if ($baseName -in @('ffmpeg.exe', 'ffprobe.exe', 'nssm.exe', 'ffmpeg', 'ffprobe', 'nssm')) {
+                    if ($haystack -match 'clarix|pulse') {
+                        $isClarixProcess = $true
+                    } elseif (
+                        -not [string]::IsNullOrWhiteSpace($script:NormalizedInstallRoot) -and
+                        $haystack -like ("*" + $script:NormalizedInstallRoot.ToLowerInvariant() + "*")
+                    ) {
+                        $isClarixProcess = $true
+                    }
+                }
+            }
+            if (-not $isClarixProcess) {
                 continue
             }
 
@@ -130,21 +159,39 @@ function Get-ClarixProcessIds {
 }
 
 function Stop-ClarixProcesses {
-    param([switch]$WhatIf)
+    param(
+        [switch]$WhatIf,
+        [int]$MaxAttempts = 4,
+        [int]$DelayMilliseconds = 900
+    )
 
-    $candidateIds = Get-ClarixProcessIds
-    if (-not $candidateIds) {
-        Write-Skip "No Clarix agent processes found"
-        return $false
+    for ($attempt = 1; $attempt -le [Math]::Max(1, $MaxAttempts); $attempt++) {
+        $candidateIds = @(Get-ClarixProcessIds)
+        if (-not $candidateIds -or $candidateIds.Count -eq 0) {
+            if ($attempt -eq 1) {
+                Write-Skip "No Clarix agent processes found"
+                return $false
+            }
+            Write-Ok "No Clarix processes remain running"
+            return $true
+        }
+
+        if ($WhatIf) {
+            Write-Info "WhatIf: Would Stop-Process -Id $($candidateIds -join ', ') -Force"
+            return $true
+        }
+
+        Stop-Process -Id $candidateIds -Force -ErrorAction SilentlyContinue
+        Write-Info "Stopped process IDs: $($candidateIds -join ', ') (attempt $attempt)"
+        Start-Sleep -Milliseconds ([Math]::Max(100, $DelayMilliseconds))
     }
 
-    if ($WhatIf) {
-        Write-Info "WhatIf: Would Stop-Process -Id $($candidateIds -join ', ') -Force"
-        return $true
+    $remaining = @(Get-ClarixProcessIds)
+    if ($remaining.Count -gt 0) {
+        throw "Clarix process(es) still running after retries: $($remaining -join ', ')"
     }
 
-    Stop-Process -Id $candidateIds -Force -ErrorAction SilentlyContinue
-    Write-Ok "Killed $($candidateIds.Count) Clarix agent process(es)"
+    Write-Ok "No Clarix processes remain running"
     return $true
 }
 
@@ -442,11 +489,15 @@ if ([string]::IsNullOrWhiteSpace($localAppData)) {
 $tempPath = [System.IO.Path]::GetTempPath()
 
 $dirsToRemove = @(
+    'C:\ClarixPulse',
     'C:\ProgramData\ClarixPulse',
     'C:\pulse-node-bundle',
     'C:\Program Files\ClarixPulse',
     'C:\Program Files (x86)\ClarixPulse'
 )
+if (-not [string]::IsNullOrWhiteSpace($script:NormalizedInstallRoot)) {
+    $dirsToRemove += $script:NormalizedInstallRoot
+}
 if (-not [string]::IsNullOrWhiteSpace($localAppData)) {
     $dirsToRemove += @(
         (Join-Path $localAppData 'ClarixPulse'),
@@ -568,6 +619,17 @@ Write-Host "-- 6. Startup Remnants -------------------------------------" -Foreg
 
 Invoke-Step "Remove startup autorun remnants" {
     Remove-ClarixStartupRemnants
+}
+
+# ============================================================================
+# 7. FINAL PROCESS SWEEP
+# ============================================================================
+
+Write-Host ""
+Write-Host "-- 7. Final Process Sweep ----------------------------------" -ForegroundColor White
+
+Invoke-Step "Ensure no Clarix process is still running" {
+    Stop-ClarixProcesses -WhatIf:$WhatIf -MaxAttempts 5 -DelayMilliseconds 1200
 }
 
 # ============================================================================

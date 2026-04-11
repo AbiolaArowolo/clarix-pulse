@@ -5,6 +5,7 @@ FILES IN THIS DOWNLOAD
   1. ClarixPulseSetup.exe
   2. README.txt
   3. Uninstall.exe
+  4. pulse-account.json (downloaded from the Hub per account)
 
 
 INSTALL (WINDOWS)

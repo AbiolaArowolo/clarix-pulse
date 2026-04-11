@@ -3631,10 +3631,27 @@ def _command_option_value(args: list[str], option_name: str, default: str | None
 
 
 def _load_or_prepare_config(config_path: str) -> dict[str, Any]:
+    config_exists = os.path.exists(config_path)
     existing = _load_yaml_if_exists(config_path)
     if not existing and os.path.exists(_bundle_path("config.yaml")):
         _copy_if_exists(_bundle_path("config.yaml"), config_path)
         existing = _load_yaml_if_exists(config_path)
+        config_exists = os.path.exists(config_path)
+
+    existing_before_defaults = copy.deepcopy(existing) if isinstance(existing, dict) else {}
+    existing, account_message = _apply_pulse_account_defaults(
+        existing,
+        [
+            os.path.dirname(os.path.abspath(config_path)),
+            INSTALL_DIR,
+            _base_dir(),
+            os.getcwd(),
+        ],
+    )
+    if account_message:
+        print(account_message)
+    if config_exists and existing != existing_before_defaults:
+        _write_yaml(config_path, existing)
 
     if existing and not _contains_placeholder(existing):
         try:

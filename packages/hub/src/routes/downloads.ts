@@ -82,12 +82,12 @@ export function buildTenantBundleBuffer(input: {
   }
   zip.addFile('README.txt', Buffer.from(readmeAugmented, 'utf8'));
 
-  // Keep the public installer surface compact (3 files only):
-  // ClarixPulseSetup.exe, Uninstall.exe, README.txt.
-  // Tenant defaults are carried in the README marker block.
+  // Keep tenant account defaults in both README marker and a standalone
+  // pulse-account.json file so installers can auto-bootstrap key material.
   if (zip.getEntry('pulse-account.json')) {
     zip.deleteFile('pulse-account.json');
   }
+  zip.addFile('pulse-account.json', Buffer.from(`${accountConfigJson}\r\n`, 'utf8'));
 
   return zip.toBuffer();
 }

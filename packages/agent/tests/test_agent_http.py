@@ -137,6 +137,62 @@ class ConfigureBundleCommandTests(unittest.TestCase):
 
         self.assertEqual(config["enrollment_key"], "ENROLL-ABC-123")
 
+    def test_load_or_prepare_config_prefills_key_from_readme_before_local_ui(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.yaml"
+            readme_path = temp_root / "README.txt"
+
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "node_id: studio-a",
+                        "node_name: Studio A",
+                        "site_id: studio-a",
+                        "hub_url: \"\"",
+                        "agent_token: \"\"",
+                        "enrollment_key: \"\"",
+                        "players: []",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            readme_path.write_text(
+                "\n".join(
+                    [
+                        "Clarix Pulse",
+                        "",
+                        "[PULSE_ACCOUNT_JSON_START]",
+                        '{"hubUrl":"https://pulse.example.com","enrollmentKey":"ENROLL-README-123"}',
+                        "[PULSE_ACCOUNT_JSON_END]",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(agent, "_bundle_path", side_effect=lambda name: str(temp_root / name)):
+                with patch.object(agent, "_run_config_editor") as run_editor_mock:
+                    with patch.object(
+                        agent,
+                        "load_config",
+                        return_value={
+                            "node_id": "studio-a",
+                            "node_name": "Studio A",
+                            "players": [],
+                        },
+                    ):
+                        loaded = agent._load_or_prepare_config(str(config_path))
+
+            written = agent._load_yaml_if_exists(str(config_path))
+
+        run_editor_mock.assert_not_called()
+        self.assertEqual(loaded.get("hub_url"), "https://pulse.example.com")
+        self.assertEqual(loaded.get("enrollment_key"), "ENROLL-README-123")
+        self.assertEqual(written.get("hub_url"), "https://pulse.example.com")
+        self.assertEqual(written.get("enrollment_key"), "ENROLL-README-123")
+
     def test_import_local_ui_state_preloads_enrollment_key_from_uploaded_discovery_data(self) -> None:
         config, message = agent._import_local_ui_state(
             "\n".join(

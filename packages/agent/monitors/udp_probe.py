@@ -16,6 +16,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional, Sequence
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 # ffmpeg/ffprobe paths - bundled alongside the .exe in the agent package
 def _runtime_base_dir() -> str:
@@ -31,6 +32,7 @@ FFPROBE = os.path.join(_BASE, "ffprobe.exe")
 PROBE_TIMEOUT = 8
 THUMBNAIL_MAX_KB = 50
 _DEFAULT_SOURCE_PRIORITY = 100
+_UDP_FIFO_SIZE_DEFAULT = "5000000"
 _FILTER_KEYS = {
     "sources",
     "udp_sources",
@@ -168,6 +170,48 @@ def normalize_stream_url(value: Any) -> str:
     return text
 
 
+def _tune_udp_stream_url(stream_url: str) -> str:
+    """
+    Add ffmpeg-friendly buffering defaults for UDP sources.
+    Existing operator-provided query params are preserved.
+    """
+    normalized = normalize_stream_url(stream_url)
+    if not normalized:
+        return ""
+
+    split = urlsplit(normalized)
+    if split.scheme.lower() != "udp":
+        return normalized
+
+    query_pairs = parse_qsl(split.query, keep_blank_values=True)
+    query_map = {key: value for key, value in query_pairs}
+    if "overrun_nonfatal" not in query_map:
+        query_map["overrun_nonfatal"] = "1"
+    if "fifo_size" not in query_map:
+        query_map["fifo_size"] = _UDP_FIFO_SIZE_DEFAULT
+
+    tuned_query = urlencode(query_map, doseq=True)
+    return urlunsplit((split.scheme, split.netloc, split.path, tuned_query, split.fragment))
+
+
+def _probe_url_candidates(stream_url: str) -> list[str]:
+    """
+    Return probe URL candidates in priority order.
+    For multicast URLs with '@', include a fallback without '@' for compatibility.
+    """
+    tuned = _tune_udp_stream_url(stream_url)
+    if not tuned:
+        return []
+
+    candidates = [tuned]
+    split = urlsplit(tuned)
+    if split.scheme.lower() == "udp" and split.netloc.startswith("@"):
+        fallback = urlunsplit((split.scheme, split.netloc.lstrip("@"), split.path, split.query, split.fragment))
+        if fallback and fallback not in candidates:
+            candidates.append(fallback)
+    return candidates
+
+
 def _copy_metadata(source: Mapping[str, Any]) -> dict[str, Any]:
     return {
         key: value
@@ -296,31 +340,38 @@ def _as_sequence(value: Any) -> list[Any]:
 
 def check_presence(stream_url: str) -> int:
     """Return 1 if stream is present, 0 otherwise."""
-    rc, _, _ = _run(
-        [
-            FFPROBE,
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1",
-            "-timeout",
-            "5000000",
-            stream_url,
-        ],
-        timeout=PROBE_TIMEOUT,
-    )
-    return 1 if rc == 0 else 0
+    for probe_url in _probe_url_candidates(stream_url):
+        rc, stdout, _ = _run(
+            [
+                FFPROBE,
+                "-v",
+                "error",
+                "-show_streams",
+                "-of",
+                "json",
+                "-timeout",
+                "5000000",
+                probe_url,
+            ],
+            timeout=PROBE_TIMEOUT,
+        )
+        if rc != 0:
+            continue
+        if '"codec_type"' in (stdout or ""):
+            return 1
+
+    return 0
 
 
 def check_freeze(stream_url: str, duration: int = 10) -> float:
     """Return seconds of freeze detected in the last `duration` seconds of stream."""
+    candidates = _probe_url_candidates(stream_url)
+    probe_url = candidates[0] if candidates else stream_url
     _, _, stderr = _run(
         [
             FFMPEG,
             "-i",
-            stream_url,
+            probe_url,
             "-t",
             str(duration),
             "-vf",
@@ -339,11 +390,13 @@ def check_freeze(stream_url: str, duration: int = 10) -> float:
 
 def check_black(stream_url: str, duration: int = 10) -> float:
     """Return black ratio (0.0 to 1.0) over the last `duration` seconds."""
+    candidates = _probe_url_candidates(stream_url)
+    probe_url = candidates[0] if candidates else stream_url
     _, _, stderr = _run(
         [
             FFMPEG,
             "-i",
-            stream_url,
+            probe_url,
             "-t",
             str(duration),
             "-vf",
@@ -362,11 +415,13 @@ def check_black(stream_url: str, duration: int = 10) -> float:
 
 def check_silence(stream_url: str, duration: int = 10) -> float:
     """Return seconds of audio silence in the last `duration` seconds."""
+    candidates = _probe_url_candidates(stream_url)
+    probe_url = candidates[0] if candidates else stream_url
     _, _, stderr = _run(
         [
             FFMPEG,
             "-i",
-            stream_url,
+            probe_url,
             "-t",
             str(duration),
             "-vn",
@@ -389,6 +444,8 @@ def _capture_thumbnail_url(stream_url: str) -> Optional[str]:
     Returns base64 data URL string, or None on failure.
     """
     tmp_path = None
+    candidates = _probe_url_candidates(stream_url)
+    probe_url = candidates[0] if candidates else stream_url
     try:
         from PIL import Image
 
@@ -399,7 +456,7 @@ def _capture_thumbnail_url(stream_url: str) -> Optional[str]:
             [
                 FFMPEG,
                 "-i",
-                stream_url,
+                probe_url,
                 "-frames:v",
                 "1",
                 "-q:v",
