@@ -398,7 +398,13 @@ function computeBroadcast(
 
     if (udpFaultDetected) {
       const udpFaultAgeSeconds = computePersistedUdpFaultAgeSeconds(context);
-      const udpDerivedBroadcastHealth = udpFaultAgeSeconds >= UDP_RED_AFTER_SECONDS
+      const udpFaultAlreadyConfirmed = context.previousBroadcastHealth === 'off_air_confirmed'
+        && (
+          context.previousRuntimeHealth === undefined
+          || context.previousRuntimeHealth === 'healthy'
+          || context.previousRuntimeHealth === 'unknown'
+        );
+      const udpDerivedBroadcastHealth = (udpFaultAlreadyConfirmed || udpFaultAgeSeconds >= UDP_RED_AFTER_SECONDS)
         ? 'off_air_confirmed'
         : 'degraded';
       return maxBroadcastHealth(runtimeDerivedBroadcastHealth, udpDerivedBroadcastHealth);

@@ -225,3 +225,27 @@ test('computeHealth does not escalate first UDP fault to confirmed when previous
   assert.equal(result.runtimeHealth, 'healthy');
   assert.equal(result.broadcastHealth, 'degraded');
 });
+
+test('computeHealth keeps UDP confirmed off-air latched while the same UDP fault persists', () => {
+  const now = new Date('2026-04-06T14:00:00.000Z');
+  const result = computeHealth(
+    {
+      playout_process_up: 1,
+      filebar_position_delta_poll: 1,
+      output_signal_present: 0,
+      udp_enabled: 1,
+      udp_input_count: 1,
+    },
+    true,
+    {
+      currentTime: now,
+      previousRuntimeHealth: 'healthy',
+      previousRuntimeStartedAt: '2026-04-06T13:59:00.000Z',
+      previousBroadcastHealth: 'off_air_confirmed',
+      previousBroadcastStartedAt: '2026-04-06T13:59:45.000Z',
+    },
+  );
+
+  assert.equal(result.runtimeHealth, 'healthy');
+  assert.equal(result.broadcastHealth, 'off_air_confirmed');
+});
