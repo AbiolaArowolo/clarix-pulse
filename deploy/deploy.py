@@ -31,6 +31,7 @@ LOCAL_RELEASE_ROOT = Path(r"D:\monitoring\packages\agent\release")
 REPO_ROOT = Path(r"D:\monitoring")
 REMOTE_REPO_ROOT = "/var/www/clarix-pulse"
 REMOTE_REVISION_PATH = f"{REMOTE_REPO_ROOT}/DEPLOYED_REVISION.json"
+SIGNED_RELEASE_BYPASS_ENV = "CLARIX_ALLOW_UNSIGNED_RELEASE"
 
 
 def parse_bundle_version(name):
@@ -84,6 +85,70 @@ def sha256_file(file_path):
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def env_flag(name):
+    value = os.environ.get(name, "")
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def get_authenticode_signature_status(file_path):
+    escaped_path = str(file_path).replace("'", "''")
+    command = (
+        "$signature = Get-AuthenticodeSignature -FilePath '{path}'; "
+        "[pscustomobject]@{{"
+        "Status=[string]$signature.Status; "
+        "Subject=if ($signature.SignerCertificate) {{ [string]$signature.SignerCertificate.Subject }} else {{ '' }}; "
+        "StatusMessage=[string]$signature.StatusMessage"
+        "}} | ConvertTo-Json -Compress"
+    ).format(path=escaped_path)
+    output = subprocess.check_output(
+        ["powershell", "-NoProfile", "-Command", command],
+        text=True,
+        stderr=subprocess.STDOUT,
+    ).strip()
+    return json.loads(output)
+
+
+def verify_release_signature_gate(bundle_dir):
+    artifacts = [
+        Path(bundle_dir) / "ClarixPulseSetup.exe",
+        Path(bundle_dir) / "Uninstall.exe",
+        Path(bundle_dir) / "clarix-agent.exe",
+    ]
+    statuses = []
+    unsigned = []
+
+    for artifact in artifacts:
+        if not artifact.exists():
+            raise FileNotFoundError(f"Expected release artifact is missing: {artifact}")
+        status = get_authenticode_signature_status(artifact)
+        statuses.append((artifact.name, status))
+        if status.get("Status") != "Valid":
+            unsigned.append((artifact.name, status))
+
+    for artifact_name, status in statuses:
+        signer = status.get("Subject") or "unsigned"
+        safe_print(f"  signature {artifact_name}: {status.get('Status')} ({signer})")
+
+    if not unsigned:
+        return
+
+    details = "; ".join(
+        f"{artifact_name}={status.get('Status')}"
+        for artifact_name, status in unsigned
+    )
+    message = (
+        "Refusing to deploy unsigned public installer artifacts. "
+        "Windows will show 'Publisher: Unknown' and SmartScreen warnings for these files. "
+        "Configure CLARIX_SIGN_* and rebuild the bundle, or set "
+        f"{SIGNED_RELEASE_BYPASS_ENV}=true to bypass this guard intentionally. "
+        f"Current signature status: {details}"
+    )
+    if env_flag(SIGNED_RELEASE_BYPASS_ENV):
+        safe_print(f"WARNING: {message}")
+        return
+    raise RuntimeError(message)
 
 
 def build_revision_metadata(local_installer_zip):
@@ -152,7 +217,9 @@ def main():
     client.connect(HOST, port=PORT, username=USER, password=PASSWORD, timeout=30)
     print("Connected.")
 
-    _, local_installer_zip, remote_installer_zip = resolve_latest_bundle_paths()
+    local_bundle_dir, local_installer_zip, remote_installer_zip = resolve_latest_bundle_paths()
+    print("\nChecking installer signing status before deploy...")
+    verify_release_signature_gate(local_bundle_dir)
     revision_metadata = build_revision_metadata(local_installer_zip)
     revision_payload = json.dumps(revision_metadata, indent=2, sort_keys=True) + "\n"
 

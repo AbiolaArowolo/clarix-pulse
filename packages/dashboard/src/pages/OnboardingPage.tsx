@@ -78,7 +78,7 @@ export function OnboardingPage({
     setDownloadError(null);
     setDownloading(true);
     try {
-      await downloadAuthenticatedFile('/api/downloads/bundle/windows/ClarixPulseSetup.exe', 'ClarixPulseSetup.exe');
+      await downloadAuthenticatedFile('/api/downloads/bundle/windows/latest', 'clarix-pulse-latest.zip');
     } catch (error) {
       setDownloadError(error instanceof Error ? error.message : 'Failed to download the installer.');
     } finally {

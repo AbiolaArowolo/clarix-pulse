@@ -490,6 +490,9 @@ $vendorFiles = @(
 
 try {
     $signingOptions = Resolve-SigningOptions
+    if (-not $signingOptions.enabled) {
+        Write-Warning 'Building unsigned Clarix Pulse executables. Windows will show "Publisher: Unknown" and Microsoft Defender SmartScreen warnings until code signing is configured.'
+    }
     Ensure-NssmBinary
     Ensure-FfmpegBinaries
     Ensure-Directory -Path $OutputRoot

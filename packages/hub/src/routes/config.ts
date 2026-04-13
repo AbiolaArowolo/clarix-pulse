@@ -436,8 +436,7 @@ export function createConfigRouter(io: SocketServer): Router {
     const installerLink = createBundleDownloadLink({
       baseUrl,
       tenantId: claims.tenantId,
-      fileName: 'ClarixPulseSetup.exe',
-      pathName: '/api/downloads/bundle/windows/ClarixPulseSetup.exe',
+      fileName: 'clarix-pulse-latest.zip',
       expiresAt: claims.expiresAt,
     });
     const configLink = createNodeConfigDownloadLink({

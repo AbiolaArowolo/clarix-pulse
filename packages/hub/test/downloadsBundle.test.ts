@@ -58,7 +58,7 @@ registerHooks({
   },
 });
 
-test('/api/downloads/bundle/windows/ClarixPulseSetup.exe streams the installer executable directly', async () => {
+test('/api/downloads/bundle/windows/latest serves the published zip without extra extracted artifacts', async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pulse-download-test-'));
   const bundlePath = path.join(tempRoot, 'clarix-pulse-test.zip');
 
@@ -82,12 +82,22 @@ test('/api/downloads/bundle/windows/ClarixPulseSetup.exe streams the installer e
       await new Promise<void>((resolve) => server.on('listening', () => resolve()));
       const address = server.address();
       assert.ok(address && typeof address === 'object');
-      const response = await fetch(`http://127.0.0.1:${address.port}/api/downloads/bundle/windows/ClarixPulseSetup.exe`);
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/downloads/bundle/windows/latest`);
       assert.equal(response.status, 200);
-      assert.equal(response.headers.get('content-type'), 'application/octet-stream');
-      assert.match(response.headers.get('content-disposition') ?? '', /ClarixPulseSetup\.exe/i);
+      assert.equal(response.headers.get('content-type'), 'application/zip');
+      assert.match(response.headers.get('content-disposition') ?? '', /clarix-pulse-test\.zip/i);
+
       const buffer = Buffer.from(await response.arrayBuffer());
-      assert.equal(buffer.toString('utf8'), 'setup');
+      const extracted = new AdmZip(buffer);
+      assert.equal(
+        extracted.getEntries().map((entry) => entry.entryName).sort().join(','),
+        'ClarixPulseSetup.exe,README.txt,Uninstall.exe',
+      );
+      assert.equal(extracted.getEntry('pulse-account.json'), null);
+
+      const readmeEntry = extracted.getEntry('README.txt');
+      assert.ok(readmeEntry, 'README.txt should be included in the bundle');
+      assert.equal(readmeEntry!.getData().toString('utf8'), 'Original readme content.\r\n');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import AdmZip from 'adm-zip';
 import { Request, Response, Router } from 'express';
 import { serializeAgentConfigYaml } from '../config/remoteSetup';
 import { getSessionFromRequest, requireSession } from '../serverAuth';
@@ -14,16 +13,13 @@ import { getMirroredNodeConfig } from '../store/nodeConfigMirror';
 import { getActiveAgentToken, getNode, issueNodeBootstrapClaim } from '../store/registry';
 
 const repoRoot = path.resolve(__dirname, '../../../..');
-const INSTALLER_DOWNLOAD_FILE_NAME = 'ClarixPulseSetup.exe';
-const UNINSTALL_DOWNLOAD_FILE_NAME = 'Uninstall.exe';
-const README_DOWNLOAD_FILE_NAME = 'README.txt';
 
-function resolveBundlePath(): { path: string; archiveName: string } {
+function resolveBundlePath(): { path: string; fileName: string } {
   const configuredPath = (process.env.PULSE_DOWNLOAD_BUNDLE_PATH ?? '').trim();
   const configuredName = (process.env.PULSE_DOWNLOAD_BUNDLE_NAME ?? '').trim();
 
   if (configuredPath) {
-    return { path: configuredPath, archiveName: configuredName || path.basename(configuredPath) };
+    return { path: configuredPath, fileName: configuredName || path.basename(configuredPath) };
   }
 
   // Auto-find the latest clarix-pulse-v*.zip using numeric version comparison.
@@ -53,36 +49,8 @@ function resolveBundlePath(): { path: string; archiveName: string } {
 
   return {
     path: path.join(releaseDir, bundleFileName),
-    archiveName: configuredName || bundleFileName,
+    fileName: configuredName || bundleFileName,
   };
-}
-
-function readBundleArtifact(bundlePath: string, artifactName: string): Buffer {
-  const archive = new AdmZip(bundlePath);
-  const entry = archive.getEntry(artifactName);
-  if (!entry) {
-    throw new Error(`Bundle artifact not found: ${artifactName}`);
-  }
-
-  return entry.getData();
-}
-
-function contentTypeForArtifact(fileName: string): string {
-  const lower = fileName.toLowerCase();
-  if (lower.endsWith('.txt')) {
-    return 'text/plain; charset=utf-8';
-  }
-
-  return 'application/octet-stream';
-}
-
-function sendBundleArtifact(res: Response, bundlePath: string, artifactName: string): void {
-  const buffer = readBundleArtifact(bundlePath, artifactName);
-  res.setHeader('Content-Type', contentTypeForArtifact(artifactName));
-  res.setHeader('Content-Disposition', `attachment; filename="${artifactName}"`);
-  res.setHeader('Content-Length', buffer.length);
-  res.setHeader('Cache-Control', 'private, no-store');
-  res.end(buffer);
 }
 
 function asString(value: unknown, fallback = ''): string {
@@ -264,13 +232,12 @@ export function createDownloadsRouter(): Router {
       const link = createBundleDownloadLink({
         baseUrl: requestBaseUrl(req),
         tenantId: req.auth!.tenantId,
-        fileName: INSTALLER_DOWNLOAD_FILE_NAME,
-        pathName: `/api/downloads/bundle/windows/${encodeURIComponent(INSTALLER_DOWNLOAD_FILE_NAME)}`,
+        fileName: bundle.fileName,
       });
 
       return res.json({
         ok: true,
-        fileName: INSTALLER_DOWNLOAD_FILE_NAME,
+        fileName: bundle.fileName,
         url: link.url,
         expiresAt: link.expiresAt,
       });
@@ -321,11 +288,7 @@ export function createDownloadsRouter(): Router {
     }
   });
 
-  const sendAuthorizedBundleArtifact = async (
-    req: Request,
-    res: Response,
-    artifactName: string,
-  ) => {
+  router.get('/bundle/windows/latest', async (req: Request, res: Response) => {
     const auth = await authorizeBundleDownload(req);
     if (!auth.ok) {
       return res.status(auth.status).json({ error: auth.error });
@@ -337,31 +300,19 @@ export function createDownloadsRouter(): Router {
     }
 
     try {
-      sendBundleArtifact(res, bundle.path, artifactName);
+      const stat = fs.statSync(bundle.path);
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${bundle.fileName}"`);
+      res.setHeader('Content-Length', stat.size);
+      res.setHeader('Cache-Control', 'private, no-store');
+      return fs.createReadStream(bundle.path).pipe(res);
     } catch (error) {
-      console.error('[downloads] Failed to prepare installer artifact', error);
+      console.error('[downloads] Failed to stream installer bundle', error);
       if (!res.headersSent) {
-        res.status(500).json({ error: 'Failed to prepare installer download.' });
-      } else {
-        res.end();
+        return res.status(500).json({ error: 'Failed to prepare installer bundle.' });
       }
+      res.end();
     }
-  };
-
-  router.get('/bundle/windows/latest', async (req: Request, res: Response) => {
-    return sendAuthorizedBundleArtifact(req, res, INSTALLER_DOWNLOAD_FILE_NAME);
-  });
-
-  router.get('/bundle/windows/ClarixPulseSetup.exe', async (req: Request, res: Response) => {
-    return sendAuthorizedBundleArtifact(req, res, INSTALLER_DOWNLOAD_FILE_NAME);
-  });
-
-  router.get('/bundle/windows/Uninstall.exe', async (req: Request, res: Response) => {
-    return sendAuthorizedBundleArtifact(req, res, UNINSTALL_DOWNLOAD_FILE_NAME);
-  });
-
-  router.get('/bundle/windows/README.txt', async (req: Request, res: Response) => {
-    return sendAuthorizedBundleArtifact(req, res, README_DOWNLOAD_FILE_NAME);
   });
 
   router.get('/nodes/:nodeId/config.yaml', async (req: Request, res: Response) => {

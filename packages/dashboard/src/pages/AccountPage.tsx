@@ -3,7 +3,7 @@ import { InstallWorkspacePanel } from '../components/InstallWorkspacePanel';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { downloadAuthenticatedFile, requestAuthenticatedDownloadLink } from '../lib/downloads';
 
-const INSTALLER_DOWNLOAD_NAME = 'ClarixPulseSetup.exe';
+const INSTALLER_DOWNLOAD_NAME = 'clarix-pulse-latest.zip';
 
 interface SessionShape {
   user: {
@@ -173,7 +173,7 @@ export function AccountPage({
     setDownloadError(null);
     setDownloading(true);
     try {
-      await downloadAuthenticatedFile('/api/downloads/bundle/windows/ClarixPulseSetup.exe', INSTALLER_DOWNLOAD_NAME);
+      await downloadAuthenticatedFile('/api/downloads/bundle/windows/latest', INSTALLER_DOWNLOAD_NAME);
     } catch (error) {
       setDownloadError(error instanceof Error ? error.message : 'Failed to download the installer.');
     } finally {
