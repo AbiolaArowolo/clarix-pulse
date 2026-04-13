@@ -8,7 +8,6 @@ import express from 'express';
 import AdmZip from 'adm-zip';
 
 let mockedTenantId = 'tenant-123';
-let mockedEnrollmentKey = 'ENROLL-123-TEST';
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -51,9 +50,6 @@ registerHooks({
             };
           }
 
-          export async function getTenantEnrollmentKey() {
-            return ${JSON.stringify(mockedEnrollmentKey)};
-          }
         `,
       };
     }
@@ -62,7 +58,7 @@ registerHooks({
   },
 });
 
-test('/api/downloads/bundle/windows/latest includes tenant key file and README defaults', async () => {
+test('/api/downloads/bundle/windows/latest includes hub defaults for installer bootstrap', async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pulse-download-test-'));
   const bundlePath = path.join(tempRoot, 'clarix-pulse-test.zip');
 
@@ -107,27 +103,23 @@ test('/api/downloads/bundle/windows/latest includes tenant key file and README d
       const accountConfig = JSON.parse(markerMatch![1]) as {
         hubUrl: string;
         hub_url: string;
-        enrollmentKey: string;
-        enrollment_key: string;
       };
 
       assert.equal(accountConfig.hubUrl, 'https://pulse.example.com');
       assert.equal(accountConfig.hub_url, 'https://pulse.example.com');
-      assert.equal(accountConfig.enrollmentKey, mockedEnrollmentKey);
-      assert.equal(accountConfig.enrollment_key, mockedEnrollmentKey);
+      assert.equal((accountConfig as Record<string, unknown>).enrollmentKey, undefined);
+      assert.equal((accountConfig as Record<string, unknown>).enrollment_key, undefined);
 
       const accountEntry = extracted.getEntry('pulse-account.json');
       assert.ok(accountEntry, 'pulse-account.json should be included in the bundle');
       const accountJson = JSON.parse(accountEntry!.getData().toString('utf8')) as {
         hubUrl: string;
         hub_url: string;
-        enrollmentKey: string;
-        enrollment_key: string;
       };
       assert.equal(accountJson.hubUrl, 'https://pulse.example.com');
       assert.equal(accountJson.hub_url, 'https://pulse.example.com');
-      assert.equal(accountJson.enrollmentKey, mockedEnrollmentKey);
-      assert.equal(accountJson.enrollment_key, mockedEnrollmentKey);
+      assert.equal((accountJson as Record<string, unknown>).enrollmentKey, undefined);
+      assert.equal((accountJson as Record<string, unknown>).enrollment_key, undefined);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

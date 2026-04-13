@@ -10,7 +10,6 @@ test('createInstallHandoffLink creates a verifiable signed token', () => {
     baseUrl: 'https://pulse.example.com',
     tenantId: 'tenant-123',
     nodeId: 'node-123',
-    agentToken: 'agent-token-123',
     mirrorUpdatedAt: '2026-03-29T21:30:00.000Z',
     expiresAt,
   });
@@ -28,7 +27,6 @@ test('createInstallHandoffLink creates a verifiable signed token', () => {
     tenantId: 'tenant-123',
     nodeId: 'node-123',
     fileName: 'node-123-install-handoff',
-    agentToken: 'agent-token-123',
     mirrorUpdatedAt: '2026-03-29T21:30:00.000Z',
     expiresAt,
   });

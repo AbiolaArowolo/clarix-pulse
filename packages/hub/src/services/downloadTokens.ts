@@ -12,7 +12,6 @@ export type DownloadTokenClaims =
       tenantId: string;
       nodeId: string;
       fileName: string;
-      agentToken: string;
       mirrorUpdatedAt: string;
       expiresAt: string;
     }
@@ -21,7 +20,6 @@ export type DownloadTokenClaims =
       tenantId: string;
       nodeId: string;
       fileName: string;
-      agentToken: string;
       mirrorUpdatedAt: string;
       expiresAt: string;
     };
@@ -140,9 +138,8 @@ export function verifyDownloadToken(token: string): DownloadTokenClaims | null {
 
     if (kind === 'node-config' || kind === 'install-handoff') {
       const nodeId = typeof parsed.nodeId === 'string' ? parsed.nodeId.trim() : '';
-      const agentToken = typeof parsed.agentToken === 'string' ? parsed.agentToken.trim() : '';
       const mirrorUpdatedAt = typeof parsed.mirrorUpdatedAt === 'string' ? parsed.mirrorUpdatedAt.trim() : '';
-      if (!nodeId || !agentToken || !mirrorUpdatedAt) {
+      if (!nodeId || !mirrorUpdatedAt) {
         return null;
       }
 
@@ -151,7 +148,6 @@ export function verifyDownloadToken(token: string): DownloadTokenClaims | null {
         tenantId,
         nodeId,
         fileName,
-        agentToken,
         mirrorUpdatedAt,
         expiresAt,
       };
@@ -188,7 +184,6 @@ export function createNodeConfigDownloadLink(input: {
   tenantId: string;
   nodeId: string;
   fileName: string;
-  agentToken: string;
   mirrorUpdatedAt: string;
   expiresAt?: string;
 }): SignedDownloadLink {
@@ -198,7 +193,6 @@ export function createNodeConfigDownloadLink(input: {
     tenantId: input.tenantId,
     nodeId: input.nodeId,
     fileName: input.fileName,
-    agentToken: input.agentToken,
     mirrorUpdatedAt: input.mirrorUpdatedAt,
     expiresAt,
   });
@@ -213,7 +207,6 @@ export function createInstallHandoffLink(input: {
   baseUrl: string;
   tenantId: string;
   nodeId: string;
-  agentToken: string;
   mirrorUpdatedAt: string;
   expiresAt?: string;
 }): SignedDownloadLink {
@@ -223,7 +216,6 @@ export function createInstallHandoffLink(input: {
     tenantId: input.tenantId,
     nodeId: input.nodeId,
     fileName: `${input.nodeId}-install-handoff`,
-    agentToken: input.agentToken,
     mirrorUpdatedAt: input.mirrorUpdatedAt,
     expiresAt,
   });

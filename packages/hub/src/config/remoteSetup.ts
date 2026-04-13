@@ -437,15 +437,26 @@ export function buildMirrorPayload(draft: RemoteSetupDraft): Record<string, unkn
 
 export function serializeAgentConfigYaml(
   draft: RemoteSetupDraft,
-  agentToken: string,
-  enrollmentKey?: string | null,
+  options: {
+    agentToken?: string | null;
+    bootstrapClaim?: string | null;
+    bootstrapClaimExpiresAt?: string | null;
+    enrollmentKey?: string | null;
+  },
 ): string {
+  const agentToken = asString(options.agentToken);
+  const bootstrapClaim = asString(options.bootstrapClaim);
+  const bootstrapClaimExpiresAt = asString(options.bootstrapClaimExpiresAt);
+  const enrollmentKey = asString(options.enrollmentKey);
+
   const document = {
     node_id: draft.nodeId,
     node_name: draft.nodeName,
     site_id: draft.siteId,
     hub_url: draft.hubUrl,
-    agent_token: agentToken,
+    ...(agentToken ? { agent_token: agentToken } : {}),
+    ...(bootstrapClaim ? { bootstrap_claim: bootstrapClaim } : {}),
+    ...(bootstrapClaimExpiresAt ? { bootstrap_claim_expires_at: bootstrapClaimExpiresAt } : {}),
     ...(enrollmentKey ? { enrollment_key: enrollmentKey } : {}),
     poll_interval_seconds: draft.pollIntervalSeconds,
     players: draft.players.map((player) => ({

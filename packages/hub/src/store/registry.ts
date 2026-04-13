@@ -105,7 +105,20 @@ interface PlayerRow extends QueryResultRow {
 const DEFAULT_LOCAL_UI_URL = 'http://127.0.0.1:3210/';
 const LEGACY_TENANT_ID = 'legacy-hub';
 const NODE_REENROLL_LOCK_MINUTES = Number(process.env.PULSE_NODE_REENROLL_LOCK_MINUTES ?? 180);
+const NODE_BOOTSTRAP_TTL_MINUTES = Number(process.env.PULSE_NODE_BOOTSTRAP_TTL_MINUTES ?? 10080);
 const LEGACY_SITE_NAME_MAP = new Map(SITES.map((site) => [site.id, site.name]));
+
+function bootstrapClaimTtlMinutes(): number {
+  if (!Number.isFinite(NODE_BOOTSTRAP_TTL_MINUTES) || NODE_BOOTSTRAP_TTL_MINUTES <= 0) {
+    return 10080;
+  }
+
+  return Math.min(43_200, Math.max(5, Math.floor(NODE_BOOTSTRAP_TTL_MINUTES)));
+}
+
+function hashBootstrapClaim(value: string): string {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
 
 function normalizePlayerId(value: string): string {
   return value.trim();
@@ -515,6 +528,119 @@ export async function getActiveAgentToken(nodeId: string, tenantId: string): Pro
   `, [nodeId, tenantId]);
 
   return row?.token ?? null;
+}
+
+export async function issueNodeBootstrapClaim(input: {
+  nodeId: string;
+  tenantId: string;
+  description?: string;
+  expiresAt?: string;
+}): Promise<{ bootstrapClaim: string; expiresAt: string }> {
+  const nodeId = input.nodeId.trim();
+  const tenantId = input.tenantId.trim();
+  if (!nodeId) {
+    throw new Error('nodeId is required.');
+  }
+  if (!tenantId) {
+    throw new Error('tenantId is required.');
+  }
+
+  const node = await getNode(tenantId, nodeId);
+  if (!node) {
+    throw new Error(`Node "${nodeId}" does not belong to this account.`);
+  }
+
+  const now = new Date();
+  const timestamp = now.toISOString();
+  const expiresAt = (() => {
+    const provided = input.expiresAt?.trim();
+    if (!provided) {
+      return new Date(now.getTime() + bootstrapClaimTtlMinutes() * 60_000).toISOString();
+    }
+
+    const parsed = new Date(provided);
+    if (Number.isNaN(parsed.getTime()) || parsed.getTime() <= now.getTime()) {
+      throw new Error('Bootstrap claim expiry must be a future timestamp.');
+    }
+    return parsed.toISOString();
+  })();
+
+  const bootstrapClaim = crypto.randomBytes(32).toString('hex');
+  const claimHash = hashBootstrapClaim(bootstrapClaim);
+  const description = input.description?.trim() || 'Created for provisioned config bootstrap.';
+
+  await withTransaction(async (client) => {
+    await exec(`
+      UPDATE node_bootstrap_claims
+      SET consumed_at = COALESCE(consumed_at, $3), updated_at = $3
+      WHERE node_id = $1
+        AND tenant_id = $2
+        AND consumed_at IS NULL
+        AND expires_at > $3::timestamptz
+    `, [nodeId, tenantId, timestamp], client);
+
+    await exec(`
+      INSERT INTO node_bootstrap_claims (
+        claim_hash,
+        node_id,
+        tenant_id,
+        description,
+        expires_at,
+        consumed_at,
+        created_at,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, NULL, $6, $6)
+    `, [claimHash, nodeId, tenantId, description, expiresAt, timestamp], client);
+  });
+
+  return {
+    bootstrapClaim,
+    expiresAt,
+  };
+}
+
+export async function consumeNodeBootstrapClaim(input: {
+  nodeId: string;
+  bootstrapClaim: string;
+}): Promise<{ nodeId: string; tenantId: string } | null> {
+  const nodeId = input.nodeId.trim();
+  const bootstrapClaim = input.bootstrapClaim.trim();
+  if (!nodeId || !bootstrapClaim) {
+    return null;
+  }
+
+  const claimHash = hashBootstrapClaim(bootstrapClaim);
+
+  return withTransaction(async (client) => {
+    const claim = await queryOne<{ node_id: string; tenant_id: string }>(`
+      SELECT c.node_id, c.tenant_id
+      FROM node_bootstrap_claims c
+      JOIN nodes n ON n.node_id = c.node_id
+      JOIN sites s ON s.site_id = n.site_id
+      WHERE c.claim_hash = $1
+        AND c.node_id = $2
+        AND c.consumed_at IS NULL
+        AND c.expires_at > NOW()
+        AND s.tenant_id = c.tenant_id
+      FOR UPDATE
+    `, [claimHash, nodeId], client);
+
+    if (!claim) {
+      return null;
+    }
+
+    await exec(`
+      UPDATE node_bootstrap_claims
+      SET consumed_at = NOW(), updated_at = NOW()
+      WHERE claim_hash = $1
+    `, [claimHash], client);
+
+    return {
+      nodeId: claim.node_id,
+      tenantId: claim.tenant_id,
+    };
+  });
 }
 
 interface NodeDecommissionLockRow extends QueryResultRow {

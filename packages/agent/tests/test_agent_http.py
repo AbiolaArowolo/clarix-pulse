@@ -432,6 +432,54 @@ class ConfigureBundleCommandTests(unittest.TestCase):
 
         self.assertEqual(config["enrollment_key"], "ENROLL-ABC-123")
 
+    def test_normalize_local_ui_submission_accepts_bootstrap_claim_without_manual_token(self) -> None:
+        payload = {
+            "node_id": "studio-a",
+            "node_name": "Studio A",
+            "site_id": "studio-a",
+            "hub_url": "https://pulse.example.com",
+            "bootstrap_claim": "BOOTSTRAP-CLAIM-123",
+            "poll_interval_seconds": 3,
+            "players": [
+                {
+                    "player_id": "studio-a-admax-1",
+                    "playout_type": "admax",
+                    "paths": {"admax_root": r"C:\Admax\admax3"},
+                    "udp_inputs": [],
+                }
+            ],
+        }
+
+        config = agent._normalize_local_ui_submission(payload, existing={})
+
+        self.assertEqual(config["bootstrap_claim"], "BOOTSTRAP-CLAIM-123")
+        self.assertEqual(config.get("agent_token"), "")
+
+    def test_materialize_local_ui_config_exchanges_bootstrap_claim_for_agent_token(self) -> None:
+        payload = {
+            "node_id": "studio-a",
+            "node_name": "Studio A",
+            "site_id": "studio-a",
+            "hub_url": "https://pulse.example.com",
+            "bootstrap_claim": "BOOTSTRAP-CLAIM-123",
+            "poll_interval_seconds": 3,
+            "players": [
+                {
+                    "player_id": "studio-a-admax-1",
+                    "playout_type": "admax",
+                    "paths": {"admax_root": r"C:\Admax\admax3"},
+                    "udp_inputs": [],
+                }
+            ],
+        }
+
+        with patch.object(agent, "_claim_agent_token_with_bootstrap", return_value="TOKEN-BOOTSTRAPPED") as claim_mock:
+            config = agent._materialize_local_ui_config(payload, existing={})
+
+        claim_mock.assert_called_once()
+        self.assertEqual(config["agent_token"], "TOKEN-BOOTSTRAPPED")
+        self.assertEqual(config.get("bootstrap_claim"), "")
+
 
 class CycleContextTests(unittest.TestCase):
     def test_build_cycle_shared_context_collects_connectivity_once_and_counts_log_paths(self) -> None:

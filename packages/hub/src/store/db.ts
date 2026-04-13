@@ -495,6 +495,34 @@ export async function initDb(): Promise<void> {
     `, [], client);
 
     await exec(`
+      CREATE TABLE IF NOT EXISTS node_bootstrap_claims (
+        claim_hash        TEXT PRIMARY KEY,
+        node_id           TEXT NOT NULL REFERENCES nodes(node_id) ON DELETE CASCADE,
+        tenant_id         TEXT NOT NULL REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+        description       TEXT NOT NULL DEFAULT '',
+        expires_at        TIMESTAMPTZ NOT NULL,
+        consumed_at       TIMESTAMPTZ,
+        created_at        TIMESTAMPTZ NOT NULL,
+        updated_at        TIMESTAMPTZ NOT NULL
+      );
+    `, [], client);
+
+    await exec(`
+      CREATE INDEX IF NOT EXISTS idx_node_bootstrap_claims_node_id
+      ON node_bootstrap_claims(node_id);
+    `, [], client);
+
+    await exec(`
+      CREATE INDEX IF NOT EXISTS idx_node_bootstrap_claims_tenant_id
+      ON node_bootstrap_claims(tenant_id);
+    `, [], client);
+
+    await exec(`
+      CREATE INDEX IF NOT EXISTS idx_node_bootstrap_claims_expires_at
+      ON node_bootstrap_claims(expires_at);
+    `, [], client);
+
+    await exec(`
       CREATE TABLE IF NOT EXISTS node_decommission_locks (
         node_id           TEXT PRIMARY KEY,
         tenant_id         TEXT NOT NULL REFERENCES tenants(tenant_id) ON DELETE CASCADE,

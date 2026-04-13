@@ -62,7 +62,23 @@ function Expand-Zip {
         [string]$Destination
     )
     Ensure-Directory -Path $Destination
-    Expand-Archive -Path $ZipPath -DestinationPath $Destination -Force
+    $archivePath = $ZipPath
+    $temporaryZipPath = $null
+
+    # Expand-Archive only supports .zip; Chocolatey packages are .nupkg.
+    if ([string]::Equals([System.IO.Path]::GetExtension($ZipPath), '.nupkg', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $temporaryZipPath = [System.IO.Path]::ChangeExtension([System.IO.Path]::GetTempFileName(), '.zip')
+        Copy-Item -Path $ZipPath -Destination $temporaryZipPath -Force
+        $archivePath = $temporaryZipPath
+    }
+
+    try {
+        Expand-Archive -Path $archivePath -DestinationPath $Destination -Force
+    } finally {
+        if ($temporaryZipPath -and (Test-Path -LiteralPath $temporaryZipPath -PathType Leaf)) {
+            Remove-Item -LiteralPath $temporaryZipPath -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Get-FirstMatch {
@@ -282,6 +298,16 @@ function Ensure-NssmBinary {
         Where-Object { $_.FullName -match 'win64' } |
         Select-Object -First 1
     if (-not $nssm) {
+        $nestedArchives = Get-ChildItem -Path $workDir -Recurse -File -Filter '*.zip'
+        foreach ($archive in $nestedArchives) {
+            $nestedTarget = Join-Path $workDir ("expanded-" + [System.IO.Path]::GetFileNameWithoutExtension($archive.Name))
+            Expand-Zip -ZipPath $archive.FullName -Destination $nestedTarget
+        }
+        $nssm = Get-ChildItem -Path $workDir -Recurse -File -Filter 'nssm.exe' |
+            Where-Object { $_.FullName -match 'win64' } |
+            Select-Object -First 1
+    }
+    if (-not $nssm) {
         $nssm = Get-FirstMatch -Root $workDir -Filter 'nssm.exe'
     }
     if (-not $nssm) {
@@ -306,7 +332,24 @@ function Ensure-FfmpegBinaries {
     Ensure-Directory -Path $workDir
 
     $zipPath = Join-Path $workDir 'ffmpeg.zip'
-    Download-File -Uri 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.0-latest-win64-gpl-8.0.zip' -OutFile $zipPath
+    $ffmpegUrls = @(
+        'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
+        'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.0-latest-win64-gpl-8.0.zip',
+        'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip'
+    )
+    $downloaded = $false
+    foreach ($url in $ffmpegUrls) {
+        try {
+            Download-File -Uri $url -OutFile $zipPath
+            $downloaded = $true
+            break
+        } catch {
+            Write-Warning "FFmpeg download failed from $url ($($_.Exception.Message)); trying next source."
+        }
+    }
+    if (-not $downloaded) {
+        throw 'Failed to download FFmpeg archive from all known sources.'
+    }
     Expand-Zip -ZipPath $zipPath -Destination $workDir
 
     $ffmpeg = Get-FirstMatch -Root $workDir -Filter 'ffmpeg.exe'
