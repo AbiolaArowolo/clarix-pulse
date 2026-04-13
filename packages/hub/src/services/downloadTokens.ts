@@ -164,6 +164,7 @@ export function createBundleDownloadLink(input: {
   tenantId: string;
   fileName: string;
   expiresAt?: string;
+  pathName?: string;
 }): SignedDownloadLink {
   const expiresAt = resolveExpiryIso(input.expiresAt);
   const token = createToken({
@@ -174,7 +175,7 @@ export function createBundleDownloadLink(input: {
   });
 
   return {
-    url: buildUrl(input.baseUrl, '/api/downloads/bundle/windows/latest', token),
+    url: buildUrl(input.baseUrl, input.pathName ?? '/api/downloads/bundle/windows/latest', token),
     expiresAt,
   };
 }

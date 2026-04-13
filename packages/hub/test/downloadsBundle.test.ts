@@ -58,7 +58,7 @@ registerHooks({
   },
 });
 
-test('/api/downloads/bundle/windows/latest includes hub defaults for installer bootstrap', async () => {
+test('/api/downloads/bundle/windows/ClarixPulseSetup.exe streams the installer executable directly', async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pulse-download-test-'));
   const bundlePath = path.join(tempRoot, 'clarix-pulse-test.zip');
 
@@ -71,7 +71,6 @@ test('/api/downloads/bundle/windows/latest includes hub defaults for installer b
 
     process.env.PULSE_DOWNLOAD_BUNDLE_PATH = bundlePath;
     process.env.PULSE_DOWNLOAD_BUNDLE_NAME = 'clarix-pulse-test.zip';
-    process.env.PULSE_HUB_URL = 'https://pulse.example.com';
 
     const { createDownloadsRouter } = await import('../src/routes/downloads');
 
@@ -83,50 +82,18 @@ test('/api/downloads/bundle/windows/latest includes hub defaults for installer b
       await new Promise<void>((resolve) => server.on('listening', () => resolve()));
       const address = server.address();
       assert.ok(address && typeof address === 'object');
-      const response = await fetch(`http://127.0.0.1:${address.port}/api/downloads/bundle/windows/latest`);
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/downloads/bundle/windows/ClarixPulseSetup.exe`);
       assert.equal(response.status, 200);
-      assert.equal(response.headers.get('content-type'), 'application/zip');
-
+      assert.equal(response.headers.get('content-type'), 'application/octet-stream');
+      assert.match(response.headers.get('content-disposition') ?? '', /ClarixPulseSetup\.exe/i);
       const buffer = Buffer.from(await response.arrayBuffer());
-      const extracted = new AdmZip(buffer);
-      assert.equal(
-        extracted.getEntries().map((entry) => entry.entryName).sort().join(','),
-        'ClarixPulseSetup.exe,README.txt,Uninstall.exe,pulse-account.json',
-      );
-
-      const readmeEntry = extracted.getEntry('README.txt');
-      assert.ok(readmeEntry, 'README.txt should be included in the bundle');
-      const readmeText = readmeEntry!.getData().toString('utf8');
-      const markerMatch = readmeText.match(/\[PULSE_ACCOUNT_JSON_START\]\s*(\{[\s\S]*?\})\s*\[PULSE_ACCOUNT_JSON_END\]/);
-      assert.ok(markerMatch, 'README should contain embedded tenant account block');
-
-      const accountConfig = JSON.parse(markerMatch![1]) as {
-        hubUrl: string;
-        hub_url: string;
-      };
-
-      assert.equal(accountConfig.hubUrl, 'https://pulse.example.com');
-      assert.equal(accountConfig.hub_url, 'https://pulse.example.com');
-      assert.equal((accountConfig as Record<string, unknown>).enrollmentKey, undefined);
-      assert.equal((accountConfig as Record<string, unknown>).enrollment_key, undefined);
-
-      const accountEntry = extracted.getEntry('pulse-account.json');
-      assert.ok(accountEntry, 'pulse-account.json should be included in the bundle');
-      const accountJson = JSON.parse(accountEntry!.getData().toString('utf8')) as {
-        hubUrl: string;
-        hub_url: string;
-      };
-      assert.equal(accountJson.hubUrl, 'https://pulse.example.com');
-      assert.equal(accountJson.hub_url, 'https://pulse.example.com');
-      assert.equal((accountJson as Record<string, unknown>).enrollmentKey, undefined);
-      assert.equal((accountJson as Record<string, unknown>).enrollment_key, undefined);
+      assert.equal(buffer.toString('utf8'), 'setup');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   } finally {
     delete process.env.PULSE_DOWNLOAD_BUNDLE_PATH;
     delete process.env.PULSE_DOWNLOAD_BUNDLE_NAME;
-    delete process.env.PULSE_HUB_URL;
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });

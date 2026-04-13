@@ -27,7 +27,7 @@ interface InstallHandoffPayload {
 const handoffSteps = [
   {
     title: 'Download installer',
-    detail: 'Use the signed bundle if Pulse is not already unpacked on the Windows node.',
+    detail: 'Use the signed installer if Pulse is not already installed on the Windows node.',
   },
   {
     title: 'Pull node config',
@@ -40,7 +40,7 @@ const handoffSteps = [
 ] as const;
 
 const fastChecklist = [
-  'Download the installer bundle if the node does not already have Pulse unpacked.',
+  'Download the installer if the node does not already have Pulse installed.',
   'Open the local setup UI on the Windows node.',
   'Download the node config or paste the secure config link into the local UI.',
   'Save local settings on the node.',
@@ -143,7 +143,7 @@ export function InstallHandoffPage({
 
               <div className="rounded-[var(--radius-panel)] border border-white/[0.08] bg-white/[0.04] px-4 py-4 text-sm text-slate-300 xl:max-w-xs">
                 <p className="ui-kicker-muted">Handoff window</p>
-                <p className="mt-2 text-lg font-semibold text-slate-50">{payload?.tenant?.name ?? 'Secure install bundle'}</p>
+                <p className="mt-2 text-lg font-semibold text-slate-50">{payload?.tenant?.name ?? 'Secure installer handoff'}</p>
                 <p className="mt-2 leading-6 text-slate-400">
                   {payload?.handoff?.expiresAt ? `Expires ${payload.handoff.expiresAt}` : 'Share this page with the operator finishing setup on the node.'}
                 </p>

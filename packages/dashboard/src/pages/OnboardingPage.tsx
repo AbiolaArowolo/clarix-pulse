@@ -16,7 +16,7 @@ const onboardingSteps = [
   {
     id: '01',
     title: 'Stage the signed installer',
-    detail: 'Pull the latest Windows bundle from this workspace so the target node starts with the current Pulse build.',
+    detail: 'Pull the latest Windows installer from this workspace so the target node starts with the current Pulse build.',
   },
   {
     id: '02',
@@ -31,7 +31,7 @@ const onboardingSteps = [
 ] as const;
 
 const localInstallChecklist = [
-  'Download the signed installer bundle for the Windows node.',
+  'Download the signed installer for the Windows node.',
   'Keep the monitored application or process running if possible before discovery.',
   'Run discover-node.ps1 so Pulse can infer paths, logs, and player hints.',
   'Upload the discovery report in the dashboard remote setup panel.',
@@ -78,7 +78,7 @@ export function OnboardingPage({
     setDownloadError(null);
     setDownloading(true);
     try {
-      await downloadAuthenticatedFile('/api/downloads/bundle/windows/latest', 'clarix-pulse-latest.zip');
+      await downloadAuthenticatedFile('/api/downloads/bundle/windows/ClarixPulseSetup.exe', 'ClarixPulseSetup.exe');
     } catch (error) {
       setDownloadError(error instanceof Error ? error.message : 'Failed to download the installer.');
     } finally {
@@ -177,7 +177,7 @@ export function OnboardingPage({
             <div className="mt-6 rounded-[var(--radius-panel)] border border-slate-800/80 bg-slate-950/55 p-4">
               <p className="ui-kicker-muted">Secure installer handoff</p>
               <p className="mt-2 text-sm leading-6 text-slate-300">
-                Share this short-lived installer URL with a remote operator when they need to pull the bundle without signing into the dashboard.
+                Share this short-lived installer URL with a remote operator when they need to pull the installer without signing into the dashboard.
               </p>
               <div className="mt-4 rounded-[var(--radius-control)] border border-slate-800 bg-slate-950 px-4 py-3 font-mono text-xs text-indigo-100 break-all whitespace-normal">
                 {installerLink.url}

@@ -37,7 +37,7 @@ function Get-SafeLeafName {
     } catch {
     }
 
-    return 'pulse-node-bundle.zip'
+    return 'ClarixPulseSetup.exe'
 }
 
 function Test-ExpectedHash {
@@ -59,51 +59,62 @@ function Test-ExpectedHash {
 Ensure-Directory -Path $DestinationRoot
 
 $leafName = Get-SafeLeafName -Url $BundleUrl
-if (-not $leafName.ToLowerInvariant().EndsWith('.zip')) {
-    $leafName = $leafName + '.zip'
-}
-
-$zipPath = Join-Path $DestinationRoot $leafName
-$extractName = [System.IO.Path]::GetFileNameWithoutExtension($leafName)
-$extractPath = Join-Path $DestinationRoot $extractName
+$downloadPath = Join-Path $DestinationRoot $leafName
 
 Write-Host "Downloading Pulse bundle from $BundleUrl"
-Invoke-WebRequest -Uri $BundleUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
-Test-ExpectedHash -Path $zipPath -Expected $ExpectedSha256
+Invoke-WebRequest -Uri $BundleUrl -OutFile $downloadPath -UseBasicParsing -ErrorAction Stop
+Test-ExpectedHash -Path $downloadPath -Expected $ExpectedSha256
 
-if (Test-Path -LiteralPath $extractPath) {
-    Remove-Item -Path $extractPath -Recurse -Force
-}
+$lowerLeafName = $leafName.ToLowerInvariant()
+if ($lowerLeafName.EndsWith('.zip')) {
+    $extractName = [System.IO.Path]::GetFileNameWithoutExtension($leafName)
+    $extractPath = Join-Path $DestinationRoot $extractName
 
-Write-Host "Extracting bundle to $extractPath"
-Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+    if (Test-Path -LiteralPath $extractPath) {
+        Remove-Item -Path $extractPath -Recurse -Force
+    }
 
-$installBat = Join-Path $extractPath 'install.bat'
-$setupExe = Join-Path $extractPath 'ClarixPulseSetup.exe'
-$launcherPath = ''
+    Write-Host "Extracting bundle to $extractPath"
+    Expand-Archive -Path $downloadPath -DestinationPath $extractPath -Force
 
-if (Test-Path -LiteralPath $installBat) {
-    $launcherPath = $installBat
-} elseif (Test-Path -LiteralPath $setupExe) {
-    $launcherPath = $setupExe
-} else {
-    throw "Neither install.bat nor ClarixPulseSetup.exe was found in extracted bundle at $extractPath"
-}
+    $installBat = Join-Path $extractPath 'install.bat'
+    $setupExe = Join-Path $extractPath 'ClarixPulseSetup.exe'
+    $launcherPath = ''
 
-Write-Host ''
-Write-Host "Bundle ready at $extractPath"
-Write-Host "Launcher: $launcherPath"
-
-if ($RunInstall) {
-    if ($launcherPath -ieq $installBat) {
-        Write-Host 'Launching install.bat'
-        & $installBat
+    if (Test-Path -LiteralPath $installBat) {
+        $launcherPath = $installBat
+    } elseif (Test-Path -LiteralPath $setupExe) {
+        $launcherPath = $setupExe
     } else {
+        throw "Neither install.bat nor ClarixPulseSetup.exe was found in extracted bundle at $extractPath"
+    }
+
+    Write-Host ''
+    Write-Host "Bundle ready at $extractPath"
+    Write-Host "Launcher: $launcherPath"
+
+    if ($RunInstall) {
+        if ($launcherPath -ieq $installBat) {
+            Write-Host 'Launching install.bat'
+            & $installBat
+        } else {
+            Write-Host 'Launching ClarixPulseSetup.exe'
+            Push-Location $extractPath
+            try {
+                & $setupExe
+            } finally {
+                Pop-Location
+            }
+        }
+    }
+} else {
+    Write-Host ''
+    Write-Host "Installer ready at $downloadPath"
+    if ($RunInstall) {
         Write-Host 'Launching ClarixPulseSetup.exe'
-        # Run from extracted bundle folder so README/pulse-account.json are discoverable.
-        Push-Location $extractPath
+        Push-Location $DestinationRoot
         try {
-            & $setupExe
+            & $downloadPath
         } finally {
             Pop-Location
         }

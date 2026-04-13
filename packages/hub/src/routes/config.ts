@@ -433,11 +433,11 @@ export function createConfigRouter(io: SocketServer): Router {
     }
 
     const baseUrl = requestBaseUrl(req);
-    const installerBundleName = (process.env.PULSE_DOWNLOAD_BUNDLE_NAME ?? '').trim() || 'clarix-pulse-latest.zip';
     const installerLink = createBundleDownloadLink({
       baseUrl,
       tenantId: claims.tenantId,
-      fileName: installerBundleName,
+      fileName: 'ClarixPulseSetup.exe',
+      pathName: '/api/downloads/bundle/windows/ClarixPulseSetup.exe',
       expiresAt: claims.expiresAt,
     });
     const configLink = createNodeConfigDownloadLink({
