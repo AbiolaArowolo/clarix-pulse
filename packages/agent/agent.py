@@ -1682,9 +1682,6 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
     if not hub_url:
         raise ValueError("config.yaml missing hub_url")
 
-    if not agent_token and not bootstrap_claim and not enrollment_key:
-        raise ValueError("config.yaml missing bootstrap_claim (or legacy agent_token/enrollment_key)")
-
     players_raw = raw.get("players")
     if players_raw is None:
         players_raw = raw.get("instances", [])
@@ -3294,8 +3291,9 @@ def _run_local_config_ui(
 
 
 def _run_config_editor(existing: dict[str, Any] | None = None) -> dict[str, Any]:
+    preferred_ports = [LOCAL_UI_PORT, *range(TEMP_LOCAL_UI_PORT_START, TEMP_LOCAL_UI_PORT_END + 1)]
     try:
-        return _run_local_config_ui(existing)
+        return _run_local_config_ui(existing, preferred_ports=preferred_ports)
     except Exception as exc:
         print(f"Local setup UI was unavailable: {exc}")
         print("Falling back to the console wizard.")
@@ -3333,11 +3331,24 @@ def _load_pulse_account_defaults(search_roots: list[str]) -> dict[str, str]:
         enrollment_key = _as_non_placeholder_str(
             document.get("enrollmentKey") or document.get("enrollment_key")
         )
-        if not hub_url and not enrollment_key:
+        bootstrap_claim = _as_non_placeholder_str(
+            document.get("bootstrapClaim")
+            or document.get("bootstrap_claim")
+            or document.get("claim"),
+        )
+        bootstrap_claim_expires_at = _as_str(
+            document.get("bootstrapClaimExpiresAt")
+            or document.get("bootstrap_claim_expires_at")
+            or document.get("bootstrapClaimExpiry")
+            or document.get("bootstrap_claim_expiry"),
+        )
+        if not hub_url and not enrollment_key and not bootstrap_claim:
             return {}
         return {
             "hub_url": hub_url,
             "enrollment_key": enrollment_key,
+            "bootstrap_claim": bootstrap_claim,
+            "bootstrap_claim_expires_at": bootstrap_claim_expires_at,
         }
 
     def _extract_from_readme(readme_text: str) -> dict[str, str]:
@@ -3366,6 +3377,8 @@ def _load_pulse_account_defaults(search_roots: list[str]) -> dict[str, str]:
     merged_defaults = {
         "hub_url": "",
         "enrollment_key": "",
+        "bootstrap_claim": "",
+        "bootstrap_claim_expires_at": "",
         "source_path": "",
     }
     seen: set[str] = set()
@@ -3402,13 +3415,30 @@ def _load_pulse_account_defaults(search_roots: list[str]) -> dict[str, str]:
             merged_defaults["hub_url"] = defaults["hub_url"]
         if defaults.get("enrollment_key") and not merged_defaults["enrollment_key"]:
             merged_defaults["enrollment_key"] = defaults["enrollment_key"]
+        if defaults.get("bootstrap_claim") and not merged_defaults["bootstrap_claim"]:
+            merged_defaults["bootstrap_claim"] = defaults["bootstrap_claim"]
+        if (
+            defaults.get("bootstrap_claim_expires_at")
+            and not merged_defaults["bootstrap_claim_expires_at"]
+        ):
+            merged_defaults["bootstrap_claim_expires_at"] = defaults["bootstrap_claim_expires_at"]
         if not merged_defaults["source_path"]:
             merged_defaults["source_path"] = resolved
 
-        if merged_defaults["hub_url"] and merged_defaults["enrollment_key"]:
+        if (
+            merged_defaults["hub_url"]
+            and (
+                merged_defaults["enrollment_key"]
+                or merged_defaults["bootstrap_claim"]
+            )
+        ):
             break
 
-    if not merged_defaults["hub_url"] and not merged_defaults["enrollment_key"]:
+    if (
+        not merged_defaults["hub_url"]
+        and not merged_defaults["enrollment_key"]
+        and not merged_defaults["bootstrap_claim"]
+    ):
         return {}
 
     return merged_defaults
@@ -3430,6 +3460,17 @@ def _apply_pulse_account_defaults(
     if defaults.get("enrollment_key") and not _as_non_placeholder_str(current.get("enrollment_key")):
         current["enrollment_key"] = defaults["enrollment_key"]
         applied_fields.append("enrollment key")
+    if defaults.get("bootstrap_claim") and not _as_non_placeholder_str(current.get("bootstrap_claim")):
+        current["bootstrap_claim"] = defaults["bootstrap_claim"]
+        if defaults.get("bootstrap_claim_expires_at"):
+            current["bootstrap_claim_expires_at"] = defaults["bootstrap_claim_expires_at"]
+        applied_fields.append("bootstrap claim")
+    elif (
+        defaults.get("bootstrap_claim_expires_at")
+        and _as_non_placeholder_str(current.get("bootstrap_claim"))
+        and not _as_str(current.get("bootstrap_claim_expires_at"))
+    ):
+        current["bootstrap_claim_expires_at"] = defaults["bootstrap_claim_expires_at"]
 
     if not applied_fields:
         return current, None
@@ -3650,10 +3691,8 @@ def open_local_ui_command() -> int:
     url = _local_ui_url()
 
     try:
-        response = requests.get(url, timeout=2)
-        if response.status_code >= 400:
-            raise requests.RequestException(f"Unexpected HTTP {response.status_code}")
-    except requests.RequestException:
+        _wait_for_local_ui(url, timeout_seconds=15.0)
+    except RuntimeError:
         print(f"Persistent local UI is not running at {url}")
         return 2
 
@@ -4922,6 +4961,7 @@ def poll_player(
 def run_agent_loop() -> int:
     config_path = _runtime_config_path()
     last_config_signature = ""
+    last_identity_warning_key = ""
 
     while True:
         config = load_config(config_path)
@@ -4931,6 +4971,8 @@ def run_agent_loop() -> int:
         node_id = config["node_id"]
         node_name = config["node_name"]
         hub_url = config["hub_url"].rstrip("/")
+        poll_interval = int(config.get("poll_interval_seconds", DEFAULT_POLL_INTERVAL_SECONDS))
+        players = config.get("players", [])
         token = _as_non_placeholder_str(config.get("agent_token"))
         if not token:
             refreshed_token, refresh_error = _refresh_agent_token_from_bootstrap_claim(
@@ -4947,16 +4989,19 @@ def run_agent_loop() -> int:
                 config["agent_token"] = refreshed_token
                 _write_yaml(config_path, config)
                 last_config_signature = ""
+                last_identity_warning_key = ""
             else:
-                log.error(
-                    f"No agent token available for node {node_id}. "
-                    f"Import a fresh provisioned config and save local settings. "
-                    f"({refresh_error or 'No bootstrap claim or enrollment key found.'})"
-                )
-                time.sleep(max(3, _as_int(config.get("poll_interval_seconds"), DEFAULT_POLL_INTERVAL_SECONDS)))
+                warning_key = f"{node_id}|{hub_url}"
+                if warning_key != last_identity_warning_key:
+                    log.warning(
+                        f"Pulse is running locally for node {node_id}, but hub registration is not active. "
+                        f"Open {_local_ui_url()} and import a provisioned setup link/config to connect this node "
+                        f"to the hub. ({refresh_error or 'No bootstrap claim or enrollment key found.'})"
+                    )
+                    last_identity_warning_key = warning_key
+                time.sleep(max(3, poll_interval))
                 continue
-        poll_interval = int(config.get("poll_interval_seconds", DEFAULT_POLL_INTERVAL_SECONDS))
-        players = config.get("players", [])
+        last_identity_warning_key = ""
         node_config_mirror = _build_node_config_mirror(config)
 
         config_signature = json.dumps(

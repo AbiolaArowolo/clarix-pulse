@@ -33,7 +33,7 @@ echo  =====================================================
 echo    CLARIX PULSE  ^|  Node Setup  ^|  %BUNDLE_VERSION%
 echo  =====================================================
 echo.
-echo    [1]  Install Pulse as a Windows service
+echo    [1]  Install Pulse as a Windows service ^(one-time admin approval^)
 echo    [2]  Scan this computer and open local setup UI
 echo    [3]  Uninstall and remove Pulse service
 echo    [4]  Exit
@@ -55,7 +55,8 @@ exit /b 0
 :INSTALL
 echo.
 echo  Installing Clarix Pulse service...
-echo  You may be prompted for Administrator approval.
+echo  You may be prompted once for Administrator approval.
+echo  After install, local UI should open at http://127.0.0.1:3210/
 echo.
 "%EXE_PATH%" --install-service
 set "EC=%ERRORLEVEL%"
@@ -148,8 +149,12 @@ exit /b 0
 timeout /t 3 >nul
 "%EXE_PATH%" --open-local-ui
 if "%ERRORLEVEL%"=="2" (
-    echo  Persistent local UI is not running yet.
-    echo  Use option [2] ^(Scan + setup^) to run guided configuration.
+    timeout /t 5 >nul
+    "%EXE_PATH%" --open-local-ui
+)
+if "%ERRORLEVEL%"=="2" (
+    echo  Persistent local UI is not running yet on http://127.0.0.1:3210/
+    echo  Use option [2] ^(Scan + setup^) to finish guided configuration.
 )
 exit /b 0
 

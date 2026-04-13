@@ -97,6 +97,43 @@ function Ensure-IExpressBinary {
     return [string]$iexpress.Source
 }
 
+function Ensure-7ZipBinary {
+    $commands = @(
+        (Get-Command '7z.exe' -ErrorAction SilentlyContinue | Select-Object -First 1),
+        (Get-Command '7za.exe' -ErrorAction SilentlyContinue | Select-Object -First 1),
+        (Get-Command '7zr.exe' -ErrorAction SilentlyContinue | Select-Object -First 1)
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_.Source -PathType Leaf) }
+
+    if ($commands) {
+        return [string]$commands[0].Source
+    }
+
+    foreach ($candidate in @(
+        'C:\Program Files\7-Zip\7z.exe',
+        'C:\Program Files (x86)\7-Zip\7z.exe'
+    )) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return [string](Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+
+    throw '7z.exe was not found. Install 7-Zip or add it to PATH before building node bundles.'
+}
+
+function Get-7ZipSfxModulePath {
+    param([string]$SevenZipPath)
+
+    $sevenZipDirectory = Split-Path -Path $SevenZipPath -Parent
+    foreach ($moduleName in @('7z.sfx', '7zCon.sfx')) {
+        $modulePath = Join-Path $sevenZipDirectory $moduleName
+        if (Test-Path -LiteralPath $modulePath -PathType Leaf) {
+            return [string](Resolve-Path -LiteralPath $modulePath).Path
+        }
+    }
+
+    throw "7-Zip SFX module was not found beside $SevenZipPath"
+}
+
 function Get-BooleanValue {
     param([string]$Value)
     if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
@@ -262,6 +299,68 @@ function New-IExpressPackage {
     }
 }
 
+function New-7ZipSfxPackage {
+    param(
+        [string]$SevenZipPath,
+        [string]$SfxModulePath,
+        [string]$SourceDirectory,
+        [string]$AppLaunched,
+        [string]$FriendlyName,
+        [string]$TargetName
+    )
+
+    if (-not (Test-Path -LiteralPath $SourceDirectory -PathType Container)) {
+        throw "7-Zip SFX source directory not found: $SourceDirectory"
+    }
+
+    $archivePath = Join-Path $tempRoot ('clarix-7zsfx-' + [guid]::NewGuid().ToString('N') + '.7z')
+    $configPath = Join-Path $tempRoot ('clarix-7zsfx-' + [guid]::NewGuid().ToString('N') + '.txt')
+
+    Push-Location $SourceDirectory
+    try {
+        & $SevenZipPath a -t7z -mx=9 -y $archivePath '.\*' | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "7-Zip archive build failed for $FriendlyName (exit $LASTEXITCODE)."
+        }
+    }
+    finally {
+        Pop-Location
+    }
+
+    $configText = @"
+;!@Install@!UTF-8!
+Title="$FriendlyName"
+RunProgram="cmd.exe /c $AppLaunched"
+GUIMode="2"
+;!@InstallEnd@!
+"@
+    [System.IO.File]::WriteAllText(
+        $configPath,
+        $configText,
+        (New-Object System.Text.UTF8Encoding($false))
+    )
+
+    $targetDirectory = Split-Path -Path $TargetName -Parent
+    if (-not [string]::IsNullOrWhiteSpace($targetDirectory)) {
+        Ensure-Directory -Path $targetDirectory
+    }
+
+    $outputStream = [System.IO.File]::Open($TargetName, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write)
+    try {
+        foreach ($partPath in @($SfxModulePath, $configPath, $archivePath)) {
+            $bytes = [System.IO.File]::ReadAllBytes($partPath)
+            $outputStream.Write($bytes, 0, $bytes.Length)
+        }
+    }
+    finally {
+        $outputStream.Dispose()
+    }
+
+    if (-not (Test-Path -LiteralPath $TargetName -PathType Leaf)) {
+        throw "Failed to generate 7-Zip SFX package: $TargetName"
+    }
+}
+
 function Resolve-AgentBinary {
     $candidates = @(
         (Join-Path $distDir 'clarix-agent.exe'),
@@ -372,11 +471,14 @@ $requiredRepoFiles = @(
     @{ Source = (Join-Path $PSScriptRoot 'configure.bat'); Target = 'configure.bat' }
     @{ Source = (Join-Path $PSScriptRoot 'install.bat'); Target = 'install.bat' }
     @{ Source = (Join-Path $PSScriptRoot 'uninstall.bat'); Target = 'uninstall.bat' }
+    @{ Source = (Join-Path $PSScriptRoot 'install-from-url.ps1'); Target = 'install-from-url.ps1' }
     @{ Source = (Join-Path $PSScriptRoot 'remove-pulse-agent.ps1'); Target = 'remove-pulse-agent.ps1' }
+    @{ Source = (Join-Path $PSScriptRoot 'config.example.yaml'); Target = 'config.example.yaml' }
     @{ Source = (Join-Path $PSScriptRoot 'fingerprint_manifest.json'); Target = 'fingerprint_manifest.json' }
     @{ Source = (Join-Path $PSScriptRoot 'confidence_scorer.py'); Target = 'confidence_scorer.py' }
     @{ Source = (Join-Path $PSScriptRoot 'learning_store.py'); Target = 'learning_store.py' }
     @{ Source = (Join-Path $PSScriptRoot 'discover-node.ps1'); Target = 'discover-node.ps1' }
+    @{ Source = (Join-Path $PSScriptRoot 'show-discovery-summary.ps1'); Target = 'show-discovery-summary.ps1' }
     @{ Source = (Join-Path $PSScriptRoot 'README.txt'); Target = 'README.txt' }
 )
 
@@ -430,7 +532,8 @@ try {
 
     Invoke-CodeSign -FilePath (Join-Path $bundleDir 'clarix-agent.exe') -SigningOptions $signingOptions
 
-    $iexpressPath = Ensure-IExpressBinary
+    $sevenZipPath = Ensure-7ZipBinary
+    $sevenZipSfxModulePath = Get-7ZipSfxModulePath -SevenZipPath $sevenZipPath
 
     $setupSourceDir = Join-Path $tempRoot ('clarix-setup-src-' + [guid]::NewGuid().ToString('N'))
     Ensure-Directory -Path $setupSourceDir
@@ -521,15 +624,10 @@ start "" "%ComSpec%" /C "cd /d ""%TARGET_DIR%"" && call setup.bat"
 exit /b 0
 '@ | Set-Content -Path $setupLauncherPath -Encoding ASCII
 
-    $setupSourceFiles = @(
-        Get-ChildItem -Path $setupSourceDir -File |
-        Sort-Object Name |
-        ForEach-Object { $_.Name }
-    )
-    New-IExpressPackage `
-        -IExpressPath $iexpressPath `
+    New-7ZipSfxPackage `
+        -SevenZipPath $sevenZipPath `
+        -SfxModulePath $sevenZipSfxModulePath `
         -SourceDirectory $setupSourceDir `
-        -SourceFiles $setupSourceFiles `
         -AppLaunched 'launcher-install.cmd' `
         -FriendlyName 'Clarix Pulse Setup' `
         -TargetName (Join-Path $bundleDir $setupExecutableName)
@@ -625,10 +723,10 @@ if not defined TARGET_DIR if exist "!SERVICE_DIR!\clarix-agent.exe" set "TARGET_
 goto :eof
 '@ | Set-Content -Path $uninstallLauncherPath -Encoding ASCII
 
-    New-IExpressPackage `
-        -IExpressPath $iexpressPath `
+    New-7ZipSfxPackage `
+        -SevenZipPath $sevenZipPath `
+        -SfxModulePath $sevenZipSfxModulePath `
         -SourceDirectory $uninstallSourceDir `
-        -SourceFiles @('launcher-uninstall.cmd') `
         -AppLaunched 'launcher-uninstall.cmd' `
         -FriendlyName 'Clarix Pulse Uninstall' `
         -TargetName (Join-Path $bundleDir $uninstallExecutableName)

@@ -290,6 +290,81 @@ class ConfigureBundleCommandTests(unittest.TestCase):
         self.assertEqual(written.get("hub_url"), "https://pulse.example.com")
         self.assertEqual(written.get("enrollment_key"), "ENROLL-README-123")
 
+    def test_load_or_prepare_config_prefills_bootstrap_claim_from_readme_before_local_ui(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.yaml"
+            readme_path = temp_root / "README.txt"
+
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "node_id: studio-a",
+                        "node_name: Studio A",
+                        "site_id: studio-a",
+                        "hub_url: \"\"",
+                        "agent_token: \"\"",
+                        "bootstrap_claim: \"\"",
+                        "bootstrap_claim_expires_at: \"\"",
+                        "players:",
+                        "  - player_id: studio-a-admax-1",
+                        "    playout_type: admax",
+                        "    paths:",
+                        "      admax_root_candidates:",
+                        "        - C:\\\\Admax\\\\admax",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            readme_path.write_text(
+                "\n".join(
+                    [
+                        "Clarix Pulse",
+                        "",
+                        "[PULSE_ACCOUNT_JSON_START]",
+                        '{"hubUrl":"https://pulse.example.com","bootstrapClaim":"BOOTSTRAP-123","bootstrapClaimExpiresAt":"2026-12-01T00:00:00Z"}',
+                        "[PULSE_ACCOUNT_JSON_END]",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(agent, "_bundle_path", side_effect=lambda name: str(temp_root / name)):
+                loaded = agent._load_or_prepare_config(str(config_path))
+
+            written = agent._load_yaml_if_exists(str(config_path))
+
+        self.assertEqual(loaded.get("hub_url"), "https://pulse.example.com")
+        self.assertEqual(loaded.get("bootstrap_claim"), "BOOTSTRAP-123")
+        self.assertEqual(loaded.get("bootstrap_claim_expires_at"), "2026-12-01T00:00:00Z")
+        self.assertEqual(written.get("bootstrap_claim"), "BOOTSTRAP-123")
+
+    def test_normalize_config_allows_local_only_config_without_identity(self) -> None:
+        config = agent.normalize_config(
+            {
+                "node_id": "studio-a",
+                "node_name": "Studio A",
+                "site_id": "studio-a",
+                "hub_url": "https://pulse.example.com",
+                "poll_interval_seconds": 3,
+                "players": [
+                    {
+                        "player_id": "studio-a-admax-1",
+                        "playout_type": "admax",
+                        "paths": {
+                            "admax_root_candidates": [r"C:\Admax\admax"],
+                        },
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(config["node_id"], "studio-a")
+        self.assertEqual(config.get("agent_token"), "")
+        self.assertEqual(config.get("bootstrap_claim"), "")
+
     def test_import_local_ui_state_preloads_enrollment_key_from_uploaded_discovery_data(self) -> None:
         config, message = agent._import_local_ui_state(
             "\n".join(
@@ -566,13 +641,17 @@ class BrowserLaunchTests(unittest.TestCase):
         browser_open_mock.assert_not_called()
 
     def test_open_local_ui_command_reports_manual_url_when_auto_open_fails(self) -> None:
-        response = Mock(status_code=200)
-
-        with patch.object(agent.requests, "get", return_value=response):
+        with patch.object(agent, "_wait_for_local_ui"):
             with patch.object(agent, "_open_url_in_browser", return_value="webbrowser.open returned False"):
                 exit_code = agent.open_local_ui_command()
 
         self.assertEqual(exit_code, 1)
+
+    def test_open_local_ui_command_returns_2_when_persistent_ui_is_unavailable(self) -> None:
+        with patch.object(agent, "_wait_for_local_ui", side_effect=RuntimeError("not running")):
+            exit_code = agent.open_local_ui_command()
+
+        self.assertEqual(exit_code, 2)
 
 
 class TemporaryUiPortTests(unittest.TestCase):
@@ -587,6 +666,17 @@ class TemporaryUiPortTests(unittest.TestCase):
         self.assertIs(server, mock_server)
         self.assertEqual(server_mock.call_args_list[0].args[0], (agent.LOCAL_UI_HOST, 3211))
         self.assertEqual(server_mock.call_args_list[1].args[0], (agent.LOCAL_UI_HOST, 3212))
+
+    def test_run_config_editor_prefers_persistent_local_ui_port_before_fallback_range(self) -> None:
+        with patch.object(agent, "_run_local_config_ui", return_value={"ok": True}) as ui_mock:
+            result = agent._run_config_editor({})
+
+        self.assertEqual(result, {"ok": True})
+        preferred_ports = ui_mock.call_args.kwargs.get("preferred_ports")
+        self.assertIsInstance(preferred_ports, list)
+        self.assertGreaterEqual(len(preferred_ports), 2)
+        self.assertEqual(preferred_ports[0], agent.LOCAL_UI_PORT)
+        self.assertEqual(preferred_ports[1], agent.TEMP_LOCAL_UI_PORT_START)
 
 
 @unittest.skipUnless(sys.platform == "win32", "Windows batch launcher test")
