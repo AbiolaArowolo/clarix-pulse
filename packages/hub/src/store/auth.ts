@@ -873,6 +873,14 @@ export async function authenticateUser(
   };
 }
 
+export async function resolveUserIdByEmail(emailInput: string): Promise<string | null> {
+  const email = normalizeEmail(emailInput);
+  const row = await queryOne<{ user_id: string }>(`
+    SELECT user_id FROM users WHERE email = $1
+  `, [email]);
+  return row?.user_id ?? null;
+}
+
 export async function createSessionForUser(userId: string): Promise<{ sessionToken: string; session: AuthenticatedSession }> {
   const access = await userAccessRowForUserId(userId);
   if (!access) {

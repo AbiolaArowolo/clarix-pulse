@@ -18,7 +18,7 @@ export function createThumbnailRouter(io: SocketServer): Router {
 
   router.get('/:playerId', async (req: Request, res: Response) => {
     const playerId = req.params.playerId;
-    const session = await getSessionFromRequest(req);
+    const session = await getSessionFromRequest(req, res);
     if (!session) {
       return res.status(401).json({ error: 'Sign in required.' });
     }

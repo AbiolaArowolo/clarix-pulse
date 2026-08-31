@@ -88,7 +88,7 @@ export function createAuthRouter(): Router {
   const router = Router();
 
   router.get('/session', async (req: Request, res: Response) => {
-    await getSessionFromRequest(req);
+    await getSessionFromRequest(req, res);
     return res.json(sessionPayload(req));
   });
 
@@ -238,7 +238,7 @@ export function createAuthRouter(): Router {
   });
 
   router.post('/resend-access-key', async (req: Request, res: Response) => {
-    const session = await getSessionFromRequest(req);
+    const session = await getSessionFromRequest(req, res);
     if (!session) {
       return res.status(401).json({ error: 'Sign in required.' });
     }
@@ -275,7 +275,7 @@ export function createAuthRouter(): Router {
   });
 
   router.post('/impersonation/stop', async (req: Request, res: Response) => {
-    const session = await getSessionFromRequest(req);
+    const session = await getSessionFromRequest(req, res);
     if (!session) {
       return res.status(401).json({ error: 'Sign in required.' });
     }
