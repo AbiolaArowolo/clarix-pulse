@@ -630,6 +630,10 @@ export async function registerTenantOwner(input: {
       timestamp,
     ], client);
 
+    // The person who self-registers a brand-new tenant is that tenant's
+    // owner -- give them role='admin' (not the DB default 'user') so they
+    // can invite teammates immediately after creating their workspace,
+    // without needing a second platform-admin step to promote them.
     await exec(`
       INSERT INTO users (
         user_id,
@@ -637,10 +641,11 @@ export async function registerTenantOwner(input: {
         clerk_user_id,
         email,
         display_name,
+        role,
         created_at,
         updated_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $6)
+      VALUES ($1, $2, $3, $4, $5, 'admin', $6, $6)
     `, [userId, tenantId, input.clerkUserId, email, displayName, timestamp], client);
 
     await exec(`
@@ -1090,4 +1095,276 @@ export async function deleteTenantAccount(input: {
     deletedSiteCount: siteIds.length,
     deletedPlayerCount: playerIdList.length,
   };
+}
+
+// --- Teammates / invites (tenant-scoped role management) -------------------
+// A "teammate" is just a row in `users` for the caller's own tenant. An
+// invited-but-not-yet-signed-in teammate is indistinguishable in shape from
+// an active one -- the only difference is clerk_user_id IS NULL ("pending").
+// When that person later signs in through Clerk with a matching verified
+// email, resolveOrLinkPulseUserByClerkIdentity (above) links this exact row
+// rather than creating anything new -- invites and self-registration share
+// one linking path by construction, not by a special case here.
+
+export type TeammateStatus = 'active' | 'pending';
+
+export interface TeammateSummary {
+  userId: string;
+  email: string;
+  displayName: string;
+  role: UserRole;
+  status: TeammateStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface TeammateRow extends QueryResultRow {
+  user_id: string;
+  email: string;
+  display_name: string;
+  role: string;
+  clerk_user_id: string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
+// Deliberately excludes 'super_admin' -- that role is only ever assigned via
+// the platform-admin email allowlist (resolveRole), never stored/settable on
+// a tenant-scoped user row. An admin can hand out admin/user/support only.
+const INVITABLE_ROLES: ReadonlySet<string> = new Set(['admin', 'user', 'support']);
+
+function assertInvitableRole(role: string): void {
+  if (!INVITABLE_ROLES.has(role)) {
+    throw new Error('Role must be one of: admin, user, support.');
+  }
+}
+
+function rowToTeammateSummary(row: TeammateRow): TeammateSummary {
+  return {
+    userId: row.user_id,
+    email: row.email,
+    displayName: row.display_name,
+    role: VALID_ROLES.has(row.role) ? (row.role as UserRole) : 'user',
+    status: row.clerk_user_id ? 'active' : 'pending',
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+  };
+}
+
+const TEAMMATE_SELECT = `
+  SELECT user_id, email, display_name, role, clerk_user_id, created_at, updated_at
+  FROM users
+`;
+
+async function teammateRowForTenant(
+  tenantId: string,
+  userId: string,
+  client?: Parameters<typeof exec>[2],
+): Promise<TeammateRow | null> {
+  return queryOne<TeammateRow>(`
+    ${TEAMMATE_SELECT}
+    WHERE tenant_id = $1 AND user_id = $2
+  `, [tenantId, userId], client);
+}
+
+export async function listTeammatesForTenant(tenantId: string): Promise<TeammateSummary[]> {
+  const rows = await query<TeammateRow>(`
+    ${TEAMMATE_SELECT}
+    WHERE tenant_id = $1
+    ORDER BY created_at ASC
+  `, [tenantId]);
+
+  return rows.map(rowToTeammateSummary);
+}
+
+// Pre-creates the pending row an invited teammate will link to on their
+// first Clerk sign-in. clerk_user_id stays NULL -- there is nothing else to
+// set up front since Clerk owns credentials entirely; the invited person
+// proves who they are by signing up with the same email this row was
+// created with.
+export async function createTeammateInvite(input: {
+  tenantId: string;
+  inviterUserId: string;
+  inviterEmail: string;
+  email: string;
+  displayName: string;
+  role: string;
+}): Promise<TeammateSummary> {
+  assertInvitableRole(input.role);
+
+  const email = normalizeEmail(input.email);
+  if (!email || !email.includes('@')) {
+    throw new Error('A valid email address is required.');
+  }
+  const displayName = normalizeDisplayName(input.displayName, email);
+  const userId = randomId('user');
+  const timestamp = new Date().toISOString();
+
+  await withTransaction(async (client) => {
+    // Same uniqueness guard registerTenantOwner relies on -- reusing it here
+    // is what stops one email from ever holding a pending invite in two
+    // tenants at once, and (together with the linking logic) is what stops
+    // an invited email from spinning up a second, unrelated workspace via
+    // self-registration instead of accepting the invite.
+    //
+    // SECURITY: ensureUniqueUserEmail's error message ("That email is
+    // already registered. Sign in with Clerk instead of registering
+    // again.") is written for the self-registration flow, where the person
+    // reading it IS the email owner. Here the reader is a different actor
+    // (the inviting tenant admin), so forwarding that message verbatim
+    // would let anyone with admin on any tenant probe arbitrary email
+    // addresses and learn whether they already have a Pulse account in a
+    // *different* tenant -- a cross-tenant account-existence oracle. Catch
+    // it and surface a tenant-agnostic message instead.
+    try {
+      await ensureUniqueUserEmail(email, client);
+    } catch {
+      throw new Error('Could not create that invite.');
+    }
+
+    await exec(`
+      INSERT INTO users (
+        user_id, tenant_id, clerk_user_id, email, display_name, role, created_at, updated_at
+      )
+      VALUES ($1, $2, NULL, $3, $4, $5, $6, $6)
+    `, [userId, input.tenantId, email, displayName, input.role, timestamp], client);
+
+    await recordAdminAuditEvent({
+      actorUserId: input.inviterUserId,
+      actorEmail: input.inviterEmail,
+      targetTenantId: input.tenantId,
+      targetUserId: userId,
+      targetEmail: email,
+      action: 'teammate_invited',
+      details: { role: input.role, displayName },
+    }, client);
+  });
+
+  return {
+    userId,
+    email,
+    displayName,
+    role: input.role as UserRole,
+    status: 'pending',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+export async function revokeTeammateInvite(input: {
+  tenantId: string;
+  actorUserId: string;
+  actorEmail: string;
+  targetUserId: string;
+}): Promise<void> {
+  const row = await teammateRowForTenant(input.tenantId, input.targetUserId);
+  if (!row) {
+    throw new Error('Unknown teammate.');
+  }
+  if (row.clerk_user_id) {
+    throw new Error('This invite was already accepted. Remove the teammate instead of revoking their invite.');
+  }
+
+  await withTransaction(async (client) => {
+    // WHERE clerk_user_id IS NULL guards against a race where the invite was
+    // accepted (and linked) between the check above and this delete -- if
+    // that happens this becomes a no-op rather than deleting a live account.
+    await exec(`
+      DELETE FROM users
+      WHERE user_id = $1 AND tenant_id = $2 AND clerk_user_id IS NULL
+    `, [input.targetUserId, input.tenantId], client);
+
+    await recordAdminAuditEvent({
+      actorUserId: input.actorUserId,
+      actorEmail: input.actorEmail,
+      targetTenantId: input.tenantId,
+      targetUserId: input.targetUserId,
+      targetEmail: row.email,
+      action: 'teammate_invite_revoked',
+    }, client);
+  });
+}
+
+export async function updateTeammateRole(input: {
+  tenantId: string;
+  actorUserId: string;
+  actorEmail: string;
+  targetUserId: string;
+  role: string;
+}): Promise<TeammateSummary> {
+  // A user must never be able to change their own role -- checked here
+  // rather than only in the route layer so every caller gets the guarantee.
+  if (input.targetUserId === input.actorUserId) {
+    throw new Error('You cannot change your own role.');
+  }
+  assertInvitableRole(input.role);
+
+  const row = await teammateRowForTenant(input.tenantId, input.targetUserId);
+  if (!row) {
+    throw new Error('Unknown teammate.');
+  }
+
+  const timestamp = new Date().toISOString();
+  await withTransaction(async (client) => {
+    await exec(`
+      UPDATE users SET role = $1, updated_at = $2 WHERE user_id = $3 AND tenant_id = $4
+    `, [input.role, timestamp, input.targetUserId, input.tenantId], client);
+
+    await recordAdminAuditEvent({
+      actorUserId: input.actorUserId,
+      actorEmail: input.actorEmail,
+      targetTenantId: input.tenantId,
+      targetUserId: input.targetUserId,
+      targetEmail: row.email,
+      action: 'teammate_role_changed',
+      details: { fromRole: row.role, toRole: input.role },
+    }, client);
+  });
+
+  return rowToTeammateSummary({ ...row, role: input.role, updated_at: timestamp });
+}
+
+export async function removeTeammateFromTenant(input: {
+  tenantId: string;
+  actorUserId: string;
+  actorEmail: string;
+  targetUserId: string;
+}): Promise<void> {
+  if (input.targetUserId === input.actorUserId) {
+    throw new Error('You cannot remove yourself from the tenant.');
+  }
+
+  const row = await teammateRowForTenant(input.tenantId, input.targetUserId);
+  if (!row) {
+    throw new Error('Unknown teammate.');
+  }
+
+  await withTransaction(async (client) => {
+    // FOR UPDATE locks every row for this tenant so a concurrent
+    // removeTeammateFromTenant call for the same tenant blocks here until
+    // this transaction commits/rolls back, instead of both reading the
+    // same pre-removal count and both passing the "more than one member
+    // left" guard -- otherwise two admins removing each other at the same
+    // moment could both succeed and strand the tenant with zero users.
+    const remaining = await queryOne<{ count: string }>(`
+      SELECT COUNT(*)::text AS count FROM users WHERE tenant_id = $1 FOR UPDATE
+    `, [input.tenantId], client);
+    if (remaining && Number(remaining.count) <= 1) {
+      throw new Error('Cannot remove the last remaining member of a workspace.');
+    }
+
+    // sessions.user_id is ON DELETE CASCADE, so any impersonation session
+    // pointed at this user is cleaned up automatically by this delete --
+    // no separate cleanup query needed.
+    await exec(`DELETE FROM users WHERE user_id = $1 AND tenant_id = $2`, [input.targetUserId, input.tenantId], client);
+
+    await recordAdminAuditEvent({
+      actorUserId: input.actorUserId,
+      actorEmail: input.actorEmail,
+      targetTenantId: input.tenantId,
+      targetUserId: input.targetUserId,
+      targetEmail: row.email,
+      action: 'teammate_removed',
+    }, client);
+  });
 }

@@ -1,15 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { InstallWorkspacePanel } from '../components/InstallWorkspacePanel';
+import { TeammatesPanel } from '../components/TeammatesPanel';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { downloadAuthenticatedFile, requestAuthenticatedDownloadLink } from '../lib/downloads';
+import type { TenantRole } from '../features/auth/AuthProvider';
 
 const INSTALLER_DOWNLOAD_NAME = 'clarix-pulse-latest.zip';
 
 interface SessionShape {
   user: {
+    userId: string;
     displayName: string;
     email: string;
     isPlatformAdmin?: boolean;
+    role: TenantRole;
   };
   tenant: {
     name: string;
@@ -385,6 +389,8 @@ export function AccountPage({
           </div>
         </aside>
       </section>
+
+      <TeammatesPanel currentUserId={session.user.userId} currentUserRole={session.user.role} />
 
       <InstallWorkspacePanel />
     </div>

@@ -4,6 +4,22 @@ const FOOTER_BG = '#0f172a';
 const BRAND_TEAL = '#14b8a6';
 
 /**
+ * Escapes a string for safe interpolation into HTML email bodies. Every
+ * caller that interpolates free-text values (tenant names, display names,
+ * roles) sourced from user input must run them through this first -
+ * some of these emails go to third-party inboxes the sender doesn't
+ * control (e.g. teammate invites), not just the tenant's own recipients.
+ */
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
  * Wraps content in the standard Pulse branded HTML email shell.
  * accentColor drives the thin bar below the header (defaults to teal).
  */

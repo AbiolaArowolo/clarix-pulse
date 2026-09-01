@@ -13,11 +13,14 @@ import { disconnectHubSocket } from '../../lib/socket';
 // the matching Pulse user by clerk_user_id - see the DESIGN note in the
 // migration for the full account-linking flow. There is no password,
 // access-key, or reset-token concept on the frontend any more.
+export type TenantRole = 'super_admin' | 'admin' | 'support' | 'user';
+
 interface AuthUser {
   userId: string;
   email: string;
   displayName: string;
   isPlatformAdmin?: boolean;
+  role: TenantRole;
 }
 
 interface AuthImpersonation {
