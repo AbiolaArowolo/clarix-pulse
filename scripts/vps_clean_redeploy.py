@@ -20,6 +20,8 @@ ENV_SYNC_KEYS = (
     "PULSE_DOWNLOAD_BUNDLE_NAME",
     "PULSE_DOWNLOAD_SIGNING_SECRET",
     "PULSE_DOWNLOAD_LINK_TTL_MINUTES",
+    "CLERK_SECRET_KEY",
+    "CLERK_PUBLISHABLE_KEY",
 )
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
@@ -344,6 +346,26 @@ def main() -> int:
             timeout=300,
         )
 
+        print("=== verify required runtime config ===")
+        # Fails fast, before any build/cutover work, if a required secret is
+        # missing from the staged .env.local. Without this, a missing
+        # CLERK_SECRET_KEY would let the deploy "succeed" (the app starts,
+        # /api/version responds fine since it's a public endpoint) while
+        # login is completely broken for every real user - exactly the kind
+        # of outage this script's own health check wouldn't catch.
+        run(
+            ssh,
+            (
+                "bash -lc 'set -e; "
+                f"for key in CLERK_SECRET_KEY CLERK_PUBLISHABLE_KEY; do "
+                f"grep -q \"^${{key}}=.\\+\" {staging_app}/.env.local 2>/dev/null || "
+                f"{{ echo \"Missing required runtime config: $key (set it as a GitHub secret so it reaches .env.local via ENV_SYNC_KEYS)\"; exit 1; }}; "
+                f"done; "
+                f"echo required runtime config present'"
+            ),
+            timeout=60,
+        )
+
         print("=== npm ci ===")
         run(
             ssh,
@@ -359,9 +381,22 @@ def main() -> int:
         )
 
         print("=== build dashboard ===")
+        # Vite reads VITE_-prefixed vars from process.env directly (existing
+        # env vars take priority over .env files, per Vite's own docs) - it
+        # does NOT read the app-root .env.local this script writes above,
+        # since that file lives outside packages/dashboard (Vite's default
+        # envDir, unset in vite.config.ts, is the cwd of the build command).
+        # CLERK_PUBLISHABLE_KEY is not secret (safe to echo/grep - unlike
+        # CLERK_SECRET_KEY, it's meant to ship in client-side JS), so a
+        # plain export from the already-staged .env.local is enough; no
+        # separate VITE_CLERK_PUBLISHABLE_KEY secret needs to exist.
         run(
             ssh,
-            f"bash -lc 'cd {staging_app} && npm run build --workspace=packages/dashboard'",
+            (
+                f"bash -lc 'cd {staging_app} && "
+                f"export VITE_CLERK_PUBLISHABLE_KEY=$(grep -m1 \"^CLERK_PUBLISHABLE_KEY=\" .env.local | cut -d= -f2-) && "
+                f"npm run build --workspace=packages/dashboard'"
+            ),
             timeout=1800,
         )
 
