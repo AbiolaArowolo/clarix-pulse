@@ -36,5 +36,7 @@ jobs:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_ROOT_PASSWORD: ${{ secrets.VPS_ROOT_PASSWORD }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
         run: |
           python scripts/vps_clean_redeploy.py --archive /tmp/clarix-pulse-deploy.tar.gz
