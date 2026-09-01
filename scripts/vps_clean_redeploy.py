@@ -331,7 +331,13 @@ def main() -> int:
                 f"if [ -f {backup_root}/.env.local ]; then cp {backup_root}/.env.local {staging_app}/.env.local; fi; "
                 f"if [ -f {remote_env_override} ]; then "
                 f"touch {staging_app}/.env.local; "
-                f"while IFS= read -r line; do "
+                # `|| [ -n "$line" ]` handles a final line with no trailing
+                # newline (build_env_override_lines_with_extra's "\n".join()
+                # doesn't add one) - without it, `read` still captures the
+                # text but returns non-zero at EOF, and `while` uses that
+                # exit status to decide whether to loop, silently dropping
+                # whichever key happens to be last in ENV_SYNC_KEYS.
+                f"while IFS= read -r line || [ -n \"$line\" ]; do "
                 f"[ -z \"$line\" ] && continue; "
                 f"key=${{line%%=*}}; "
                 f"tmp=$(mktemp); "
