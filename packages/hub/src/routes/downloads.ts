@@ -77,17 +77,9 @@ function requestBaseUrl(req: Request): string {
 function tenantAccessError(input: {
   enabled: boolean;
   disabledReason: string | null;
-  accessKeyExpiresAt: string | null;
 }): string | null {
   if (!input.enabled) {
     return input.disabledReason?.trim() || 'Account is disabled.';
-  }
-
-  if (input.accessKeyExpiresAt) {
-    const expiry = new Date(input.accessKeyExpiresAt);
-    if (!Number.isNaN(expiry.getTime()) && expiry.getTime() < Date.now()) {
-      return 'Account access key has expired.';
-    }
   }
 
   return null;
@@ -137,7 +129,6 @@ async function authorizeBundleDownload(req: Request): Promise<
   const accessError = tenantAccessError({
     enabled: tenant.enabled,
     disabledReason: tenant.disabledReason,
-    accessKeyExpiresAt: tenant.accessKeyExpiresAt,
   });
   if (accessError) {
     return {
@@ -201,7 +192,6 @@ async function authorizeNodeConfigDownload(
   const accessError = tenantAccessError({
     enabled: tenant.enabled,
     disabledReason: tenant.disabledReason,
-    accessKeyExpiresAt: tenant.accessKeyExpiresAt,
   });
   if (accessError) {
     return {
@@ -231,7 +221,7 @@ export function createDownloadsRouter(): Router {
       }
       const link = createBundleDownloadLink({
         baseUrl: requestBaseUrl(req),
-        tenantId: req.auth!.tenantId,
+        tenantId: req.pulseSession!.tenantId,
         fileName: bundle.fileName,
       });
 
@@ -250,18 +240,18 @@ export function createDownloadsRouter(): Router {
 
   router.get('/nodes/:nodeId/config-link', requireSession, async (req: Request, res: Response) => {
     const nodeId = req.params.nodeId.trim();
-    const node = await getNode(req.auth!.tenantId, nodeId);
+    const node = await getNode(req.pulseSession!.tenantId, nodeId);
     if (!node) {
       return res.status(404).json({ error: 'Unknown node.' });
     }
 
     try {
-      const mirror = await getMirroredNodeConfig(node.nodeId, req.auth!.tenantId);
+      const mirror = await getMirroredNodeConfig(node.nodeId, req.pulseSession!.tenantId);
       if (!mirror) {
         return res.status(404).json({ error: 'No mirrored config is available for this node yet.' });
       }
 
-      const agentToken = await getActiveAgentToken(node.nodeId, req.auth!.tenantId);
+      const agentToken = await getActiveAgentToken(node.nodeId, req.pulseSession!.tenantId);
       if (!agentToken) {
         return res.status(409).json({ error: 'No active agent token is available for this node.' });
       }
@@ -269,7 +259,7 @@ export function createDownloadsRouter(): Router {
       const fileName = `${node.nodeId}-pulse-config.yaml`;
       const link = createNodeConfigDownloadLink({
         baseUrl: requestBaseUrl(req),
-        tenantId: req.auth!.tenantId,
+        tenantId: req.pulseSession!.tenantId,
         nodeId: node.nodeId,
         fileName,
         mirrorUpdatedAt: mirror.updatedAt,

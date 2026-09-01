@@ -7,7 +7,7 @@ import {
   parseRemoteSetupReport,
   serializeAgentConfigYaml,
 } from '../config/remoteSetup';
-import { requireSession } from '../serverAuth';
+import { blockSupportDeletes, requireSession } from '../serverAuth';
 import { createBundleDownloadLink, createInstallHandoffLink, createNodeConfigDownloadLink, verifyDownloadToken } from '../services/downloadTokens';
 import { appendAdminAuditEvent, findTenantByEnrollmentKey, getTenantAccessSummary } from '../store/auth';
 import { getAlertSettings, updateAlertSettings } from '../store/alertSettings';
@@ -141,17 +141,9 @@ function requestBaseUrl(req: Request): string {
 function tenantAccessError(input: {
   enabled: boolean;
   disabledReason: string | null;
-  accessKeyExpiresAt: string | null;
 }): string | null {
   if (!input.enabled) {
     return input.disabledReason?.trim() || 'Workspace access is currently disabled.';
-  }
-
-  if (input.accessKeyExpiresAt) {
-    const expiry = new Date(input.accessKeyExpiresAt);
-    if (!Number.isNaN(expiry.getTime()) && expiry.getTime() < Date.now()) {
-      return 'Workspace access has expired.';
-    }
   }
 
   return null;
@@ -412,7 +404,6 @@ export function createConfigRouter(io: SocketServer): Router {
     const accessError = tenantAccessError({
       enabled: tenant.enabled,
       disabledReason: tenant.disabledReason,
-      accessKeyExpiresAt: tenant.accessKeyExpiresAt,
     });
     if (accessError) {
       return res.status(403).json({ error: accessError });
@@ -485,6 +476,10 @@ export function createConfigRouter(io: SocketServer): Router {
   });
 
   router.use(requireSession);
+  // Every route below this point is tenant-scoped and includes the DELETE
+  // at /remote/node/:nodeId -- gate all of them once here rather than
+  // per-route so a support account can never remove a node record.
+  router.use(blockSupportDeletes);
 
   router.post('/remote/install-handoff-link', async (req: Request, res: Response) => {
     const nodeId = asString(req.body?.nodeId);
@@ -492,32 +487,32 @@ export function createConfigRouter(io: SocketServer): Router {
       return res.status(400).json({ error: 'nodeId is required.' });
     }
 
-    const node = await getNode(req.auth!.tenantId, nodeId);
+    const node = await getNode(req.pulseSession!.tenantId, nodeId);
     if (!node) {
       return res.status(404).json({ error: 'Unknown node.' });
     }
 
-    const mirror = await getMirroredNodeConfig(node.nodeId, req.auth!.tenantId);
+    const mirror = await getMirroredNodeConfig(node.nodeId, req.pulseSession!.tenantId);
     if (!mirror) {
       return res.status(404).json({ error: 'No mirrored config is available for this node yet.' });
     }
 
-    if (!await getActiveAgentToken(node.nodeId, req.auth!.tenantId)) {
+    if (!await getActiveAgentToken(node.nodeId, req.pulseSession!.tenantId)) {
       return res.status(409).json({ error: 'No active agent token is available for this node.' });
     }
 
     try {
       const link = createInstallHandoffLink({
         baseUrl: requestBaseUrl(req),
-        tenantId: req.auth!.tenantId,
+        tenantId: req.pulseSession!.tenantId,
         nodeId: node.nodeId,
         mirrorUpdatedAt: mirror.updatedAt,
       });
 
       await appendAdminAuditEvent({
-        actorUserId: req.auth!.userId,
-        actorEmail: req.auth!.email,
-        targetTenantId: req.auth!.tenantId,
+        actorUserId: req.pulseSession!.userId,
+        actorEmail: req.pulseSession!.email,
+        targetTenantId: req.pulseSession!.tenantId,
         action: 'install_handoff_link_created',
         details: {
           nodeId: node.nodeId,
@@ -546,7 +541,7 @@ export function createConfigRouter(io: SocketServer): Router {
   });
 
   router.get('/player/:playerId', async (req: Request, res: Response) => {
-    const tenantId = req.auth!.tenantId;
+    const tenantId = req.pulseSession!.tenantId;
     const mirrored = await getMirroredPlayerConfig(req.params.playerId, tenantId);
     if (mirrored) {
       return res.json(mirrored);
@@ -578,7 +573,7 @@ export function createConfigRouter(io: SocketServer): Router {
   });
 
   router.patch('/player/:playerId', async (req: Request, res: Response) => {
-    const tenantId = req.auth!.tenantId;
+    const tenantId = req.pulseSession!.tenantId;
     const { playerId } = req.params;
 
     const udpInputId = asString(req.body?.udpInputId);
@@ -610,7 +605,7 @@ export function createConfigRouter(io: SocketServer): Router {
   });
 
   router.get('/instance/:playerId/controls', async (req: Request, res: Response) => {
-    const player = await getPlayer(req.params.playerId, req.auth!.tenantId);
+    const player = await getPlayer(req.params.playerId, req.pulseSession!.tenantId);
     if (!player) {
       return res.status(404).json({ error: 'Unknown player.' });
     }
@@ -622,7 +617,7 @@ export function createConfigRouter(io: SocketServer): Router {
   });
 
   router.post('/instance/:playerId/controls', async (req: Request, res: Response) => {
-    const player = await getPlayer(req.params.playerId, req.auth!.tenantId);
+    const player = await getPlayer(req.params.playerId, req.pulseSession!.tenantId);
     if (!player) {
       return res.status(404).json({ error: 'Unknown player.' });
     }
@@ -648,7 +643,7 @@ export function createConfigRouter(io: SocketServer): Router {
 
   router.get('/alerts', async (req: Request, res: Response) => {
     return res.json({
-      settings: await getAlertSettings(req.auth!.tenantId),
+      settings: await getAlertSettings(req.pulseSession!.tenantId),
       capabilities: {
         emailDeliveryConfigured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
         telegramDeliveryConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN),
@@ -679,7 +674,7 @@ export function createConfigRouter(io: SocketServer): Router {
     }
 
     const settings = await updateAlertSettings({
-      tenantId: req.auth!.tenantId,
+      tenantId: req.pulseSession!.tenantId,
       emailRecipients,
       telegramChatIds,
       phoneNumbers,
@@ -752,13 +747,13 @@ export function createConfigRouter(io: SocketServer): Router {
       }
 
       const enrollment = await enrollNode({
-        tenantId: req.auth!.tenantId,
+        tenantId: req.pulseSession!.tenantId,
         ignoreDecommissionLock: true,
         ...buildEnrollmentInput(draft),
       });
-      const mirroredUpdate = await updateMirroredNodeConfig(req.auth!.tenantId, draft.nodeId, buildMirrorPayload(draft));
+      const mirroredUpdate = await updateMirroredNodeConfig(req.pulseSession!.tenantId, draft.nodeId, buildMirrorPayload(draft));
       const mirrored = mirroredUpdate?.config ?? null;
-      emitRemovedPlayers(io, req.auth!.tenantId, draft.nodeId, mirroredUpdate?.removedPlayerIds ?? []);
+      emitRemovedPlayers(io, req.pulseSession!.tenantId, draft.nodeId, mirroredUpdate?.removedPlayerIds ?? []);
 
       for (const player of draft.players) {
         await updateInstanceControls(player.playerId, {
@@ -767,7 +762,7 @@ export function createConfigRouter(io: SocketServer): Router {
       }
 
       const bootstrapClaim = await issueNodeBootstrapClaim({
-        tenantId: req.auth!.tenantId,
+        tenantId: req.pulseSession!.tenantId,
         nodeId: draft.nodeId,
         description: 'Generated by remote provisioning.',
       });
@@ -781,7 +776,7 @@ export function createConfigRouter(io: SocketServer): Router {
         try {
           const signedLink = createNodeConfigDownloadLink({
             baseUrl: requestBaseUrl(req),
-            tenantId: req.auth!.tenantId,
+            tenantId: req.pulseSession!.tenantId,
             nodeId: draft.nodeId,
             fileName: `${draft.nodeId}-pulse-config.yaml`,
             mirrorUpdatedAt: mirrored.updatedAt,
@@ -824,22 +819,22 @@ export function createConfigRouter(io: SocketServer): Router {
       return res.status(400).json({ error: 'nodeId is required.' });
     }
 
-    const node = await getNode(req.auth!.tenantId, nodeId);
+    const node = await getNode(req.pulseSession!.tenantId, nodeId);
     if (!node) {
       return res.status(404).json({ error: 'Unknown node.' });
     }
 
-    const removal = await removeNode(nodeId, req.auth!.tenantId);
+    const removal = await removeNode(nodeId, req.pulseSession!.tenantId);
     if (!removal.removed) {
       return res.status(409).json({ error: 'Node could not be removed.' });
     }
 
-    emitRemovedPlayers(io, req.auth!.tenantId, nodeId, removal.removedPlayerIds);
-    emitNodeRemoved(io, req.auth!.tenantId, nodeId);
+    emitRemovedPlayers(io, req.pulseSession!.tenantId, nodeId, removal.removedPlayerIds);
+    emitNodeRemoved(io, req.pulseSession!.tenantId, nodeId);
     await appendAdminAuditEvent({
-      actorUserId: req.auth!.userId,
-      actorEmail: req.auth!.email,
-      targetTenantId: req.auth!.tenantId,
+      actorUserId: req.pulseSession!.userId,
+      actorEmail: req.pulseSession!.email,
+      targetTenantId: req.pulseSession!.tenantId,
       action: 'node_removed',
       details: {
         nodeId,

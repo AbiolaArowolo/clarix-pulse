@@ -5,6 +5,16 @@ import { clearInstanceControlsCacheForInstances } from './instanceControls';
 import { clearStateCacheForInstances } from './state';
 import { deleteThumbnailsForPlayers } from './thumbnails';
 
+// LEARN: Clerk vs. Pulse's own tables.
+// Clerk is a *pure authentication layer* -- it proves "this browser is this
+// person" and owns the login session/cookie. It knows nothing about tenants,
+// roles, or impersonation, and we deliberately never write that data into
+// Clerk (no tenant/role in Clerk metadata). Everything in this file is the
+// authorization side: which Pulse tenant a person belongs to, what role they
+// hold, whether their tenant is enabled, and (for platform admins) which
+// tenant they are currently impersonating. That side stays 100% in Postgres,
+// same as before this migration -- only the identity-proving step changed.
+
 export type UserRole = 'super_admin' | 'admin' | 'support' | 'user';
 
 export interface AuthenticatedSession {
@@ -22,8 +32,6 @@ export interface AuthenticatedSession {
   isPlatformAdmin: boolean;
   tenantEnabled: boolean;
   disabledReason: string | null;
-  accessKeyHint: string | null;
-  accessKeyExpiresAt: string | null;
   impersonating: boolean;
   impersonatorUserId: string | null;
   impersonatorEmail: string | null;
@@ -38,9 +46,6 @@ export interface RegistrationResult {
   ownerDisplayName: string;
   enrollmentKey: string;
   defaultAlertEmail: string;
-  accessKey: string;
-  accessKeyHint: string;
-  accessKeyExpiresAt: string;
 }
 
 export interface TenantAccessSummary {
@@ -52,16 +57,8 @@ export interface TenantAccessSummary {
   defaultAlertEmail: string | null;
   enabled: boolean;
   disabledReason: string | null;
-  accessKeyHint: string | null;
-  accessKeyGeneratedAt: string | null;
-  accessKeyExpiresAt: string | null;
   createdAt: string;
   updatedAt: string;
-}
-
-export interface TenantAccessKeyRotation {
-  summary: TenantAccessSummary;
-  accessKey: string;
 }
 
 export interface TenantDeletionResult {
@@ -87,54 +84,29 @@ export interface AdminAuditEvent {
   createdAt: string;
 }
 
-export interface PasswordResetIssueResult {
-  userId: string;
-  email: string;
-  displayName: string;
-  tenantId: string;
-  tenantName: string;
-  resetToken: string;
-  expiresAt: string;
-}
-
-export interface AuthenticationResult {
-  ok: boolean;
-  statusCode: number;
-  error?: string;
-  userId?: string;
-}
-
-export interface PasswordResetRequestResult {
-  resetToken: string;
-  resetUrl: string;
-  expiresAt: string;
-  userId: string;
-  email: string;
-  displayName: string;
-  tenantId: string;
-  tenantName: string;
-  createdByAdmin: boolean;
-}
-
-interface SessionRow extends QueryResultRow {
-  session_id: string;
+// A Pulse user row joined with its tenant -- the shared shape every lookup
+// (by user_id, by clerk_user_id, by email) returns, so session-building logic
+// only needs to live in one place (sessionFromRow).
+interface PulseUserRow extends QueryResultRow {
   user_id: string;
+  clerk_user_id: string | null;
+  email: string;
+  display_name: string;
+  role: string;
   tenant_id: string;
   tenant_name: string;
   tenant_slug: string;
   enrollment_key: string;
   default_alert_email: string | null;
-  email: string;
-  display_name: string;
-  role: string;
-  expires_at: Date | string;
   enabled: boolean;
   disabled_reason: string | null;
-  access_key_hint: string | null;
-  access_key_expires_at: Date | string | null;
-  impersonator_user_id: string | null;
-  impersonator_email: string | null;
-  impersonation_started_at: Date | string | null;
+}
+
+interface ImpersonationSessionRow extends PulseUserRow {
+  impersonator_user_id: string;
+  impersonator_email: string;
+  impersonation_started_at: Date | string;
+  expires_at: Date | string;
 }
 
 interface UserRow extends QueryResultRow {
@@ -143,29 +115,6 @@ interface UserRow extends QueryResultRow {
 
 interface TenantRow extends QueryResultRow {
   tenant_id: string;
-}
-
-interface UserAuthRow extends QueryResultRow {
-  user_id: string;
-  password_hash: string;
-  email: string;
-  tenant_id: string;
-  enabled: boolean;
-  disabled_reason: string | null;
-  access_key_hash: string;
-  access_key_expires_at: Date | string | null;
-}
-
-interface UserAccessRow extends QueryResultRow {
-  user_id: string;
-  email: string;
-  display_name: string;
-  tenant_id: string;
-  tenant_name: string;
-  tenant_slug: string;
-  enabled: boolean;
-  disabled_reason: string | null;
-  access_key_expires_at: Date | string | null;
 }
 
 interface TenantOwnerRow extends QueryResultRow {
@@ -177,21 +126,6 @@ interface TenantOwnerRow extends QueryResultRow {
   tenant_slug: string;
 }
 
-interface PasswordResetRow extends QueryResultRow {
-  reset_id: string;
-  user_id: string;
-  email: string;
-  display_name: string;
-  tenant_id: string;
-  tenant_name: string;
-  token_hash: string;
-  expires_at: Date | string;
-  created_by_admin: boolean;
-  actor_user_id: string | null;
-  actor_email: string | null;
-  consumed_at: Date | string | null;
-}
-
 interface TenantSummaryRow extends QueryResultRow {
   tenant_id: string;
   tenant_name: string;
@@ -201,9 +135,6 @@ interface TenantSummaryRow extends QueryResultRow {
   default_alert_email: string | null;
   enabled: boolean;
   disabled_reason: string | null;
-  access_key_hint: string | null;
-  access_key_generated_at: Date | string | null;
-  access_key_expires_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -220,25 +151,11 @@ interface AdminAuditEventRow extends QueryResultRow {
   created_at: Date | string;
 }
 
-const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
-
-function passwordResetValidityMinutes(): number {
-  const parsed = Number.parseInt(process.env.PULSE_PASSWORD_RESET_TTL_MINUTES ?? '60', 10);
-  if (!Number.isFinite(parsed)) {
-    return 60;
-  }
-
-  return Math.min(24 * 60, Math.max(5, parsed));
-}
-
-function accessKeyValidityDays(): number {
-  const parsed = Number.parseInt(process.env.PULSE_ACCESS_KEY_TTL_DAYS ?? '365', 10);
-  if (!Number.isFinite(parsed)) {
-    return 365;
-  }
-
-  return Math.min(3650, Math.max(1, parsed));
-}
+// Impersonation sessions are Pulse-issued and Pulse-verified (they are not
+// Clerk sessions -- the impersonating admin's own Clerk cookie never
+// changes). This TTL bounds how long a "support mode" window can stay open
+// before the admin has to re-open it from the admin console.
+const IMPERSONATION_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 
 function toIso(value: Date | string | null | undefined): string {
   if (!value) return new Date().toISOString();
@@ -246,11 +163,6 @@ function toIso(value: Date | string | null | undefined): string {
 
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toISOString();
-}
-
-function toOptionalIso(value: Date | string | null | undefined): string | null {
-  if (!value) return null;
-  return toIso(value);
 }
 
 function normalizeEmail(value: string): string {
@@ -289,34 +201,31 @@ function hashSessionToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-function hashOpaqueToken(token: string): string {
-  return crypto.createHash('sha256').update(token).digest('hex');
+function tenantAccessError(input: {
+  enabled: boolean;
+  disabledReason: string | null;
+  isPlatformAdmin: boolean;
+}): string | null {
+  if (input.isPlatformAdmin) {
+    return null;
+  }
+
+  if (!input.enabled) {
+    return input.disabledReason?.trim() || 'Account pending activation. Clarix must enable this account before you can sign in.';
+  }
+
+  return null;
 }
 
-function normalizeAccessKey(value: string): string {
-  return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-}
+const VALID_ROLES: ReadonlySet<string> = new Set(['super_admin', 'admin', 'support', 'user']);
 
-function formatAccessKey(value: string): string {
-  return normalizeAccessKey(value).match(/.{1,4}/g)?.join('-') ?? normalizeAccessKey(value);
-}
+function resolveRole(dbRole: string, isPlatformAdmin: boolean): UserRole {
+  // Email-based super_admin takes precedence over the DB role.
+  if (isPlatformAdmin) {
+    return 'super_admin';
+  }
 
-function accessKeyHint(value: string): string {
-  const normalized = normalizeAccessKey(value);
-  const tail = normalized.slice(-6) || normalized;
-  return `...${tail}`;
-}
-
-function createAccessKey(): string {
-  return formatAccessKey(crypto.randomBytes(12).toString('hex').toUpperCase());
-}
-
-function accessKeyExpiryIso(validityDays = accessKeyValidityDays()): string {
-  return new Date(Date.now() + validityDays * 24 * 60 * 60 * 1000).toISOString();
-}
-
-function passwordResetExpiryIso(validityMinutes = passwordResetValidityMinutes()): string {
-  return new Date(Date.now() + validityMinutes * 60 * 1000).toISOString();
+  return VALID_ROLES.has(dbRole) ? (dbRole as UserRole) : 'user';
 }
 
 function platformAdminEmails(): Set<string> {
@@ -336,101 +245,23 @@ export function isPlatformAdminEmail(email: string): boolean {
   return platformAdminEmails().has(normalizeEmail(email));
 }
 
-async function scryptHash(secret: string, salt: string): Promise<string> {
-  const derived = await new Promise<Buffer>((resolve, reject) => {
-    crypto.scrypt(secret, salt, 64, (error, key) => {
-      if (error) {
-        reject(error);
-        return;
-      }
+// Builds the authoritative AuthenticatedSession from a Pulse user+tenant row.
+// `impersonation` is non-null only when this session is a platform admin's
+// support-mode overlay onto a tenant owner's account; when present, the
+// effective role/isPlatformAdmin are always forced down to a plain tenant
+// user regardless of the target row's own role, matching the pre-Clerk
+// behaviour exactly.
+function sessionFromRow(
+  row: PulseUserRow,
+  impersonation: { userId: string; email: string; startedAt: string } | null,
+  expiresAt: string,
+): AuthenticatedSession {
+  const isPlatformAdmin = isPlatformAdminEmail(row.email);
+  const impersonating = Boolean(impersonation);
+  const role = impersonating ? 'user' : resolveRole(row.role, isPlatformAdmin);
 
-      resolve(key as Buffer);
-    });
-  });
-
-  return derived.toString('hex');
-}
-
-async function hashSecret(secret: string): Promise<string> {
-  const salt = randomSecret(16);
-  const digest = await scryptHash(secret, salt);
-  return `scrypt:${salt}:${digest}`;
-}
-
-async function verifySecret(secret: string, stored: string): Promise<boolean> {
-  const [algorithm, salt, digest] = stored.split(':');
-  if (algorithm !== 'scrypt' || !salt || !digest) {
-    return false;
-  }
-
-  const candidate = await scryptHash(secret, salt);
-  const expected = Buffer.from(digest, 'hex');
-  const actual = Buffer.from(candidate, 'hex');
-  if (expected.length !== actual.length) {
-    return false;
-  }
-
-  return crypto.timingSafeEqual(expected, actual);
-}
-
-async function hashPassword(password: string): Promise<string> {
-  return hashSecret(password);
-}
-
-async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  return verifySecret(password, stored);
-}
-
-async function hashAccessKey(accessKey: string): Promise<string> {
-  return hashSecret(normalizeAccessKey(accessKey));
-}
-
-async function verifyAccessKey(accessKey: string, stored: string): Promise<boolean> {
-  return verifySecret(normalizeAccessKey(accessKey), stored);
-}
-
-function tenantAccessError(input: {
-  enabled: boolean;
-  disabledReason: string | null;
-  accessKeyExpiresAt: Date | string | null;
-  isPlatformAdmin: boolean;
-}): string | null {
-  if (input.isPlatformAdmin) {
-    return null;
-  }
-
-  if (!input.enabled) {
-    return input.disabledReason?.trim() || 'Account pending activation. Clarix must enable this account before you can sign in.';
-  }
-
-  if (input.accessKeyExpiresAt) {
-    const expiry = new Date(input.accessKeyExpiresAt);
-    if (!Number.isNaN(expiry.getTime()) && expiry.getTime() < Date.now()) {
-      return 'Your access key has expired. Contact Clarix to renew it.';
-    }
-  }
-
-  return null;
-}
-
-const VALID_ROLES: ReadonlySet<string> = new Set(['super_admin', 'admin', 'support', 'user']);
-
-function resolveRole(row: SessionRow, isPlatformAdmin: boolean): UserRole {
-  // Email-based super_admin takes precedence over the DB role.
-  if (isPlatformAdmin) {
-    return 'super_admin';
-  }
-
-  const dbRole = row.role ?? 'user';
-  return VALID_ROLES.has(dbRole) ? (dbRole as UserRole) : 'user';
-}
-
-function rowToSession(row: SessionRow, isPlatformAdmin: boolean): AuthenticatedSession {
-  const impersonating = Boolean(row.impersonator_user_id);
-  const effectivePlatformAdmin = impersonating ? false : isPlatformAdmin;
-  const role = impersonating ? 'user' : resolveRole(row, isPlatformAdmin);
   return {
-    sessionId: row.session_id,
+    sessionId: impersonation ? `impersonation-${row.user_id}` : `identity-${row.user_id}`,
     userId: row.user_id,
     tenantId: row.tenant_id,
     tenantName: row.tenant_name,
@@ -439,17 +270,15 @@ function rowToSession(row: SessionRow, isPlatformAdmin: boolean): AuthenticatedS
     defaultAlertEmail: row.default_alert_email,
     email: row.email,
     displayName: row.display_name,
-    expiresAt: toIso(row.expires_at),
+    expiresAt,
     role,
-    isPlatformAdmin: effectivePlatformAdmin || role === 'super_admin',
+    isPlatformAdmin: impersonating ? false : (isPlatformAdmin || role === 'super_admin'),
     tenantEnabled: !!row.enabled,
     disabledReason: row.disabled_reason,
-    accessKeyHint: row.access_key_hint,
-    accessKeyExpiresAt: toOptionalIso(row.access_key_expires_at),
     impersonating,
-    impersonatorUserId: row.impersonator_user_id,
-    impersonatorEmail: row.impersonator_email,
-    impersonationStartedAt: toOptionalIso(row.impersonation_started_at),
+    impersonatorUserId: impersonation?.userId ?? null,
+    impersonatorEmail: impersonation?.email ?? null,
+    impersonationStartedAt: impersonation?.startedAt ?? null,
   };
 }
 
@@ -463,9 +292,6 @@ function rowToTenantSummary(row: TenantSummaryRow): TenantAccessSummary {
     defaultAlertEmail: row.default_alert_email,
     enabled: !!row.enabled,
     disabledReason: row.disabled_reason,
-    accessKeyHint: row.access_key_hint,
-    accessKeyGeneratedAt: toOptionalIso(row.access_key_generated_at),
-    accessKeyExpiresAt: toOptionalIso(row.access_key_expires_at),
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };
@@ -485,52 +311,34 @@ function rowToAdminAuditEvent(row: AdminAuditEventRow): AdminAuditEvent {
   };
 }
 
-async function sessionForHash(sessionTokenHash: string): Promise<AuthenticatedSession | null> {
-  const row = await queryOne<SessionRow>(`
-    SELECT
-      s.session_id,
-      u.user_id,
-      t.tenant_id,
-      t.name AS tenant_name,
-      t.slug AS tenant_slug,
-      t.enrollment_key,
-      t.default_alert_email,
-      t.enabled,
-      t.disabled_reason,
-      t.access_key_hint,
-      t.access_key_expires_at,
-      u.email,
-      u.display_name,
-      u.role,
-      s.expires_at,
-      s.impersonator_user_id,
-      s.impersonator_email,
-      s.impersonation_started_at
-    FROM sessions s
-    JOIN users u ON u.user_id = s.user_id
-    JOIN tenants t ON t.tenant_id = u.tenant_id
-    WHERE s.session_token_hash = $1
-      AND s.expires_at > NOW()
-  `, [sessionTokenHash]);
+const PULSE_USER_SELECT = `
+  SELECT
+    u.user_id,
+    u.clerk_user_id,
+    u.email,
+    u.display_name,
+    u.role,
+    t.tenant_id,
+    t.name AS tenant_name,
+    t.slug AS tenant_slug,
+    t.enrollment_key,
+    t.default_alert_email,
+    t.enabled,
+    t.disabled_reason
+  FROM users u
+  JOIN tenants t ON t.tenant_id = u.tenant_id
+`;
 
-  if (!row) {
-    return null;
-  }
+async function pulseUserRowForUserId(userId: string): Promise<PulseUserRow | null> {
+  return queryOne<PulseUserRow>(`${PULSE_USER_SELECT} WHERE u.user_id = $1`, [userId]);
+}
 
-  const isPlatformAdmin = isPlatformAdminEmail(row.email);
-  const bypassTenantAccess = Boolean(row.impersonator_user_id || isPlatformAdmin);
-  const accessError = tenantAccessError({
-    enabled: !!row.enabled,
-    disabledReason: row.disabled_reason,
-    accessKeyExpiresAt: row.access_key_expires_at,
-    isPlatformAdmin: bypassTenantAccess,
-  });
+async function pulseUserRowForClerkUserId(clerkUserId: string): Promise<PulseUserRow | null> {
+  return queryOne<PulseUserRow>(`${PULSE_USER_SELECT} WHERE u.clerk_user_id = $1`, [clerkUserId]);
+}
 
-  if (accessError) {
-    return null;
-  }
-
-  return rowToSession(row, isPlatformAdmin);
+async function pulseUserRowForEmail(email: string): Promise<PulseUserRow | null> {
+  return queryOne<PulseUserRow>(`${PULSE_USER_SELECT} WHERE u.email = $1`, [email]);
 }
 
 async function resolveUniqueTenantSlug(baseSlug: string, client?: Parameters<typeof exec>[2]): Promise<string> {
@@ -562,7 +370,19 @@ async function ensureUniqueUserEmail(email: string, client?: Parameters<typeof e
   `, [email], client);
 
   if (existing) {
-    throw new Error('That email is already registered. Try signing in instead.');
+    throw new Error('That email is already registered. Sign in with Clerk instead of registering again.');
+  }
+}
+
+async function ensureUniqueClerkUserId(clerkUserId: string, client?: Parameters<typeof exec>[2]): Promise<void> {
+  const existing = await queryOne<UserRow>(`
+    SELECT user_id
+    FROM users
+    WHERE clerk_user_id = $1
+  `, [clerkUserId], client);
+
+  if (existing) {
+    throw new Error('This Clerk account is already linked to a Pulse workspace.');
   }
 }
 
@@ -573,21 +393,6 @@ async function deleteSessionsForTenant(tenantId: string, client?: Parameters<typ
     WHERE s.user_id = u.user_id
       AND u.tenant_id = $1
   `, [tenantId], client);
-}
-
-async function deleteSessionsForUser(userId: string, client?: Parameters<typeof exec>[2]): Promise<void> {
-  await exec(`
-    DELETE FROM sessions
-    WHERE user_id = $1
-       OR impersonator_user_id = $1
-  `, [userId], client);
-}
-
-async function deletePasswordResetTokensForUser(userId: string, client?: Parameters<typeof exec>[2]): Promise<void> {
-  await exec(`
-    DELETE FROM password_reset_tokens
-    WHERE user_id = $1
-  `, [userId], client);
 }
 
 async function tenantOwnerRowForTenantId(tenantId: string, client?: Parameters<typeof exec>[2]): Promise<TenantOwnerRow | null> {
@@ -654,57 +459,153 @@ export async function appendAdminAuditEvent(input: {
   await recordAdminAuditEvent(input);
 }
 
-async function userAccessRowForUserId(userId: string): Promise<UserAccessRow | null> {
-  return queryOne<UserAccessRow>(`
-    SELECT
-      u.user_id,
-      u.email,
-      u.display_name,
-      t.tenant_id,
-      t.name AS tenant_name,
-      t.slug AS tenant_slug,
-      t.enabled,
-      t.disabled_reason,
-      t.access_key_expires_at
-    FROM users u
-    JOIN tenants t ON t.tenant_id = u.tenant_id
-    WHERE u.user_id = $1
-  `, [userId]);
+// Account linking. Called on every request that carries a verified Clerk
+// identity. Order of resolution:
+//   1. clerk_user_id match -- the common case once a user has signed in once.
+//   2. Fallback to a verified-email match on a still-unlinked Pulse user
+//      (admin-provisioned account, first Clerk sign-in) -- link it.
+//   3. No match at all -- this Clerk identity has no Pulse account. Returns
+//      null; the caller (serverAuth.getSessionFromRequest) treats that as
+//      unauthenticated for protected routes, or the register endpoint uses it
+//      to create a brand-new tenant for this identity.
+// The partial unique index on users(clerk_user_id) (see store/db.ts) is what
+// actually enforces "only link if no other Pulse user already has that
+// clerk_user_id" -- the WHERE clerk_user_id IS NULL guard below makes the
+// UPDATE a no-op if a concurrent request wins the race first.
+export async function resolveOrLinkPulseUserByClerkIdentity(identity: {
+  clerkUserId: string;
+  email: string;
+}): Promise<PulseUserRow | null> {
+  const byClerkId = await pulseUserRowForClerkUserId(identity.clerkUserId);
+  if (byClerkId) {
+    return byClerkId;
+  }
+
+  const email = normalizeEmail(identity.email);
+  if (!email) {
+    return null;
+  }
+
+  const byEmail = await pulseUserRowForEmail(email);
+  if (!byEmail) {
+    return null;
+  }
+
+  if (byEmail.clerk_user_id) {
+    // This Pulse account is already linked to a *different* Clerk identity.
+    // Do not silently reassign it -- that would let anyone who can create a
+    // Clerk account with a matching email take over another person's tenant
+    // access. Deny rather than link.
+    return byEmail.clerk_user_id === identity.clerkUserId ? byEmail : null;
+  }
+
+  await exec(`
+    UPDATE users
+    SET clerk_user_id = $1, updated_at = $2
+    WHERE user_id = $3 AND clerk_user_id IS NULL
+  `, [identity.clerkUserId, new Date().toISOString(), byEmail.user_id]);
+
+  // Re-read rather than trust the UPDATE locally: if a concurrent request
+  // linked this same clerk_user_id to a *different* Pulse user first, our
+  // WHERE clause above matched zero rows, and the correct outcome is to
+  // resolve by clerk_user_id fresh (which will find that other user, or
+  // nothing if this identity truly isn't linked anywhere).
+  return pulseUserRowForClerkUserId(identity.clerkUserId);
 }
 
+// Builds the plain (non-impersonating) AuthenticatedSession for a Clerk
+// identity, applying the tenant-enabled gate. Used by both the Express
+// request path and the Socket.IO handshake path in serverAuth.ts.
+export async function getIdentitySessionForClerkUser(input: {
+  clerkUserId: string;
+  email: string;
+  expiresAt: string;
+}): Promise<AuthenticatedSession | null> {
+  const row = await resolveOrLinkPulseUserByClerkIdentity({
+    clerkUserId: input.clerkUserId,
+    email: input.email,
+  });
+  if (!row) {
+    return null;
+  }
+
+  const isPlatformAdmin = isPlatformAdminEmail(row.email);
+  const accessError = tenantAccessError({
+    enabled: !!row.enabled,
+    disabledReason: row.disabled_reason,
+    isPlatformAdmin,
+  });
+  if (accessError) {
+    return null;
+  }
+
+  return sessionFromRow(row, null, input.expiresAt);
+}
+
+// Used only by the PULSE_DISABLE_LOGIN bypass, which is orthogonal to the
+// Clerk migration -- it resolves straight to a Pulse user id with no Clerk
+// identity involved at all, same as it resolved straight to a session token
+// before Clerk existed.
+export async function resolveUserIdByEmail(emailInput: string): Promise<string | null> {
+  const email = normalizeEmail(emailInput);
+  const row = await queryOne<{ user_id: string }>(`
+    SELECT user_id FROM users WHERE email = $1
+  `, [email]);
+  return row?.user_id ?? null;
+}
+
+export async function buildSessionForUserId(userId: string, expiresAt: string): Promise<AuthenticatedSession | null> {
+  const row = await pulseUserRowForUserId(userId);
+  if (!row) {
+    return null;
+  }
+
+  const isPlatformAdmin = isPlatformAdminEmail(row.email);
+  const accessError = tenantAccessError({
+    enabled: !!row.enabled,
+    disabledReason: row.disabled_reason,
+    isPlatformAdmin,
+  });
+  if (accessError) {
+    return null;
+  }
+
+  return sessionFromRow(row, null, expiresAt);
+}
+
+// New Pulse users are still admin-provisioned (tenant assignment is not
+// self-service) -- the one exception is a brand-new company workspace: the
+// first user of a tenant creates the tenant and themselves atomically, same
+// as before Clerk. What changed is *how* that person proves who they are:
+// the caller (routes/auth.ts) must already hold a verified Clerk identity
+// before calling this, and clerkUserId/email come from that identity rather
+// than from a submitted password.
 export async function registerTenantOwner(input: {
   companyName: string;
   displayName: string;
+  clerkUserId: string;
   email: string;
-  password: string;
 }): Promise<RegistrationResult> {
   const email = normalizeEmail(input.email);
   const companyName = normalizeTenantName(input.companyName, email);
   const displayName = normalizeDisplayName(input.displayName, companyName);
-  const password = input.password;
 
   if (!email || !email.includes('@')) {
-    throw new Error('Enter a valid email address.');
+    throw new Error('A verified email address is required.');
   }
   if (!companyName) {
     throw new Error('Company name is required.');
   }
-  if (password.length < 8) {
-    throw new Error('Password must be at least 8 characters.');
-  }
 
-  const passwordHash = await hashPassword(password);
-  const accessKey = createAccessKey();
-  const accessKeyHash = await hashAccessKey(accessKey);
   const tenantId = randomId('tenant');
   const userId = randomId('user');
   const timestamp = new Date().toISOString();
   const enrollmentKey = randomSecret(24);
-  const accessKeyExpiresAt = accessKeyExpiryIso();
   let tenantSlug = '';
 
   await withTransaction(async (client) => {
     await ensureUniqueUserEmail(email, client);
+    await ensureUniqueClerkUserId(input.clerkUserId, client);
     tenantSlug = await resolveUniqueTenantSlug(companyName, client);
 
     await exec(`
@@ -716,39 +617,36 @@ export async function registerTenantOwner(input: {
         default_alert_email,
         enabled,
         disabled_reason,
-        access_key_hash,
-        access_key_hint,
-        access_key_generated_at,
-        access_key_expires_at,
         created_at,
         updated_at
       )
-      VALUES ($1, $2, $3, $4, $5, TRUE, $6, $7, $8, $9, $10, $9, $9)
+      VALUES ($1, $2, $3, $4, $5, TRUE, NULL, $6, $6)
     `, [
       tenantId,
       companyName,
       tenantSlug,
       enrollmentKey,
       email,
-      null,
-      accessKeyHash,
-      accessKeyHint(accessKey),
       timestamp,
-      accessKeyExpiresAt,
     ], client);
 
+    // The person who self-registers a brand-new tenant is that tenant's
+    // owner -- give them role='admin' (not the DB default 'user') so they
+    // can invite teammates immediately after creating their workspace,
+    // without needing a second platform-admin step to promote them.
     await exec(`
       INSERT INTO users (
         user_id,
         tenant_id,
+        clerk_user_id,
         email,
         display_name,
-        password_hash,
+        role,
         created_at,
         updated_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $6)
-    `, [userId, tenantId, email, displayName, passwordHash, timestamp], client);
+      VALUES ($1, $2, $3, $4, $5, 'admin', $6, $6)
+    `, [userId, tenantId, input.clerkUserId, email, displayName, timestamp], client);
 
     await exec(`
       INSERT INTO tenant_alert_settings (
@@ -774,133 +672,7 @@ export async function registerTenantOwner(input: {
     ownerDisplayName: displayName,
     enrollmentKey,
     defaultAlertEmail: email,
-    accessKey,
-    accessKeyHint: accessKeyHint(accessKey),
-    accessKeyExpiresAt,
   };
-}
-
-export async function authenticateUser(
-  emailInput: string,
-  password: string,
-  accessKeyInput: string,
-): Promise<AuthenticationResult> {
-  const email = normalizeEmail(emailInput);
-  const row = await queryOne<UserAuthRow>(`
-    SELECT
-      u.user_id,
-      u.password_hash,
-      u.email,
-      t.tenant_id,
-      t.enabled,
-      t.disabled_reason,
-      t.access_key_hash,
-      t.access_key_expires_at
-    FROM users u
-    JOIN tenants t ON t.tenant_id = u.tenant_id
-    WHERE u.email = $1
-  `, [email]);
-
-  if (!row) {
-    return {
-      ok: false,
-      statusCode: 401,
-      error: 'Invalid email or password.',
-    };
-  }
-
-  const validPassword = await verifyPassword(password, row.password_hash);
-  if (!validPassword) {
-    return {
-      ok: false,
-      statusCode: 401,
-      error: 'Invalid email or password.',
-    };
-  }
-
-  const isPlatformAdmin = isPlatformAdminEmail(row.email);
-  const accessError = tenantAccessError({
-    enabled: !!row.enabled,
-    disabledReason: row.disabled_reason,
-    accessKeyExpiresAt: row.access_key_expires_at,
-    isPlatformAdmin,
-  });
-  if (accessError) {
-    return {
-      ok: false,
-      statusCode: 403,
-      error: accessError,
-    };
-  }
-
-  // Access key is only required while the tenant is pending activation (enabled=false).
-  // Once the admin enables the account the user signs in with email + password only.
-  // If the user supplies a key anyway, validate it so they can still use it as a
-  // second factor (e.g., shared team workspace logins).
-  if (!isPlatformAdmin && !row.enabled) {
-    if (!normalizeAccessKey(accessKeyInput)) {
-      return {
-        ok: false,
-        statusCode: 400,
-        error: 'Access key is required while your account is pending activation.',
-      };
-    }
-
-    const validAccessKey = await verifyAccessKey(accessKeyInput, row.access_key_hash);
-    if (!validAccessKey) {
-      return {
-        ok: false,
-        statusCode: 401,
-        error: 'Invalid access key.',
-      };
-    }
-  } else if (!isPlatformAdmin && normalizeAccessKey(accessKeyInput)) {
-    // Account is enabled and user supplied a key -- validate it as an optional check.
-    const validAccessKey = await verifyAccessKey(accessKeyInput, row.access_key_hash);
-    if (!validAccessKey) {
-      return {
-        ok: false,
-        statusCode: 401,
-        error: 'Invalid access key.',
-      };
-    }
-  }
-
-  return {
-    ok: true,
-    statusCode: 200,
-    userId: row.user_id,
-  };
-}
-
-export async function resolveUserIdByEmail(emailInput: string): Promise<string | null> {
-  const email = normalizeEmail(emailInput);
-  const row = await queryOne<{ user_id: string }>(`
-    SELECT user_id FROM users WHERE email = $1
-  `, [email]);
-  return row?.user_id ?? null;
-}
-
-export async function createSessionForUser(userId: string): Promise<{ sessionToken: string; session: AuthenticatedSession }> {
-  const access = await userAccessRowForUserId(userId);
-  if (!access) {
-    throw new Error('Unknown user.');
-  }
-
-  const isPlatformAdmin = isPlatformAdminEmail(access.email);
-  const accessError = tenantAccessError({
-    enabled: !!access.enabled,
-    disabledReason: access.disabled_reason,
-    accessKeyExpiresAt: access.access_key_expires_at,
-    isPlatformAdmin,
-  });
-  if (accessError) {
-    throw new Error(accessError);
-  }
-
-  return createStoredSession({
-    userId,
-  });
 }
 
 export async function listAdminAuditEvents(input?: {
@@ -929,17 +701,38 @@ export async function listAdminAuditEvents(input?: {
   return rows.map(rowToAdminAuditEvent);
 }
 
-async function createStoredSession(input: {
-  userId: string;
-  impersonatorUserId?: string | null;
-  impersonatorEmail?: string | null;
-}): Promise<{ sessionToken: string; session: AuthenticatedSession }> {
+// --- Impersonation ("support mode") ----------------------------------------
+// The `sessions` table is now used for impersonation only -- regular sign-in
+// sessions live entirely in Clerk. A platform admin's own Clerk cookie never
+// changes while they impersonate; this row + the clarix_pulse_impersonation
+// cookie (serverAuth.ts) are a Pulse-owned overlay checked on top of their
+// Clerk identity on every request.
+
+export async function createImpersonationSessionForTenant(input: {
+  tenantId: string;
+  adminUserId: string;
+  adminEmail: string;
+}): Promise<{ sessionToken: string; session: AuthenticatedSession; target: TenantOwnerRow }> {
+  const adminRow = await pulseUserRowForUserId(input.adminUserId);
+  if (!adminRow || !isPlatformAdminEmail(adminRow.email)) {
+    throw new Error('Platform admin access required.');
+  }
+
+  const target = await tenantOwnerRowForTenantId(input.tenantId);
+  if (!target) {
+    throw new Error('Unknown tenant owner.');
+  }
+
+  if (target.user_id === input.adminUserId) {
+    throw new Error('You are already in this workspace.');
+  }
+
   const sessionId = randomId('session');
   const sessionToken = randomSecret(32);
   const sessionTokenHash = hashSessionToken(sessionToken);
   const timestamp = new Date().toISOString();
-  const impersonationStartedAt = input.impersonatorUserId ? timestamp : null;
-  const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
+  const expiresAt = new Date(Date.now() + IMPERSONATION_SESSION_TTL_MS).toISOString();
+  const adminEmail = normalizeEmail(input.adminEmail);
 
   await exec(`
     INSERT INTO sessions (
@@ -956,54 +749,29 @@ async function createStoredSession(input: {
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
   `, [
     sessionId,
-    input.userId,
+    target.user_id,
     sessionTokenHash,
-    input.impersonatorUserId ?? null,
-    input.impersonatorEmail ? normalizeEmail(input.impersonatorEmail) : null,
-    impersonationStartedAt,
+    input.adminUserId,
+    adminEmail,
+    timestamp,
     expiresAt,
     timestamp,
   ]);
 
-  const session = await sessionForHash(sessionTokenHash);
-  if (!session) {
-    throw new Error('Failed to create a session.');
-  }
-
-  return {
-    sessionToken,
-    session,
-  };
-}
-
-export async function createImpersonationSessionForTenant(input: {
-  tenantId: string;
-  adminUserId: string;
-  adminEmail: string;
-}): Promise<{ sessionToken: string; session: AuthenticatedSession; target: TenantOwnerRow }> {
-  const adminAccess = await userAccessRowForUserId(input.adminUserId);
-  if (!adminAccess || !isPlatformAdminEmail(adminAccess.email)) {
-    throw new Error('Platform admin access required.');
-  }
-
-  const target = await tenantOwnerRowForTenantId(input.tenantId);
-  if (!target) {
+  const targetRow = await pulseUserRowForUserId(target.user_id);
+  if (!targetRow) {
     throw new Error('Unknown tenant owner.');
   }
 
-  if (target.user_id === input.adminUserId) {
-    throw new Error('You are already in this workspace.');
-  }
-
-  const created = await createStoredSession({
-    userId: target.user_id,
-    impersonatorUserId: input.adminUserId,
-    impersonatorEmail: input.adminEmail,
-  });
+  const session = sessionFromRow(
+    targetRow,
+    { userId: input.adminUserId, email: adminEmail, startedAt: timestamp },
+    expiresAt,
+  );
 
   await recordAdminAuditEvent({
     actorUserId: input.adminUserId,
-    actorEmail: input.adminEmail,
+    actorEmail: adminEmail,
     targetTenantId: target.tenant_id,
     targetUserId: target.user_id,
     targetEmail: target.email,
@@ -1014,153 +782,65 @@ export async function createImpersonationSessionForTenant(input: {
     },
   });
 
-  return {
-    ...created,
-    target,
-  };
+  return { sessionToken, session, target };
 }
 
-export async function rotateAccessKeyForTenant(tenantId: string): Promise<{
-  accessKey: string;
-  accessKeyHint: string;
-  accessKeyExpiresAt: string;
-}> {
-  const accessKey = createAccessKey();
-  const accessKeyHash = await hashOpaqueToken(accessKey);
-  const hint = accessKeyHint(accessKey);
-  const expiresAt = accessKeyExpiryIso();
-  const now = new Date().toISOString();
-
-  await exec(`
-    UPDATE tenants
-    SET access_key_hash = $1,
-        access_key_hint = $2,
-        access_key_expires_at = $3,
-        access_key_generated_at = $4,
-        updated_at = $4
-    WHERE tenant_id = $5
-  `, [accessKeyHash, hint, expiresAt, now, tenantId]);
-
-  return { accessKey, accessKeyHint: hint, accessKeyExpiresAt: expiresAt };
-}
-
-export async function createPasswordResetForEmail(input: {
-  email: string;
-  actorUserId?: string | null;
-  actorEmail?: string | null;
-  createdByAdmin?: boolean;
-}): Promise<{
-  ok: boolean;
-  email: string;
-  displayName: string;
-  tenantId: string;
-  tenantName: string;
-  resetToken: string;
-  expiresAt: string;
-  createdByAdmin: boolean;
-} | null> {
-  const email = normalizeEmail(input.email);
-  if (!email) {
+export async function getImpersonationSessionFromToken(sessionToken: string): Promise<AuthenticatedSession | null> {
+  const trimmed = sessionToken.trim();
+  if (!trimmed) {
     return null;
   }
 
-  const owner = await queryOne<TenantOwnerRow>(`
+  const row = await queryOne<ImpersonationSessionRow>(`
     SELECT
       u.user_id,
+      u.clerk_user_id,
       u.email,
       u.display_name,
+      u.role,
       t.tenant_id,
       t.name AS tenant_name,
-      t.slug AS tenant_slug
-    FROM users u
+      t.slug AS tenant_slug,
+      t.enrollment_key,
+      t.default_alert_email,
+      t.enabled,
+      t.disabled_reason,
+      s.impersonator_user_id,
+      s.impersonator_email,
+      s.impersonation_started_at,
+      s.expires_at
+    FROM sessions s
+    JOIN users u ON u.user_id = s.user_id
     JOIN tenants t ON t.tenant_id = u.tenant_id
-    WHERE u.email = $1
-  `, [email]);
+    WHERE s.session_token_hash = $1
+      AND s.expires_at > NOW()
+      AND s.impersonator_user_id IS NOT NULL
+  `, [hashSessionToken(trimmed)]);
 
-  if (!owner) {
+  if (!row) {
     return null;
   }
 
-  const resetToken = randomSecret(32);
-  const resetTokenHash = hashOpaqueToken(resetToken);
-  const expiresAt = passwordResetExpiryIso();
-  const timestamp = new Date().toISOString();
-  const createdByAdmin = Boolean(input.createdByAdmin && input.actorEmail);
-
-  await withTransaction(async (client) => {
-    await deletePasswordResetTokensForUser(owner.user_id, client);
-
-    await exec(`
-      INSERT INTO password_reset_tokens (
-        reset_id,
-        user_id,
-        token_hash,
-        created_by_admin,
-        actor_user_id,
-        actor_email,
-        expires_at,
-        consumed_at,
-        created_at,
-        updated_at
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8, $8)
-    `, [
-      randomId('reset'),
-      owner.user_id,
-      resetTokenHash,
-      createdByAdmin,
-      input.actorUserId ?? null,
-      input.actorEmail ? normalizeEmail(input.actorEmail) : null,
-      expiresAt,
-      timestamp,
-    ], client);
-
-    if (createdByAdmin && input.actorEmail) {
-      await recordAdminAuditEvent({
-        actorUserId: input.actorUserId ?? null,
-        actorEmail: input.actorEmail,
-        targetTenantId: owner.tenant_id,
-        targetUserId: owner.user_id,
-        targetEmail: owner.email,
-        action: 'password_reset_issued',
-        details: {
-          expiresAt,
-          tenantSlug: owner.tenant_slug,
-          tenantName: owner.tenant_name,
-        },
-      }, client);
-    }
-  });
-
-  return {
-    ok: true,
-    email: owner.email,
-    displayName: owner.display_name,
-    tenantId: owner.tenant_id,
-    tenantName: owner.tenant_name,
-    resetToken,
-    expiresAt,
-    createdByAdmin,
-  };
+  // Impersonation always bypasses the target tenant's enabled/disabled gate
+  // -- support needs to be able to open a disabled tenant to diagnose it,
+  // same as before this migration.
+  return sessionFromRow(row, {
+    userId: row.impersonator_user_id,
+    email: row.impersonator_email,
+    startedAt: toIso(row.impersonation_started_at),
+  }, toIso(row.expires_at));
 }
 
-export async function createPasswordResetForTenantOwner(input: {
-  tenantId: string;
-  actorUserId?: string | null;
-  actorEmail?: string | null;
-  createdByAdmin?: boolean;
-}) {
-  const owner = await tenantOwnerRowForTenantId(input.tenantId);
-  if (!owner) {
-    throw new Error('Unknown tenant owner.');
+export async function deleteImpersonationSession(sessionToken: string): Promise<void> {
+  const trimmed = sessionToken.trim();
+  if (!trimmed) {
+    return;
   }
 
-  return createPasswordResetForEmail({
-    email: owner.email,
-    actorUserId: input.actorUserId,
-    actorEmail: input.actorEmail,
-    createdByAdmin: input.createdByAdmin,
-  });
+  await exec(`
+    DELETE FROM sessions
+    WHERE session_token_hash = $1
+  `, [hashSessionToken(trimmed)]);
 }
 
 export async function recordImpersonationEnded(input: {
@@ -1180,116 +860,10 @@ export async function recordImpersonationEnded(input: {
   });
 }
 
-export async function resetPasswordWithToken(input: {
-  token: string;
-  password: string;
-}): Promise<{ email: string; tenantName: string }> {
-  const token = input.token.trim();
-  if (!token) {
-    throw new Error('Reset token is required.');
-  }
-  if (input.password.length < 8) {
-    throw new Error('Password must be at least 8 characters.');
-  }
-
-  const tokenHash = hashOpaqueToken(token);
-  const row = await queryOne<PasswordResetRow>(`
-    SELECT
-      pr.reset_id,
-      pr.user_id,
-      pr.token_hash,
-      pr.expires_at,
-      pr.created_by_admin,
-      pr.actor_user_id,
-      pr.actor_email,
-      pr.consumed_at,
-      u.email,
-      u.display_name,
-      t.tenant_id,
-      t.name AS tenant_name
-    FROM password_reset_tokens pr
-    JOIN users u ON u.user_id = pr.user_id
-    JOIN tenants t ON t.tenant_id = u.tenant_id
-    WHERE pr.token_hash = $1
-    LIMIT 1
-  `, [tokenHash]);
-
-  if (!row) {
-    throw new Error('That reset link is invalid or has already been used.');
-  }
-
-  if (row.consumed_at) {
-    throw new Error('That reset link has already been used.');
-  }
-
-  const expiry = new Date(row.expires_at);
-  if (Number.isNaN(expiry.getTime()) || expiry.getTime() < Date.now()) {
-    throw new Error('That reset link has expired. Request a new one.');
-  }
-
-  const passwordHash = await hashPassword(input.password);
-  const timestamp = new Date().toISOString();
-
-  await withTransaction(async (client) => {
-    await exec(`
-      UPDATE users
-      SET
-        password_hash = $2,
-        updated_at = $3
-      WHERE user_id = $1
-    `, [row.user_id, passwordHash, timestamp], client);
-
-    await exec(`
-      UPDATE password_reset_tokens
-      SET
-        consumed_at = $2,
-        updated_at = $2
-      WHERE reset_id = $1
-    `, [row.reset_id, timestamp], client);
-
-    await deletePasswordResetTokensForUser(row.user_id, client);
-    await deleteSessionsForUser(row.user_id, client);
-
-    await recordAdminAuditEvent({
-      actorUserId: row.actor_user_id,
-      actorEmail: row.actor_email ?? row.email,
-      targetTenantId: row.tenant_id,
-      targetUserId: row.user_id,
-      targetEmail: row.email,
-      action: row.created_by_admin ? 'password_reset_completed' : 'self_service_password_reset_completed',
-      details: {
-        tenantName: row.tenant_name,
-      },
-    }, client);
-  });
-
-  return {
-    email: row.email,
-    tenantName: row.tenant_name,
-  };
-}
-
-export async function getSessionFromToken(sessionToken: string): Promise<AuthenticatedSession | null> {
-  const trimmed = sessionToken.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  return sessionForHash(hashSessionToken(trimmed));
-}
-
-export async function deleteSession(sessionToken: string): Promise<void> {
-  const trimmed = sessionToken.trim();
-  if (!trimmed) {
-    return;
-  }
-
-  await exec(`
-    DELETE FROM sessions
-    WHERE session_token_hash = $1
-  `, [hashSessionToken(trimmed)]);
-}
-
+// --- Node/agent bootstrap (unrelated to user auth) --------------------------
+// enrollment_key gates machine enrollment (routes/config.ts), not user
+// login -- kept here only because it shares the tenants table and the
+// enabled/disabled gate.
 export async function findTenantByEnrollmentKey(enrollmentKey: string): Promise<{
   tenantId: string;
   tenantName: string;
@@ -1299,9 +873,8 @@ export async function findTenantByEnrollmentKey(enrollmentKey: string): Promise<
     name: string;
     enabled: boolean;
     disabled_reason: string | null;
-    access_key_expires_at: Date | string | null;
   }>(`
-    SELECT tenant_id, name, enabled, disabled_reason, access_key_expires_at
+    SELECT tenant_id, name, enabled, disabled_reason
     FROM tenants
     WHERE enrollment_key = $1
   `, [enrollmentKey.trim()]);
@@ -1313,7 +886,6 @@ export async function findTenantByEnrollmentKey(enrollmentKey: string): Promise<
   const accessError = tenantAccessError({
     enabled: !!row.enabled,
     disabledReason: row.disabled_reason,
-    accessKeyExpiresAt: row.access_key_expires_at,
     isPlatformAdmin: false,
   });
   if (accessError) {
@@ -1337,9 +909,6 @@ export async function listTenantsForAdmin(): Promise<TenantAccessSummary[]> {
       t.default_alert_email,
       t.enabled,
       t.disabled_reason,
-      t.access_key_hint,
-      t.access_key_generated_at,
-      t.access_key_expires_at,
       t.created_at,
       t.updated_at
     FROM tenants t
@@ -1367,9 +936,6 @@ export async function getTenantAccessSummary(tenantId: string): Promise<TenantAc
       t.default_alert_email,
       t.enabled,
       t.disabled_reason,
-      t.access_key_hint,
-      t.access_key_generated_at,
-      t.access_key_expires_at,
       t.created_at,
       t.updated_at
     FROM tenants t
@@ -1420,6 +986,9 @@ export async function updateTenantEnabledState(input: {
     ], client);
 
     if (!input.enabled) {
+      // Only impersonation sessions live in this table now, but a disabled
+      // tenant should not be reachable through a stale support-mode window
+      // either -- drop any for this tenant.
       await deleteSessionsForTenant(input.tenantId, client);
     }
   });
@@ -1430,47 +999,6 @@ export async function updateTenantEnabledState(input: {
   }
 
   return summary;
-}
-
-export async function rotateTenantAccessKey(input: {
-  tenantId: string;
-  validityDays?: number;
-}): Promise<TenantAccessKeyRotation> {
-  const accessKey = createAccessKey();
-  const accessKeyHash = await hashAccessKey(accessKey);
-  const timestamp = new Date().toISOString();
-  const accessKeyExpiresAt = accessKeyExpiryIso(input.validityDays ?? accessKeyValidityDays());
-
-  await withTransaction(async (client) => {
-    await exec(`
-      UPDATE tenants
-      SET
-        access_key_hash = $2,
-        access_key_hint = $3,
-        access_key_generated_at = $4,
-        access_key_expires_at = $5,
-        updated_at = $4
-      WHERE tenant_id = $1
-    `, [
-      input.tenantId,
-      accessKeyHash,
-      accessKeyHint(accessKey),
-      timestamp,
-      accessKeyExpiresAt,
-    ], client);
-
-    await deleteSessionsForTenant(input.tenantId, client);
-  });
-
-  const summary = await getTenantAccessSummary(input.tenantId);
-  if (!summary) {
-    throw new Error('Unknown tenant.');
-  }
-
-  return {
-    summary,
-    accessKey,
-  };
 }
 
 export async function deleteTenantAccount(input: {
@@ -1567,4 +1095,276 @@ export async function deleteTenantAccount(input: {
     deletedSiteCount: siteIds.length,
     deletedPlayerCount: playerIdList.length,
   };
+}
+
+// --- Teammates / invites (tenant-scoped role management) -------------------
+// A "teammate" is just a row in `users` for the caller's own tenant. An
+// invited-but-not-yet-signed-in teammate is indistinguishable in shape from
+// an active one -- the only difference is clerk_user_id IS NULL ("pending").
+// When that person later signs in through Clerk with a matching verified
+// email, resolveOrLinkPulseUserByClerkIdentity (above) links this exact row
+// rather than creating anything new -- invites and self-registration share
+// one linking path by construction, not by a special case here.
+
+export type TeammateStatus = 'active' | 'pending';
+
+export interface TeammateSummary {
+  userId: string;
+  email: string;
+  displayName: string;
+  role: UserRole;
+  status: TeammateStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface TeammateRow extends QueryResultRow {
+  user_id: string;
+  email: string;
+  display_name: string;
+  role: string;
+  clerk_user_id: string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
+// Deliberately excludes 'super_admin' -- that role is only ever assigned via
+// the platform-admin email allowlist (resolveRole), never stored/settable on
+// a tenant-scoped user row. An admin can hand out admin/user/support only.
+const INVITABLE_ROLES: ReadonlySet<string> = new Set(['admin', 'user', 'support']);
+
+function assertInvitableRole(role: string): void {
+  if (!INVITABLE_ROLES.has(role)) {
+    throw new Error('Role must be one of: admin, user, support.');
+  }
+}
+
+function rowToTeammateSummary(row: TeammateRow): TeammateSummary {
+  return {
+    userId: row.user_id,
+    email: row.email,
+    displayName: row.display_name,
+    role: VALID_ROLES.has(row.role) ? (row.role as UserRole) : 'user',
+    status: row.clerk_user_id ? 'active' : 'pending',
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+  };
+}
+
+const TEAMMATE_SELECT = `
+  SELECT user_id, email, display_name, role, clerk_user_id, created_at, updated_at
+  FROM users
+`;
+
+async function teammateRowForTenant(
+  tenantId: string,
+  userId: string,
+  client?: Parameters<typeof exec>[2],
+): Promise<TeammateRow | null> {
+  return queryOne<TeammateRow>(`
+    ${TEAMMATE_SELECT}
+    WHERE tenant_id = $1 AND user_id = $2
+  `, [tenantId, userId], client);
+}
+
+export async function listTeammatesForTenant(tenantId: string): Promise<TeammateSummary[]> {
+  const rows = await query<TeammateRow>(`
+    ${TEAMMATE_SELECT}
+    WHERE tenant_id = $1
+    ORDER BY created_at ASC
+  `, [tenantId]);
+
+  return rows.map(rowToTeammateSummary);
+}
+
+// Pre-creates the pending row an invited teammate will link to on their
+// first Clerk sign-in. clerk_user_id stays NULL -- there is nothing else to
+// set up front since Clerk owns credentials entirely; the invited person
+// proves who they are by signing up with the same email this row was
+// created with.
+export async function createTeammateInvite(input: {
+  tenantId: string;
+  inviterUserId: string;
+  inviterEmail: string;
+  email: string;
+  displayName: string;
+  role: string;
+}): Promise<TeammateSummary> {
+  assertInvitableRole(input.role);
+
+  const email = normalizeEmail(input.email);
+  if (!email || !email.includes('@')) {
+    throw new Error('A valid email address is required.');
+  }
+  const displayName = normalizeDisplayName(input.displayName, email);
+  const userId = randomId('user');
+  const timestamp = new Date().toISOString();
+
+  await withTransaction(async (client) => {
+    // Same uniqueness guard registerTenantOwner relies on -- reusing it here
+    // is what stops one email from ever holding a pending invite in two
+    // tenants at once, and (together with the linking logic) is what stops
+    // an invited email from spinning up a second, unrelated workspace via
+    // self-registration instead of accepting the invite.
+    //
+    // SECURITY: ensureUniqueUserEmail's error message ("That email is
+    // already registered. Sign in with Clerk instead of registering
+    // again.") is written for the self-registration flow, where the person
+    // reading it IS the email owner. Here the reader is a different actor
+    // (the inviting tenant admin), so forwarding that message verbatim
+    // would let anyone with admin on any tenant probe arbitrary email
+    // addresses and learn whether they already have a Pulse account in a
+    // *different* tenant -- a cross-tenant account-existence oracle. Catch
+    // it and surface a tenant-agnostic message instead.
+    try {
+      await ensureUniqueUserEmail(email, client);
+    } catch {
+      throw new Error('Could not create that invite.');
+    }
+
+    await exec(`
+      INSERT INTO users (
+        user_id, tenant_id, clerk_user_id, email, display_name, role, created_at, updated_at
+      )
+      VALUES ($1, $2, NULL, $3, $4, $5, $6, $6)
+    `, [userId, input.tenantId, email, displayName, input.role, timestamp], client);
+
+    await recordAdminAuditEvent({
+      actorUserId: input.inviterUserId,
+      actorEmail: input.inviterEmail,
+      targetTenantId: input.tenantId,
+      targetUserId: userId,
+      targetEmail: email,
+      action: 'teammate_invited',
+      details: { role: input.role, displayName },
+    }, client);
+  });
+
+  return {
+    userId,
+    email,
+    displayName,
+    role: input.role as UserRole,
+    status: 'pending',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+export async function revokeTeammateInvite(input: {
+  tenantId: string;
+  actorUserId: string;
+  actorEmail: string;
+  targetUserId: string;
+}): Promise<void> {
+  const row = await teammateRowForTenant(input.tenantId, input.targetUserId);
+  if (!row) {
+    throw new Error('Unknown teammate.');
+  }
+  if (row.clerk_user_id) {
+    throw new Error('This invite was already accepted. Remove the teammate instead of revoking their invite.');
+  }
+
+  await withTransaction(async (client) => {
+    // WHERE clerk_user_id IS NULL guards against a race where the invite was
+    // accepted (and linked) between the check above and this delete -- if
+    // that happens this becomes a no-op rather than deleting a live account.
+    await exec(`
+      DELETE FROM users
+      WHERE user_id = $1 AND tenant_id = $2 AND clerk_user_id IS NULL
+    `, [input.targetUserId, input.tenantId], client);
+
+    await recordAdminAuditEvent({
+      actorUserId: input.actorUserId,
+      actorEmail: input.actorEmail,
+      targetTenantId: input.tenantId,
+      targetUserId: input.targetUserId,
+      targetEmail: row.email,
+      action: 'teammate_invite_revoked',
+    }, client);
+  });
+}
+
+export async function updateTeammateRole(input: {
+  tenantId: string;
+  actorUserId: string;
+  actorEmail: string;
+  targetUserId: string;
+  role: string;
+}): Promise<TeammateSummary> {
+  // A user must never be able to change their own role -- checked here
+  // rather than only in the route layer so every caller gets the guarantee.
+  if (input.targetUserId === input.actorUserId) {
+    throw new Error('You cannot change your own role.');
+  }
+  assertInvitableRole(input.role);
+
+  const row = await teammateRowForTenant(input.tenantId, input.targetUserId);
+  if (!row) {
+    throw new Error('Unknown teammate.');
+  }
+
+  const timestamp = new Date().toISOString();
+  await withTransaction(async (client) => {
+    await exec(`
+      UPDATE users SET role = $1, updated_at = $2 WHERE user_id = $3 AND tenant_id = $4
+    `, [input.role, timestamp, input.targetUserId, input.tenantId], client);
+
+    await recordAdminAuditEvent({
+      actorUserId: input.actorUserId,
+      actorEmail: input.actorEmail,
+      targetTenantId: input.tenantId,
+      targetUserId: input.targetUserId,
+      targetEmail: row.email,
+      action: 'teammate_role_changed',
+      details: { fromRole: row.role, toRole: input.role },
+    }, client);
+  });
+
+  return rowToTeammateSummary({ ...row, role: input.role, updated_at: timestamp });
+}
+
+export async function removeTeammateFromTenant(input: {
+  tenantId: string;
+  actorUserId: string;
+  actorEmail: string;
+  targetUserId: string;
+}): Promise<void> {
+  if (input.targetUserId === input.actorUserId) {
+    throw new Error('You cannot remove yourself from the tenant.');
+  }
+
+  const row = await teammateRowForTenant(input.tenantId, input.targetUserId);
+  if (!row) {
+    throw new Error('Unknown teammate.');
+  }
+
+  await withTransaction(async (client) => {
+    // FOR UPDATE locks every row for this tenant so a concurrent
+    // removeTeammateFromTenant call for the same tenant blocks here until
+    // this transaction commits/rolls back, instead of both reading the
+    // same pre-removal count and both passing the "more than one member
+    // left" guard -- otherwise two admins removing each other at the same
+    // moment could both succeed and strand the tenant with zero users.
+    const remaining = await queryOne<{ count: string }>(`
+      SELECT COUNT(*)::text AS count FROM users WHERE tenant_id = $1 FOR UPDATE
+    `, [input.tenantId], client);
+    if (remaining && Number(remaining.count) <= 1) {
+      throw new Error('Cannot remove the last remaining member of a workspace.');
+    }
+
+    // sessions.user_id is ON DELETE CASCADE, so any impersonation session
+    // pointed at this user is cleaned up automatically by this delete --
+    // no separate cleanup query needed.
+    await exec(`DELETE FROM users WHERE user_id = $1 AND tenant_id = $2`, [input.targetUserId, input.tenantId], client);
+
+    await recordAdminAuditEvent({
+      actorUserId: input.actorUserId,
+      actorEmail: input.actorEmail,
+      targetTenantId: input.tenantId,
+      targetUserId: input.targetUserId,
+      targetEmail: row.email,
+      action: 'teammate_removed',
+    }, client);
+  });
 }

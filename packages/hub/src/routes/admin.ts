@@ -2,21 +2,12 @@ import { Request, Response, Router } from 'express';
 import {
   appendAdminAuditEvent,
   createImpersonationSessionForTenant,
-  createPasswordResetForTenantOwner,
   deleteTenantAccount,
   listAdminAuditEvents,
   listTenantsForAdmin,
-  rotateTenantAccessKey,
   updateTenantEnabledState,
 } from '../store/auth';
-import {
-  ADMIN_RETURN_COOKIE_NAME,
-  readCookie,
-  SESSION_COOKIE_NAME,
-  serializeAdminReturnCookie,
-  serializeSessionCookie,
-} from '../serverAuth';
-import { sendPasswordResetEmail, sendRegistrationAccessKeyEmail } from '../services/accountEmail';
+import { serializeImpersonationCookie } from '../serverAuth';
 
 function asBool(value: unknown, fallback = false): boolean {
   if (typeof value === 'boolean') return value;
@@ -31,21 +22,6 @@ function asString(value: unknown, fallback = ''): string {
   if (typeof value === 'string') return value.trim();
   if (typeof value === 'number') return String(value);
   return fallback;
-}
-
-function requestBaseUrl(req: Request): string {
-  const forwardedProto = asString(req.headers['x-forwarded-proto']);
-  const forwardedHost = asString(req.headers['x-forwarded-host']);
-  if (forwardedProto && forwardedHost) {
-    return `${forwardedProto}://${forwardedHost}`;
-  }
-
-  const host = req.get('host');
-  if (!host) {
-    return 'https://pulse.clarixtech.com';
-  }
-
-  return `${req.protocol}://${host}`;
 }
 
 export function createAdminRouter(): Router {
@@ -68,7 +44,7 @@ export function createAdminRouter(): Router {
 
   router.post('/tenants/:tenantId/access', async (req: Request, res: Response) => {
     try {
-      const session = req.auth;
+      const session = req.pulseSession;
       if (!session) {
         return res.status(401).json({ error: 'Sign in required.' });
       }
@@ -104,117 +80,14 @@ export function createAdminRouter(): Router {
     }
   });
 
-  router.post('/tenants/:tenantId/renew-key', async (req: Request, res: Response) => {
-    try {
-      const session = req.auth;
-      if (!session) {
-        return res.status(401).json({ error: 'Sign in required.' });
-      }
-
-      const rotation = await rotateTenantAccessKey({
-        tenantId: req.params.tenantId,
-      });
-      const emailTenant = rotation.summary;
-      const sendEmail = asBool(req.body?.sendEmail, true) && !!emailTenant.ownerEmail;
-      const revealKey = asBool(req.body?.revealKey, false);
-      let emailed = false;
-
-      if (sendEmail && emailTenant.ownerEmail) {
-        try {
-          emailed = await sendRegistrationAccessKeyEmail({
-            to: emailTenant.ownerEmail,
-            companyName: emailTenant.tenantName,
-            displayName: emailTenant.ownerDisplayName ?? emailTenant.tenantName,
-            accessKey: rotation.accessKey,
-            accessKeyExpiresAt: rotation.summary.accessKeyExpiresAt ?? '',
-            appUrl: requestBaseUrl(req),
-            enabled: rotation.summary.enabled,
-          });
-        } catch (error) {
-          console.error('[admin] Failed to send renewed access key email', error);
-        }
-      }
-
-      await appendAdminAuditEvent({
-        actorUserId: session.userId,
-        actorEmail: session.email,
-        targetTenantId: rotation.summary.tenantId,
-        targetEmail: rotation.summary.ownerEmail,
-        action: 'access_key_renewed',
-        details: {
-          tenantName: rotation.summary.tenantName,
-          tenantSlug: rotation.summary.tenantSlug,
-          emailed,
-          expiresAt: rotation.summary.accessKeyExpiresAt,
-        },
-      });
-
-      return res.json({
-        ok: true,
-        tenant: rotation.summary,
-        accessKey: (emailed && !revealKey) ? null : rotation.accessKey,
-        emailed,
-      });
-    } catch (error) {
-      return res.status(400).json({
-        error: error instanceof Error ? error.message : 'Failed to renew the tenant key.',
-      });
-    }
-  });
-
-  router.post('/tenants/:tenantId/password-reset', async (req: Request, res: Response) => {
-    try {
-      const session = req.auth;
-      if (!session) {
-        return res.status(401).json({ error: 'Sign in required.' });
-      }
-
-      const issued = await createPasswordResetForTenantOwner({
-        tenantId: req.params.tenantId,
-        actorUserId: session.userId,
-        actorEmail: session.email,
-        createdByAdmin: true,
-      });
-      if (!issued) {
-        return res.status(404).json({ error: 'No tenant owner was found for this account.' });
-      }
-
-      const sendEmail = asBool(req.body?.sendEmail, true);
-      const revealLink = asBool(req.body?.revealLink, false);
-      const resetUrl = `${requestBaseUrl(req)}/reset-password?token=${encodeURIComponent(issued.resetToken)}`;
-      let emailed = false;
-
-      if (sendEmail) {
-        try {
-          emailed = await sendPasswordResetEmail({
-            to: issued.email,
-            companyName: issued.tenantName,
-            displayName: issued.displayName,
-            resetUrl,
-            expiresAt: issued.expiresAt,
-            appUrl: requestBaseUrl(req),
-          });
-        } catch (error) {
-          console.error('[admin] Failed to send password reset email', error);
-        }
-      }
-
-      return res.json({
-        ok: true,
-        emailed,
-        expiresAt: issued.expiresAt,
-        resetUrl: (emailed && !revealLink) ? null : resetUrl,
-      });
-    } catch (error) {
-      return res.status(400).json({
-        error: error instanceof Error ? error.message : 'Failed to start the password reset.',
-      });
-    }
-  });
-
+  // Opens a read/write "support mode" view into a tenant owner's workspace.
+  // Unlike before Clerk, this does NOT swap the admin's own login cookie --
+  // their Clerk session stays exactly as it was. It only sets a Pulse-owned
+  // impersonation cookie that getSessionFromRequest overlays on top of their
+  // still-valid Clerk identity (see serverAuth.ts).
   router.post('/tenants/:tenantId/impersonate', async (req: Request, res: Response) => {
     try {
-      const session = req.auth;
+      const session = req.pulseSession;
       if (!session) {
         return res.status(401).json({ error: 'Sign in required.' });
       }
@@ -223,25 +96,13 @@ export function createAdminRouter(): Router {
         return res.status(400).json({ error: 'Stop the current impersonation session before starting another one.' });
       }
 
-      const currentSessionToken = readCookie(req.headers.cookie, SESSION_COOKIE_NAME);
-      if (!currentSessionToken) {
-        return res.status(401).json({ error: 'Your admin session is missing. Sign in again.' });
-      }
-
-      if (readCookie(req.headers.cookie, ADMIN_RETURN_COOKIE_NAME)) {
-        return res.status(400).json({ error: 'An admin return session is already active. Stop impersonation before starting a new one.' });
-      }
-
       const impersonation = await createImpersonationSessionForTenant({
         tenantId: req.params.tenantId,
         adminUserId: session.userId,
         adminEmail: session.email,
       });
 
-      res.setHeader('Set-Cookie', [
-        serializeSessionCookie(impersonation.sessionToken),
-        serializeAdminReturnCookie(currentSessionToken),
-      ]);
+      res.setHeader('Set-Cookie', serializeImpersonationCookie(impersonation.sessionToken));
 
       return res.json({
         ok: true,
@@ -258,7 +119,7 @@ export function createAdminRouter(): Router {
 
   router.delete('/tenants/:tenantId', async (req: Request, res: Response) => {
     try {
-      const session = req.auth;
+      const session = req.pulseSession;
       if (!session) {
         return res.status(401).json({ error: 'Sign in required.' });
       }

@@ -1,36 +1,20 @@
 import React, { useEffect, useState } from 'react';
+import { SignIn } from '@clerk/clerk-react';
 import { LOGIN_ROTATOR } from '../content/publicExperience';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
+import { clerkAppearance } from '../lib/clerkAppearance';
 
-function formatAccessKeyInput(value: string): string {
-  const normalized = value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
-  return normalized.match(/.{1,4}/g)?.join('-') ?? normalized;
-}
-
+// LEARN: identity now lives entirely inside Clerk's <SignIn/> widget - it
+// handles the email/password fields, "forgot password" recovery, and the
+// link over to sign-up on its own. This page just supplies the surrounding
+// marketing panel and points the widget at our own /register route (via
+// signUpUrl) so it stays inside the app's own routing instead of Clerk's.
 export function LoginPage({
-  loading,
-  error,
-  notice,
-  registration,
-  onLogin,
   onNavigate,
 }: {
-  loading: boolean;
-  error: string | null;
-  notice: string | null;
-  registration: {
-    accessKey?: string | null;
-    accessKeyExpiresAt?: string | null;
-    pendingActivation?: boolean;
-    emailSent?: boolean;
-  } | null;
-  onLogin: (input: { email: string; password: string; accessKey: string }) => Promise<void>;
   onNavigate: (pathname: string) => void;
 }) {
   const prefersReducedMotion = usePrefersReducedMotion();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [accessKey, setAccessKey] = useState('');
   const [messageIndex, setMessageIndex] = useState(0);
 
   useEffect(() => {
@@ -71,109 +55,27 @@ export function LoginPage({
                 {LOGIN_ROTATOR[messageIndex]}
               </p>
             </div>
+
+            <button
+              type="button"
+              onClick={() => onNavigate('/')}
+              className="mt-6 text-sm font-medium text-slate-400 transition-colors hover:text-slate-200"
+            >
+              Back to overview
+            </button>
           </section>
 
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void onLogin({ email, password, accessKey });
-            }}
-            className="rounded-[32px] border border-slate-800 bg-slate-950/72 p-6 shadow-[0_24px_90px_rgba(2,12,27,0.42)] backdrop-blur"
-          >
+          <div className="rounded-[32px] border border-slate-800 bg-slate-950/72 p-6 shadow-[0_24px_90px_rgba(2,12,27,0.42)] backdrop-blur">
             <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Sign in</p>
-            <div className="mt-5 space-y-4">
-              <label className="block">
-                <span className="text-sm text-slate-300">Email</span>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/90 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm text-slate-300">Password</span>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/90 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm text-slate-300">
-                  Access key{' '}
-                  <span className="text-xs font-normal text-slate-500">(required only while pending activation)</span>
-                </span>
-                <input
-                  type="text"
-                  value={accessKey}
-                  onChange={(event) => setAccessKey(formatAccessKeyInput(event.target.value))}
-                  placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/90 px-4 py-3 text-sm uppercase tracking-[0.18em] text-slate-100 outline-none focus:border-cyan-400"
-                />
-                <p className="mt-2 text-xs leading-5 text-slate-500">
-                  Leave blank - your account is active and only email + password are needed.
-                  Your access key was sent to your registration email as a recovery credential.
-                  You can request a new one from Account settings at any time.
-                </p>
-              </label>
+            <div className="mt-5">
+              <SignIn
+                routing="virtual"
+                signUpUrl="/register"
+                fallbackRedirectUrl="/app"
+                appearance={clerkAppearance}
+              />
             </div>
-
-            {notice && (
-              <div className="mt-4 rounded-2xl border border-emerald-700/40 bg-emerald-900/20 px-4 py-3 text-sm text-emerald-100">
-                {notice}
-              </div>
-            )}
-
-            {registration?.accessKey && (
-              <div className="mt-4 rounded-2xl border border-amber-500/35 bg-amber-500/10 px-4 py-3 text-sm text-amber-50">
-                <p className="font-semibold">Access key fallback</p>
-                <p className="mt-2 leading-6">
-                  Email delivery was unavailable for this registration, so this key is shown once here. Keep it safe.
-                </p>
-                <div className="mt-3 rounded-2xl border border-amber-300/15 bg-slate-950/70 px-4 py-3 font-mono text-sm text-cyan-100">
-                  {registration.accessKey}
-                </div>
-                <p className="mt-3 text-xs text-amber-100/80">
-                  Expires: {registration.accessKeyExpiresAt ?? '365 days from issue'}
-                  {registration.pendingActivation ? ' | Account still pending activation.' : ''}
-                </p>
-              </div>
-            )}
-
-            {error && (
-              <div className="mt-4 rounded-2xl border border-red-700/40 bg-red-900/20 px-4 py-3 text-sm text-red-100">
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="mt-5 w-full rounded-2xl border border-cyan-400/35 bg-cyan-400/12 px-4 py-3 text-sm font-semibold text-cyan-50 transition-colors hover:border-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {loading ? 'Signing in...' : 'Sign in'}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => onNavigate('/forgot-password')}
-              className="mt-3 w-full rounded-2xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-sm font-medium text-slate-200 transition-colors hover:border-slate-500 hover:text-white"
-            >
-              Forgot password
-            </button>
-
-            <button
-              type="button"
-              onClick={() => onNavigate('/register')}
-              className="mt-3 w-full rounded-2xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-sm font-medium text-slate-200 transition-colors hover:border-slate-500 hover:text-white"
-            >
-              Create a new account
-            </button>
-          </form>
+          </div>
         </div>
       </div>
     </div>

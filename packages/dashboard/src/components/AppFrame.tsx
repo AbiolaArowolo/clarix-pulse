@@ -12,7 +12,6 @@ interface SessionShape {
     slug: string;
     defaultAlertEmail: string | null;
     enabled?: boolean;
-    accessKeyExpiresAt?: string | null;
   };
   impersonation?: {
     active: boolean;
@@ -34,20 +33,6 @@ interface Props {
 
 function isActivePath(currentPath: string, navPath: string): boolean {
   return currentPath === navPath || (navPath !== '/app' && currentPath.startsWith(`${navPath}/`));
-}
-
-function formatDateLabel(value: string | null | undefined): string | null {
-  if (!value) return null;
-
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
 }
 
 function SunIcon() {
@@ -98,7 +83,6 @@ export function AppFrame({
 
   const accessState = session.tenant.enabled ? 'Access active' : 'Access pending';
   const defaultAlertTarget = session.tenant.defaultAlertEmail ?? session.user.email;
-  const accessExpiryLabel = formatDateLabel(session.tenant.accessKeyExpiresAt);
   const themeIcon = theme === 'system' ? <MonitorIcon /> : colorMode === 'light' ? <SunIcon /> : <MoonIcon />;
 
   return (
@@ -223,16 +207,6 @@ export function AppFrame({
                   <p className="text-sm text-slate-300">Tenant slug</p>
                   <p className="mt-1 text-base font-semibold text-slate-100">{session.tenant.slug}</p>
                 </div>
-
-                {accessExpiryLabel && (
-                  <>
-                    <div className="ui-quiet-rule h-px" />
-                    <div>
-                      <p className="text-sm text-slate-300">Access key window</p>
-                      <p className="mt-1 text-base font-semibold text-slate-100">Valid through {accessExpiryLabel}</p>
-                    </div>
-                  </>
-                )}
               </div>
             </aside>
           </div>

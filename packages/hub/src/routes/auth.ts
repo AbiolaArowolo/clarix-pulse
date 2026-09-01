@@ -1,26 +1,17 @@
 import { Request, Response, Router } from 'express';
 import {
-  authenticateUser,
-  createPasswordResetForEmail,
-  createSessionForUser,
-  deleteSession,
-  getSessionFromToken,
+  deleteImpersonationSession,
   recordImpersonationEnded,
   registerTenantOwner,
-  resetPasswordWithToken,
-  rotateAccessKeyForTenant,
 } from '../store/auth';
 import {
-  ADMIN_RETURN_COOKIE_NAME,
-  clearSessionFromRequest,
+  clearPulseSessionState,
+  getClerkIdentityFromRequest,
   getSessionFromRequest,
+  IMPERSONATION_COOKIE_NAME,
   readCookie,
-  SESSION_COOKIE_NAME,
-  serializeClearedAdminReturnCookie,
-  serializeClearedSessionCookie,
-  serializeSessionCookie,
+  serializeClearedImpersonationCookie,
 } from '../serverAuth';
-import { accountEmailReady, sendAccessKeyResendEmail, sendPasswordResetEmail, sendRegistrationAccessKeyEmail } from '../services/accountEmail';
 
 function asString(value: unknown, fallback = ''): string {
   if (typeof value === 'string') return value.trim();
@@ -28,23 +19,8 @@ function asString(value: unknown, fallback = ''): string {
   return fallback;
 }
 
-function requestBaseUrl(req: Request): string {
-  const forwardedProto = asString(req.headers['x-forwarded-proto']);
-  const forwardedHost = asString(req.headers['x-forwarded-host']);
-  if (forwardedProto && forwardedHost) {
-    return `${forwardedProto}://${forwardedHost}`;
-  }
-
-  const host = req.get('host');
-  if (!host) {
-    return 'https://pulse.clarixtech.com';
-  }
-
-  return `${req.protocol}://${host}`;
-}
-
 function sessionPayload(req: Request) {
-  const session = req.auth;
+  const session = req.pulseSession;
   if (!session) {
     return {
       authenticated: false,
@@ -58,6 +34,7 @@ function sessionPayload(req: Request) {
       email: session.email,
       displayName: session.displayName,
       isPlatformAdmin: session.isPlatformAdmin,
+      role: session.role,
     },
     tenant: {
       tenantId: session.tenantId,
@@ -67,8 +44,6 @@ function sessionPayload(req: Request) {
       defaultAlertEmail: session.defaultAlertEmail,
       enabled: session.tenantEnabled,
       disabledReason: session.disabledReason,
-      accessKeyHint: session.accessKeyHint,
-      accessKeyExpiresAt: session.accessKeyExpiresAt,
     },
     session: {
       expiresAt: session.expiresAt,
@@ -92,186 +67,55 @@ export function createAuthRouter(): Router {
     return res.json(sessionPayload(req));
   });
 
+  // Creates a brand-new tenant workspace for the Clerk identity that is
+  // currently signed in, and makes that identity its owner. This is the one
+  // self-service path left: a person proves who they are via Clerk (sign-up
+  // handled entirely on the frontend), then calls this endpoint to spin up
+  // their own company workspace. Adding a *second* user to an *existing*
+  // tenant is still admin-only -- there is no such endpoint, same as before
+  // Clerk.
   router.post('/register', async (req: Request, res: Response) => {
+    const identity = await getClerkIdentityFromRequest(req);
+    if (!identity) {
+      return res.status(401).json({
+        error: 'Sign in with Clerk first, with a verified email address, then register your workspace.',
+      });
+    }
+
     try {
       const result = await registerTenantOwner({
         companyName: asString(req.body?.companyName),
         displayName: asString(req.body?.displayName),
-        email: asString(req.body?.email),
-        password: asString(req.body?.password),
+        clerkUserId: identity.clerkUserId,
+        email: identity.email,
       });
 
-      let emailSent = false;
-      try {
-        emailSent = await sendRegistrationAccessKeyEmail({
-          to: result.ownerEmail,
-          companyName: result.tenantName,
-          displayName: result.ownerDisplayName,
-          accessKey: result.accessKey,
-          accessKeyExpiresAt: result.accessKeyExpiresAt,
-          appUrl: requestBaseUrl(req),
-          enabled: true,
-        });
-      } catch (error) {
-        console.error('[auth] Failed to send registration access email', error);
-      }
-
-      res.setHeader('Set-Cookie', [
-        serializeClearedSessionCookie(),
-        serializeClearedAdminReturnCookie(),
-      ]);
+      req.pulseSession = undefined;
+      res.setHeader('Set-Cookie', serializeClearedImpersonationCookie());
       return res.status(201).json({
-        authenticated: false,
         registered: true,
-        notice: emailSent
-          ? 'Account created and active. Your access key was emailed -- sign in with your email and password.'
-          : 'Account created and active. The access key email could not be delivered, so the key is shown below once. Keep it safe.',
+        notice: `Workspace "${result.tenantName}" created. You're signed in as its owner.`,
         registration: {
           companyName: result.tenantName,
           email: result.ownerEmail,
-          accessKey: emailSent ? null : result.accessKey,
-          accessKeyHint: result.accessKeyHint,
-          accessKeyExpiresAt: result.accessKeyExpiresAt,
-          pendingActivation: false,
-          emailSent,
         },
       });
     } catch (error) {
       return res.status(400).json({
-        error: error instanceof Error ? error.message : 'Failed to create the account.',
+        error: error instanceof Error ? error.message : 'Failed to create the workspace.',
       });
     }
   });
 
-  router.post('/login', async (req: Request, res: Response) => {
-    const email = asString(req.body?.email);
-    const password = asString(req.body?.password);
-    const accessKey = asString(req.body?.accessKey);
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required.' });
-    }
-
-    const auth = await authenticateUser(email, password, accessKey);
-    if (!auth.ok || !auth.userId) {
-      return res.status(auth.statusCode).json({ error: auth.error ?? 'Unable to sign in.' });
-    }
-
-    try {
-      const result = await createSessionForUser(auth.userId);
-      req.auth = result.session;
-      res.setHeader('Set-Cookie', [
-        serializeSessionCookie(result.sessionToken),
-        serializeClearedAdminReturnCookie(),
-      ]);
-      return res.json(sessionPayload(req));
-    } catch (error) {
-      return res.status(403).json({
-        error: error instanceof Error ? error.message : 'Unable to create a session.',
-      });
-    }
-  });
+  // No POST /login route: Clerk's own sign-in UI/hooks (frontend) establish
+  // the session directly with Clerk. Every authenticated Pulse route re-
+  // resolves the Pulse session from the live Clerk cookie via
+  // getSessionFromRequest -- there is nothing left for the backend to
+  // "log in" separately.
 
   router.post('/logout', async (req: Request, res: Response) => {
-    await clearSessionFromRequest(req, res);
-    req.auth = undefined;
+    await clearPulseSessionState(req, res);
     return res.json({ ok: true });
-  });
-
-  router.post('/forgot-password', async (req: Request, res: Response) => {
-    const email = asString(req.body?.email);
-    if (!email) {
-      return res.status(400).json({ error: 'Email is required.' });
-    }
-
-    try {
-      const reset = await createPasswordResetForEmail({
-        email,
-      });
-
-      if (reset) {
-        try {
-          await sendPasswordResetEmail({
-            to: reset.email,
-            companyName: reset.tenantName,
-            displayName: reset.displayName,
-            resetUrl: `${requestBaseUrl(req)}/reset-password?token=${encodeURIComponent(reset.resetToken)}`,
-            expiresAt: reset.expiresAt,
-            appUrl: requestBaseUrl(req),
-          });
-        } catch (error) {
-          console.error('[auth] Failed to send password reset email', error);
-        }
-      }
-
-      return res.json({
-        ok: true,
-        notice: accountEmailReady()
-          ? 'If that email is registered, a password reset link has been sent.'
-          : 'If that email is registered, a reset request has been recorded. Email delivery is currently unavailable, so contact Clarix support for the link.',
-      });
-    } catch (error) {
-      return res.status(400).json({
-        error: error instanceof Error ? error.message : 'Failed to start the password reset.',
-      });
-    }
-  });
-
-  router.post('/reset-password', async (req: Request, res: Response) => {
-    const token = asString(req.body?.token);
-    const password = asString(req.body?.password);
-    if (!token || !password) {
-      return res.status(400).json({ error: 'Reset token and new password are required.' });
-    }
-
-    try {
-      const result = await resetPasswordWithToken({ token, password });
-      res.setHeader('Set-Cookie', [serializeClearedSessionCookie(), serializeClearedAdminReturnCookie()]);
-      return res.json({
-        ok: true,
-        notice: `Password updated for ${result.email}. Sign in with your new password.`,
-      });
-    } catch (error) {
-      return res.status(400).json({
-        error: error instanceof Error ? error.message : 'Failed to reset the password.',
-      });
-    }
-  });
-
-  router.post('/resend-access-key', async (req: Request, res: Response) => {
-    const session = await getSessionFromRequest(req, res);
-    if (!session) {
-      return res.status(401).json({ error: 'Sign in required.' });
-    }
-
-    try {
-      const rotation = await rotateAccessKeyForTenant(session.tenantId);
-      let emailSent = false;
-      try {
-        emailSent = await sendAccessKeyResendEmail({
-          to: session.email,
-          companyName: session.tenantName,
-          displayName: session.displayName,
-          accessKey: rotation.accessKey,
-          accessKeyExpiresAt: rotation.accessKeyExpiresAt,
-          appUrl: requestBaseUrl(req),
-        });
-      } catch (err) {
-        console.error('[auth] Failed to send access key resend email', err);
-      }
-
-      return res.json({
-        ok: true,
-        emailSent,
-        accessKeyHint: rotation.accessKeyHint,
-        notice: emailSent
-          ? 'A new access key has been sent to your email address.'
-          : 'A new access key was generated but the email could not be delivered. Contact Clarix support.',
-      });
-    } catch (err) {
-      return res.status(500).json({
-        error: err instanceof Error ? err.message : 'Failed to rotate access key.',
-      });
-    }
   });
 
   router.post('/impersonation/stop', async (req: Request, res: Response) => {
@@ -284,18 +128,9 @@ export function createAuthRouter(): Router {
       return res.status(400).json({ error: 'No impersonation session is active.' });
     }
 
-    const currentSessionToken = readCookie(req.headers.cookie, SESSION_COOKIE_NAME);
-    const adminReturnToken = readCookie(req.headers.cookie, ADMIN_RETURN_COOKIE_NAME);
-    if (!currentSessionToken || !adminReturnToken) {
-      res.setHeader('Set-Cookie', [serializeClearedSessionCookie(), serializeClearedAdminReturnCookie()]);
-      return res.status(400).json({ error: 'The saved admin session is no longer available. Sign in again.' });
-    }
-
-    const adminSession = await getSessionFromToken(adminReturnToken);
-    if (!adminSession || !adminSession.isPlatformAdmin || adminSession.impersonating) {
-      await clearSessionFromRequest(req, res);
-      req.auth = undefined;
-      return res.status(401).json({ error: 'The saved admin session has expired. Sign in again.' });
+    const impersonationToken = readCookie(req.headers.cookie, IMPERSONATION_COOKIE_NAME);
+    if (impersonationToken) {
+      await deleteImpersonationSession(impersonationToken);
     }
 
     await recordImpersonationEnded({
@@ -306,15 +141,18 @@ export function createAuthRouter(): Router {
       targetEmail: session.email,
     });
 
-    await deleteSession(currentSessionToken);
-    res.setHeader('Set-Cookie', [
-      serializeSessionCookie(adminReturnToken),
-      serializeClearedAdminReturnCookie(),
-    ]);
-    req.auth = adminSession;
+    res.setHeader('Set-Cookie', serializeClearedImpersonationCookie());
+
+    // The admin's own Clerk cookie was never touched by impersonation, so
+    // re-resolving the session now (with the impersonation row just deleted,
+    // and req.pulseSession cleared so it isn't served from cache) naturally
+    // falls back to their own identity -- no cookie-swap dance needed.
+    req.pulseSession = undefined;
+    const adminSession = await getSessionFromRequest(req, res);
+
     return res.json({
       ok: true,
-      notice: `Returned to the admin workspace for ${adminSession.email}.`,
+      notice: `Returned to the admin workspace for ${adminSession?.email ?? session.impersonatorEmail}.`,
     });
   });
 
