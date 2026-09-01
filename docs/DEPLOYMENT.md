@@ -121,15 +121,31 @@ Those now report:
 
 ## Initial Deployment
 
-### 1. Build and deploy from the repo
+### Automatic deploys (default path)
 
-Use the deployment helper from the workspace:
+`.github/workflows/deploy.yml` deploys to the VPS on every push to `master` (and can also be run
+manually from the Actions tab). It builds a source archive and runs
+`scripts/vps_clean_redeploy.py` on GitHub's runners, using repo secrets instead of a local
+credentials file:
+
+- `VPS_HOST`
+- `VPS_USER`
+- `VPS_ROOT_PASSWORD`
+
+Add those under **Settings → Secrets and variables → Actions** in GitHub. Rotate the VPS root
+password before adding it here if it has ever been committed, shared, or otherwise exposed — the
+secret only needs to be entered once, directly in GitHub's UI.
+
+### Manual / local deploy
+
+The same script also runs locally for one-off or diagnostic deploys:
 
 ```powershell
-python scripts\vps_clean_redeploy.py --archive D:\monitoring\deploy\clarix-pulse-<sha>.tar.gz
+python scripts\vps_clean_redeploy.py --archive D:\monitoring\deploy\clarix-pulse-<sha>.tar.gz --env-file D:\monitoring\.env.local
 ```
 
-That process now:
+`--env-file` is optional; environment variables always take priority over it, so the same script
+works unchanged in CI and locally. That process now:
 
 1. uploads the release archive and deployment metadata
 2. uploads the installer bundle to a stable VPS path outside the live app directory when a local bundle is available
