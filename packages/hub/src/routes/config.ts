@@ -7,7 +7,7 @@ import {
   parseRemoteSetupReport,
   serializeAgentConfigYaml,
 } from '../config/remoteSetup';
-import { requireSession } from '../serverAuth';
+import { blockSupportDeletes, requireSession } from '../serverAuth';
 import { createBundleDownloadLink, createInstallHandoffLink, createNodeConfigDownloadLink, verifyDownloadToken } from '../services/downloadTokens';
 import { appendAdminAuditEvent, findTenantByEnrollmentKey, getTenantAccessSummary } from '../store/auth';
 import { getAlertSettings, updateAlertSettings } from '../store/alertSettings';
@@ -476,6 +476,10 @@ export function createConfigRouter(io: SocketServer): Router {
   });
 
   router.use(requireSession);
+  // Every route below this point is tenant-scoped and includes the DELETE
+  // at /remote/node/:nodeId -- gate all of them once here rather than
+  // per-route so a support account can never remove a node record.
+  router.use(blockSupportDeletes);
 
   router.post('/remote/install-handoff-link', async (req: Request, res: Response) => {
     const nodeId = asString(req.body?.nodeId);

@@ -34,6 +34,7 @@ function sessionPayload(req: Request) {
       email: session.email,
       displayName: session.displayName,
       isPlatformAdmin: session.isPlatformAdmin,
+      role: session.role,
     },
     tenant: {
       tenantId: session.tenantId,

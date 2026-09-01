@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import webpush from 'web-push';
-import { requireSession } from '../serverAuth';
+import { blockSupportDeletes, requireSession } from '../serverAuth';
 import { exec, query, queryOne } from '../store/db';
 
 let vapidConfigured = false;
@@ -102,7 +102,7 @@ export function createPushRouter(): Router {
     }
   });
 
-  router.delete('/subscribe', requireSession, async (req: Request, res: Response) => {
+  router.delete('/subscribe', requireSession, blockSupportDeletes, async (req: Request, res: Response) => {
     const { endpoint } = req.body as { endpoint?: string };
     if (!endpoint) {
       return res.status(400).json({ error: 'endpoint is required.' });
