@@ -29,7 +29,7 @@ export function createAlertTestRouter(): Router {
       });
     }
 
-    const session = req.auth;
+    const session = req.pulseSession;
     if (!session) {
       return res.status(401).json({ ok: false, error: 'Sign in required.' });
     }

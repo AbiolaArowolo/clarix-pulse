@@ -94,7 +94,7 @@ export function createPushRouter(): Router {
     }
 
     try {
-      await savePushSubscription(req.auth!.tenantId, sub);
+      await savePushSubscription(req.pulseSession!.tenantId, sub);
       return res.json({ ok: true });
     } catch (err) {
       console.error('[push] subscribe error:', err);

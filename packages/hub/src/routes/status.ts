@@ -89,11 +89,11 @@ export function createStatusRouter(): Router {
   const router = Router();
 
   router.get('/', async (req: Request, res: Response) => {
-    if (!req.auth) {
+    if (!req.pulseSession) {
       return res.status(401).json({ error: 'Sign in required.' });
     }
 
-    res.json(await buildStatusPayload(req.auth.tenantId));
+    res.json(await buildStatusPayload(req.pulseSession.tenantId));
   });
 
   return router;

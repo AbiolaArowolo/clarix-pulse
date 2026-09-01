@@ -46,7 +46,6 @@ registerHooks({
               tenantId: ${JSON.stringify(mockedTenantId)},
               enabled: true,
               disabledReason: null,
-              accessKeyExpiresAt: null,
             };
           }
 

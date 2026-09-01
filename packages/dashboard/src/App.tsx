@@ -1,17 +1,16 @@
 import React, { useEffect } from 'react';
+import { useAuth as useClerkAuth } from '@clerk/clerk-react';
 import { AppFrame } from './components/AppFrame';
 import { useAuth } from './features/auth/AuthProvider';
 import { navigate, usePathname } from './hooks/usePathname';
 import { AccountPage } from './pages/AccountPage';
 import { AdminPage } from './pages/AdminPage';
-import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { InstallHandoffPage } from './pages/InstallHandoffPage';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
 import { MonitoringDashboardPage } from './pages/MonitoringDashboardPage';
 import { OnboardingPage } from './pages/OnboardingPage';
 import { RegisterPage } from './pages/RegisterPage';
-import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { initInstallPromptTracking } from './lib/installPrompt';
 
 initInstallPromptTracking();
@@ -27,14 +26,14 @@ function protectedPageMeta(pathname: string): { title: string; description: stri
   if (pathname === '/app/account') {
     return {
       title: 'Account and Downloads',
-      description: 'Review access status, secure installer links, the default alert email, and fallback access details.',
+      description: 'Review access status, secure installer links, and the default alert email.',
     };
   }
 
   if (pathname === '/app/admin') {
     return {
       title: 'Customer Access Control',
-      description: 'Enable or disable customer accounts, renew access keys, and keep activation under platform control.',
+      description: 'Enable or disable customer accounts, open client workspaces for support, and keep activation under platform control.',
     };
   }
 
@@ -57,9 +56,25 @@ function LoadingScreen() {
 export default function App() {
   const pathname = usePathname();
   const auth = useAuth();
+  const clerkAuth = useClerkAuth();
+
+  // Someone can be signed into Clerk (clerkAuth.isSignedIn) without yet
+  // being a recognized Pulse user (auth.authenticated) - either they're
+  // brand new (no tenant yet - RegisterPage's workspace-creation step
+  // handles that) or their admin hasn't provisioned a matching email.
+  // Either way /register is the right place to land them, rather than
+  // showing the sign-in widget they've already used.
+  const pendingLink = auth.bootstrapped && clerkAuth.isSignedIn === true && !auth.authenticated;
 
   useEffect(() => {
-    if (!auth.bootstrapped) {
+    if (!auth.bootstrapped || pathname === '/install-handoff') {
+      return;
+    }
+
+    if (pendingLink) {
+      if (pathname !== '/register') {
+        navigate('/register', true);
+      }
       return;
     }
 
@@ -79,13 +94,11 @@ export default function App() {
         pathname === '/'
         || pathname === '/login'
         || pathname === '/register'
-        || pathname === '/forgot-password'
-        || pathname === '/reset-password'
       )
     ) {
       navigate('/app', true);
     }
-  }, [auth.authenticated, auth.bootstrapped, auth.user?.isPlatformAdmin, pathname]);
+  }, [auth.authenticated, auth.bootstrapped, auth.user?.isPlatformAdmin, pendingLink, pathname]);
 
   if (!auth.bootstrapped && pathname.startsWith('/app')) {
     return <LoadingScreen />;
@@ -96,50 +109,17 @@ export default function App() {
     navigate(nextPath);
   };
 
-  if (pathname === '/forgot-password') {
-    return <ForgotPasswordPage onNavigate={go} />;
-  }
-
-  if (pathname === '/reset-password') {
-    return <ResetPasswordPage onNavigate={go} />;
-  }
-
   if (pathname === '/install-handoff') {
     return <InstallHandoffPage onNavigate={go} />;
   }
 
   if (!auth.authenticated) {
     if (pathname === '/login') {
-      return (
-        <LoginPage
-          loading={auth.loading}
-          error={auth.error}
-          notice={auth.notice}
-          registration={auth.registration}
-          onNavigate={go}
-          onLogin={async (input) => {
-            const ok = await auth.login(input);
-            if (ok) {
-              navigate('/app', true);
-            }
-          }}
-        />
-      );
+      return <LoginPage onNavigate={go} />;
     }
 
     if (pathname === '/register') {
-      return (
-        <RegisterPage
-          loading={auth.loading}
-          error={auth.error}
-          notice={auth.notice}
-          registration={auth.registration}
-          onNavigate={go}
-          onRegister={async (input) => {
-            await auth.register(input);
-          }}
-        />
-      );
+      return <RegisterPage onNavigate={go} />;
     }
 
     return <LandingPage onNavigate={go} />;

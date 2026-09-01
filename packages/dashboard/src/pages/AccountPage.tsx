@@ -18,8 +18,6 @@ interface SessionShape {
     enrollmentKey: string;
     enabled?: boolean;
     disabledReason?: string | null;
-    accessKeyHint?: string | null;
-    accessKeyExpiresAt?: string | null;
   };
 }
 
@@ -30,20 +28,6 @@ interface TenantNodeRecord {
   labels: string[];
 }
 
-function formatDateLabel(value: string | null | undefined): string | null {
-  if (!value) return null;
-
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
-}
-
 export function AccountPage({
   session,
 }: {
@@ -51,16 +35,12 @@ export function AccountPage({
 }) {
   const accessLabel = session.tenant.enabled ? 'Access active' : 'Pending activation';
   const defaultAlertTarget = session.tenant.defaultAlertEmail ?? session.user.email;
-  const accessWindowLabel = formatDateLabel(session.tenant.accessKeyExpiresAt) ?? 'Not set';
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
   const [secureLink, setSecureLink] = useState<{ url: string; expiresAt: string } | null>(null);
   const [creatingLink, setCreatingLink] = useState(false);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
-  const [keyRequestBusy, setKeyRequestBusy] = useState(false);
-  const [keyRequestNotice, setKeyRequestNotice] = useState<string | null>(null);
-  const [keyRequestError, setKeyRequestError] = useState<string | null>(null);
   const [nodeRecords, setNodeRecords] = useState<TenantNodeRecord[]>([]);
   const [nodeCleanupLoading, setNodeCleanupLoading] = useState(false);
   const [nodeCleanupBusyId, setNodeCleanupBusyId] = useState<string | null>(null);
@@ -151,24 +131,6 @@ export function AccountPage({
     void refreshNodeRecords();
   }, []);
 
-  const requestAccessKey = async () => {
-    setKeyRequestBusy(true);
-    setKeyRequestNotice(null);
-    setKeyRequestError(null);
-    try {
-      const res = await fetch('/api/auth/resend-access-key', { method: 'POST' });
-      const data = await res.json() as { ok?: boolean; notice?: string; error?: string };
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error ?? 'Request failed.');
-      }
-      setKeyRequestNotice(data.notice ?? 'A new access key was sent to your email.');
-    } catch (err) {
-      setKeyRequestError(err instanceof Error ? err.message : 'Failed to request access key.');
-    } finally {
-      setKeyRequestBusy(false);
-    }
-  };
-
   const downloadInstaller = async () => {
     setDownloadError(null);
     setDownloading(true);
@@ -229,10 +191,10 @@ export function AccountPage({
             <div className="max-w-3xl">
               <p className="ui-kicker-muted">Downloads and access</p>
               <h3 className="mt-3 text-3xl font-semibold leading-tight text-slate-50 sm:text-4xl">
-                Keep installer access, recovery, and device handoff in one calmer workspace.
+                Keep installer access and device handoff in one calmer workspace.
               </h3>
               <p className="mt-3 max-w-2xl text-base leading-7 text-slate-300">
-                Pull the current Windows installer, create short-lived handoff links for remote operators, and keep recovery details nearby without turning this page into another wall of equal-weight cards.
+                Pull the current Windows installer and create short-lived handoff links for remote operators without turning this page into another wall of equal-weight cards.
               </p>
             </div>
 
@@ -242,9 +204,6 @@ export function AccountPage({
               </span>
               <p className="mt-4 text-sm text-slate-300">Default alerts route to</p>
               <p className="mt-1 text-lg font-semibold text-slate-50">{defaultAlertTarget}</p>
-              <p className="mt-2 text-sm leading-6 text-slate-400">
-                Access key window: <span className="font-semibold text-slate-200">{accessWindowLabel}</span>
-              </p>
             </div>
           </div>
 
@@ -334,46 +293,7 @@ export function AccountPage({
                   <p className="mt-2 text-sm leading-6 text-slate-300">{session.tenant.disabledReason}</p>
                 )}
               </div>
-
-              <div className="ui-quiet-rule h-px" />
-
-              <div>
-                <p className="text-sm text-slate-300">Access key hint</p>
-                <p className="mt-2 text-base font-semibold text-slate-100">{session.tenant.accessKeyHint ?? 'Not available'}</p>
-              </div>
-
-              <div className="ui-quiet-rule h-px" />
-
-              <div>
-                <p className="text-sm text-slate-300">Access key window</p>
-                <p className="mt-2 text-base font-semibold text-slate-100">{accessWindowLabel}</p>
-              </div>
             </div>
-          </div>
-
-          <div className="ui-shell-panel rounded-[var(--radius-panel)] px-5 py-5">
-            <p className="ui-kicker-muted">Access key recovery</p>
-            <p className="mt-3 text-sm leading-6 text-slate-300">
-              Lost or forgotten your access key? Request a new one and Clarix Pulse will email it to <span className="font-semibold text-slate-100">{session.user.email}</span>. This replaces any existing key.
-            </p>
-            {keyRequestNotice && (
-              <div className="mt-4 rounded-[var(--radius-control)] border border-emerald-700/40 bg-emerald-900/20 px-4 py-3 text-sm text-emerald-100">
-                {keyRequestNotice}
-              </div>
-            )}
-            {keyRequestError && (
-              <div className="mt-4 rounded-[var(--radius-control)] border border-red-700/40 bg-red-900/20 px-4 py-3 text-sm text-red-100">
-                {keyRequestError}
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={() => void requestAccessKey()}
-              disabled={keyRequestBusy}
-              className="mt-4 rounded-[var(--radius-control)] border border-indigo-400/35 bg-indigo-400/14 px-4 py-2.5 text-sm font-semibold text-indigo-50 transition-colors hover:border-indigo-300 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {keyRequestBusy ? 'Sending...' : 'Email me a new access key'}
-            </button>
           </div>
 
           <div className="ui-shell-panel rounded-[var(--radius-panel)] px-5 py-5">

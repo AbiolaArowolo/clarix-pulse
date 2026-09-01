@@ -15,10 +15,9 @@ import { createHeartbeatRouter } from './routes/heartbeat';
 import { createPushRouter } from './routes/push';
 import { buildStatusPayload, createStatusRouter } from './routes/status';
 import { createThumbnailRouter } from './routes/thumbnail';
-import { SESSION_COOKIE_NAME, readCookie, requirePlatformAdmin, requireSession } from './serverAuth';
+import { clerkMiddleware, requirePlatformAdmin, requireSession, resolveSessionFromHandshakeCookies } from './serverAuth';
 import { getAlertDeliveryHealth, sendNetworkIssueAlert } from './services/alerting';
 import { describeConnectivityIssue } from './services/connectivityIssues';
-import { getSessionFromToken } from './store/auth';
 import { checkDbHealth, DATABASE_URL_DISPLAY, initDb } from './store/db';
 import { getInstanceControls, initInstanceControls, isAlertingSuppressed } from './store/instanceControls';
 import { getPlayer, initRegistry } from './store/registry';
@@ -40,6 +39,12 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: '256kb' }));
+// LEARN: clerkMiddleware() has to run before any route handler that calls
+// getAuth(req) / getSessionFromRequest() -- it's what reads the incoming
+// Clerk session cookie/header and attaches Clerk's own req.auth() accessor.
+// It does NOT reject unauthenticated requests itself (that's requireSession/
+// requirePlatformAdmin below, which are Pulse's own tenant-aware gates).
+app.use(clerkMiddleware());
 
 const httpServer = createServer(app);
 const io = new SocketServer(httpServer, {
@@ -107,13 +112,10 @@ if (fs.existsSync(dashboardIndex)) {
 }
 
 io.use(async (socket, next) => {
-  const sessionToken = readCookie(socket.handshake.headers.cookie, SESSION_COOKIE_NAME);
-  if (!sessionToken) {
-    next(new Error('Unauthorized'));
-    return;
-  }
-
-  const session = await getSessionFromToken(sessionToken);
+  const session = await resolveSessionFromHandshakeCookies(socket.handshake.headers.cookie).catch((err) => {
+    console.error('[ws] Failed to authenticate handshake', err);
+    return null;
+  });
   if (!session) {
     next(new Error('Unauthorized'));
     return;
@@ -124,7 +126,7 @@ io.use(async (socket, next) => {
 });
 
 io.on('connection', async (socket) => {
-  const session = socket.data.session as Awaited<ReturnType<typeof getSessionFromToken>>;
+  const session = socket.data.session as Awaited<ReturnType<typeof resolveSessionFromHandshakeCookies>>;
   if (!session) {
     socket.disconnect(true);
     return;

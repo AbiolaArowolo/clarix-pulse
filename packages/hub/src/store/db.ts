@@ -251,7 +251,6 @@ export async function initDb(): Promise<void> {
         tenant_id       TEXT NOT NULL REFERENCES tenants(tenant_id) ON DELETE CASCADE,
         email           TEXT NOT NULL,
         display_name    TEXT NOT NULL,
-        password_hash   TEXT NOT NULL,
         created_at      TIMESTAMPTZ NOT NULL,
         updated_at      TIMESTAMPTZ NOT NULL
       );
@@ -260,6 +259,37 @@ export async function initDb(): Promise<void> {
     await exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
       ON users(email);
+    `, [], client);
+
+    // Clerk migration -- Clerk is now the sole identity/session provider, so
+    // Pulse no longer stores a password to verify. clerk_user_id links a Pulse
+    // user row (tenant/role, authoritative here) to the Clerk user who proves
+    // that identity. It is nullable: a user provisioned by an admin has no
+    // clerk_user_id until they sign in through Clerk with a matching verified
+    // email, at which point the identity gets linked (see
+    // resolveOrLinkPulseUserByClerkIdentity in store/auth.ts).
+    await exec(`
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS clerk_user_id TEXT;
+    `, [], client);
+
+    // Partial unique index rather than a plain UNIQUE column: most rows start
+    // with clerk_user_id NULL, and this index doubles as the concurrency
+    // guard for account linking -- two requests racing to link the same
+    // Clerk identity to two different Pulse users can only have one succeed,
+    // since Postgres enforces uniqueness only across the non-NULL values.
+    await exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_clerk_user_id
+      ON users(clerk_user_id)
+      WHERE clerk_user_id IS NOT NULL;
+    `, [], client);
+
+    // Password-hash storage is retired now that Clerk verifies identity.
+    // Safe to drop unconditionally -- IF EXISTS makes it a no-op on fresh
+    // installs where the column was never created above.
+    await exec(`
+      ALTER TABLE users
+      DROP COLUMN IF EXISTS password_hash;
     `, [], client);
 
     await exec(`
