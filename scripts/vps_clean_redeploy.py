@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -186,18 +187,40 @@ def detect_dirty_tree() -> bool:
         return True
 
 
+def resolve_env(env_file: str | None) -> dict[str, str]:
+    """Credentials come from the environment first (CI secrets), falling back to
+    an optional local env file for interactive/local runs. This keeps one script
+    working both ways instead of maintaining two."""
+    env: dict[str, str] = {}
+    if env_file:
+        env_path = Path(env_file)
+        if env_path.exists():
+            env.update(load_env(env_path))
+
+    for key in ("VPS_HOST", "VPS_USER", "VPS_ROOT_PASSWORD", *ENV_SYNC_KEYS):
+        value = os.environ.get(key)
+        if value:
+            env[key] = value
+
+    return env
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env-file", default=str(Path("d:/monitoring/.env.local")))
+    parser.add_argument("--env-file", default=None, help="Optional local .env.local to read credentials from; environment variables always take priority.")
     parser.add_argument("--archive", required=True)
     parser.add_argument("--remote-app", default="/var/www/clarix-pulse")
     parser.add_argument("--revision", default=detect_revision())
     args = parser.parse_args()
 
-    env = load_env(Path(args.env_file))
-    host = env["VPS_HOST"]
-    user = env["VPS_USER"]
-    password = env["VPS_ROOT_PASSWORD"]
+    env = resolve_env(args.env_file)
+    host = env.get("VPS_HOST")
+    user = env.get("VPS_USER")
+    password = env.get("VPS_ROOT_PASSWORD")
+    if not host or not user or not password:
+        raise SystemExit(
+            "VPS_HOST, VPS_USER, and VPS_ROOT_PASSWORD must be set (via --env-file or environment variables)."
+        )
 
     archive_path = Path(args.archive)
     if not archive_path.exists():

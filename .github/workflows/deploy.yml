@@ -1,0 +1,40 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch: {}
+
+concurrency:
+  group: vps-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deploy dependencies
+        run: pip install paramiko
+
+      - name: Build deploy archive
+        run: |
+          tar -czf /tmp/clarix-pulse-deploy.tar.gz \
+            --exclude='packages/hub/node_modules' \
+            --exclude='packages/hub/dist' \
+            --exclude='packages/dashboard/node_modules' \
+            --exclude='packages/dashboard/dist' \
+            package.json package-lock.json packages/hub packages/dashboard
+
+      - name: Deploy to VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_ROOT_PASSWORD: ${{ secrets.VPS_ROOT_PASSWORD }}
+        run: |
+          python scripts/vps_clean_redeploy.py --archive /tmp/clarix-pulse-deploy.tar.gz
