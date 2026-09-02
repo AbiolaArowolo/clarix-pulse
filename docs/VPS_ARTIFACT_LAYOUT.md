@@ -70,11 +70,10 @@ the newest `clarix-pulse-v*.zip` present in the repo release folder.
 
 ### Installer
 
-1. Register a Clarix Pulse account.
-2. Receive the 365-day access key by email, or copy the fallback key shown once if SMTP is unavailable.
-3. Wait for a platform admin to enable the account.
-4. Sign in with email, password, and access key.
-5. Download the Windows installer from the onboarding or account page, or create a secure installer link for node-side scripted pulls.
+1. Sign up for a Clarix Pulse account via Clerk.
+2. Wait for a platform admin to enable the account.
+3. Sign in via Clerk.
+4. Download the Windows installer from the onboarding or account page, or create a secure installer link for node-side scripted pulls.
 
 ### Node Config
 

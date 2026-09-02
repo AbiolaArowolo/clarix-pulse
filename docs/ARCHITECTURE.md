@@ -52,8 +52,9 @@ Current node-side import helpers:
 
 The hub owns:
 
-- tenant, user, and session records
-- tenant access status and access-key expiry
+- tenant, user, and session records (identity itself is proven by Clerk - see
+  Authentication And Tenancy below)
+- tenant enabled/disabled access status
 - nodes, players, and agent tokens
 - monitoring enabled / disabled
 - maintenance mode
@@ -73,22 +74,36 @@ The dashboard now does three things:
 
 ## Authentication And Tenancy
 
+Identity and authorization are deliberately split (see ADR-013 in
+`DECISIONS.md`): [Clerk](https://clerk.com) is a pure authentication layer -
+it proves "this browser is this person" and owns the login session/cookie.
+It knows nothing about tenants, roles, or impersonation. Everything about
+*which* Pulse tenant a person belongs to, what role they hold, whether their
+tenant is enabled, and (for platform admins) who they're currently
+impersonating stays 100% in Postgres, same as before the migration - only
+the identity-proving step changed.
+
 The browser side is no longer global:
 
 - `/` is the landing page
-- `/login` is the login page
-- `/register` is the registration page
-- `/app` and its subpages require a valid session
+- `/login` embeds Clerk's `<SignIn/>` widget
+- `/register` embeds Clerk's `<SignUp/>` widget, then creates the workspace
+  for that identity
+- `/app` and its subpages require a resolved Pulse session (a valid Clerk
+  session linked to a Pulse tenant/user)
 
 The hub now stores:
 
 - `tenants`
-- `users`
-- `sessions`
-- `password_reset_tokens`
+- `users` (with a nullable `clerk_user_id`, linked on first Clerk sign-in
+  by matching verified email)
+- `sessions` (impersonation sessions only - see below)
 - `admin_audit_events`
-- tenant access state and 365-day access keys
+- tenant enabled/disabled access state
 - tenant-scoped alert settings
+
+There is no Pulse-issued password, access key, or password-reset token
+anymore; those tables/columns have been dropped.
 
 Realtime state is tenant-scoped:
 
@@ -103,9 +118,9 @@ Important product rule:
 - the registration email seeds the default alert email for that tenant
 - that alert email can later be changed from the dashboard
 - new accounts stay disabled until a platform admin enables them
-- users can request a password reset from `/forgot-password`
-- platform admins can issue a password reset or open a tenant workspace from `/app/admin`
-- support-mode workspace access is implemented as an impersonated session with a saved admin return session cookie
+- password reset and account recovery happen entirely inside Clerk's widget - the hub is not involved
+- platform admins can open a tenant workspace from `/app/admin` (impersonation)
+- support-mode workspace access is implemented as an impersonated session with a saved admin return session cookie - the admin's own Clerk session is never touched
 - signed-in browser downloads use `/api/downloads`
 - node-side direct pulls use secure expiring links minted from the signed-in dashboard
 
@@ -138,8 +153,7 @@ Main tables:
 
 - `tenants`
 - `users`
-- `sessions`
-- `password_reset_tokens`
+- `sessions` (impersonation overlay sessions only - Clerk owns the primary session)
 - `admin_audit_events`
 - `sites`
 - `nodes`
