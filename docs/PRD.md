@@ -14,9 +14,8 @@ Clarix Pulse solves this with:
 
 - a Windows monitoring agent
 - a tenant-aware hub
-- a login-gated dashboard
+- a login-gated dashboard, authenticated via Clerk
 - admin-controlled account activation
-- 365-day access keys
 - tenant-scoped alerting
 
 ---
@@ -24,8 +23,8 @@ Clarix Pulse solves this with:
 ## Current Product Goals
 
 - public landing page instead of exposing the monitoring board to everyone
-- registration and login with email and password
-- access-key gated sign-in with admin enable or disable control
+- registration and sign-in via Clerk (email, password, or whatever methods the connected Clerk instance is configured for)
+- admin enable/disable control over which sign-in identities can access their tenant
 - one private hub per customer account
 - empty-by-default dashboard for new accounts
 - registration email becomes the default alert email

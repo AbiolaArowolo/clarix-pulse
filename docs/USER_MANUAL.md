@@ -51,7 +51,7 @@ Important:
 Make sure you have:
 
 - a Clarix Pulse account that has already been enabled
-- your email, password, and access key
+- a Clerk sign-in (email, password, or whatever method the connected Clerk instance is configured for - see Part 1 below)
 - a Windows node where you can unpack the installer bundle
 - access to the monitored playout machine while the player is running if possible
 
@@ -68,95 +68,35 @@ Helpful terms:
 
 ## Part 1 - Public Hub Pages
 
+Sign-in and sign-up are [Clerk](https://clerk.com)'s own widgets, embedded on
+Pulse's pages. Clerk owns every field on these forms - including password
+reset and account recovery - so what exactly you see (password, magic link,
+social sign-in) depends on how the connected Clerk instance is configured.
+There is no Pulse-issued password, access key, or reset token anymore.
+
 ### 1. Register Page
 
-Open `Register` when you need to create a new customer workspace.
+Open `Sign up` when you need to create a new customer workspace.
 
-Fields:
+1. Complete Clerk's sign-up widget (email verification is handled by Clerk).
+2. Fill in the workspace-creation fields that appear once you're signed in:
+   - `Company name`: the customer or organization name shown inside the workspace
+   - `Your name`: the first user name for the account
+3. That identity becomes the workspace's owner.
 
-- `Company name`: the customer or organization name shown inside the workspace
-- `Your name`: the first user name for the account
-- `Email`: the sign-in email for that first user
-- `Password`: the sign-in password
-
-Buttons:
-
-- `Create account`: creates the workspace and the first user
-- `Already registered? Sign in`: returns to the login page
-
-What happens after registration:
-
-- Clarix Pulse creates a 365-day access key
-- if email delivery is configured, the key is emailed
-- if email delivery is unavailable, the fallback access key is shown once on screen
-- new customer accounts start disabled by default until a platform admin enables them
-
-What the `Access key fallback` box means:
-
-- it appears only when automatic email delivery is unavailable
-- it is a one-time fallback view of the access key
-- store it safely because the user will need it for login
+New customer workspaces start disabled by default until a platform admin
+enables them.
 
 ### 2. Login Page
 
-Use this page to enter the workspace.
+Use this page to enter the workspace. It's Clerk's `<SignIn/>` widget - use
+whatever credentials or sign-in method you set up with Clerk. On success,
+Pulse resolves your tenant automatically (matched to your Clerk identity by
+email, the first time you sign in).
 
-Fields:
-
-- `Email`: your account email
-- `Password`: your password
-- `Access key`: the workspace access key; platform admin accounts can leave this blank
-
-Buttons:
-
-- `Sign in`: logs into the workspace
-- `Forgot password`: opens the password-reset request page
-- `Create a new account`: opens registration
-
-Extra notes:
-
-- the access key input automatically formats the key in groups
-- if a recent registration had no email delivery, an `Access key fallback` block can appear here once
-
-### 3. Forgot Password Page
-
-Use this when a user cannot remember the password.
-
-Field:
-
-- `Email`: the account email to recover
-
-Buttons:
-
-- `Send reset link`: asks Clarix Pulse to send a reset link if the email exists
-- `Back to sign in`: returns to login
-
-Important:
-
-- the response is intentionally generic and does not confirm whether the email exists
-- password reset changes the password only
-- the tenant, access key, and node configuration do not change
-
-### 4. Reset Password Page
-
-Use this page after opening a reset link from email or after a platform admin sends a fallback token.
-
-Fields:
-
-- `Token`: the password-reset token
-- `New password`: the new password
-- `Confirm password`: repeat the new password
-
-Buttons:
-
-- `Update password`: saves the new password
-- `Back to sign in`: returns to login
-
-Validation:
-
-- the token must exist
-- the password must be at least 8 characters
-- the new password and confirm password must match
+If you can't remember your credentials, use the recovery option inside
+Clerk's own widget (e.g. "Forgot password?") - Pulse has no separate page
+for this.
 
 ---
 
@@ -445,8 +385,6 @@ This card shows:
 
 - whether the workspace is enabled
 - any disabled reason
-- access key hint
-- access key expiry time
 
 ### Alert default
 
@@ -777,31 +715,23 @@ This section is only for platform admins.
 
 ### Admin page purpose
 
-The admin page is where platform admins manage tenant access and help customers without asking for their password.
+The admin page is where platform admins manage tenant access and help
+customers without ever needing their credentials - Clerk owns sign-in, so
+there is nothing password-related for a platform admin to see or reset here.
 
 ### Admin actions per tenant
 
 Buttons:
 
-- `Open workspace`: enters that tenant's workspace in support mode
-- `Send reset link`: sends or generates a password reset link for the tenant owner
+- `Open workspace`: enters that tenant's workspace in support mode (impersonation)
 - `Enable account` or `Disable account`: controls whether the tenant can use the platform
 - `Delete account`: permanently removes the tenant account and its data
-
-Other admin actions:
-
-- access-key renewal can reveal a fallback key when email delivery is unavailable
-- reset-link generation can reveal a fallback reset link when email delivery is unavailable
-
-Fallback action buttons:
-
-- `Copy fallback key`
-- `Copy reset link`
 
 Support mode:
 
 - after `Open workspace`, the admin sees the tenant workspace with a support banner
 - use `Return to admin` in the banner to exit support mode
+- the admin's own Clerk sign-in is never touched by entering or leaving support mode
 
 ### Recent support activity
 
@@ -811,7 +741,6 @@ It helps answer:
 
 - who enabled a tenant
 - who opened a workspace in support mode
-- who issued a password reset
 - who deleted a tenant
 
 ---

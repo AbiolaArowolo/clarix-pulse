@@ -78,12 +78,9 @@ powershell -ExecutionPolicy Bypass -File .\discover-node.ps1
 Clarix Pulse is now account-based and workspace-isolated:
 
 - the public site opens to a landing page
-- each customer registers with email and password
-- a 365-day access key is generated at registration
-- if SMTP is configured, that key is emailed automatically
-- if SMTP is unavailable, the key is shown once in the registration flow as a fallback
+- each customer signs up via Clerk (identity is proven by Clerk, not by a Pulse-issued password or access key - see `docs/DECISIONS.md` ADR-013)
 - new accounts are disabled by default until a platform admin enables them
-- the platform admin uses the email listed in `PULSE_ADMIN_EMAILS`, can register that email once if needed, and signs in without an access key
+- the platform admin uses the email listed in `PULSE_ADMIN_EMAILS` - platform-admin status is granted by matching that email against the signed-in Clerk identity
 - the registration email becomes the default alert email for that workspace
 - new dashboards start empty by default
 - nodes only appear after local setup mirrors into that workspace
@@ -100,11 +97,8 @@ Open:
 
 - [pulse.clarixtech.com](https://pulse.clarixtech.com/)
 
-Register the company or sign in with:
-
-- email
-- password
-- current access key
+Sign up or sign in via Clerk (email, password, or whatever methods the
+connected Clerk instance is configured for).
 
 Use the dashboard's onboarding page first if this is the first node for that customer.
 

@@ -1,12 +1,12 @@
 # Clarix Pulse - Hub Manual
 
-**Document Date**: `2026-03-29 -04:00`
+**Document Date**: `2026-09-02`
 
 ## Purpose
 
 This manual covers the browser side of Clarix Pulse:
 
-- public login and registration pages
+- public sign-in and sign-up pages
 - signed-in dashboard pages
 - remote provisioning
 - alert contact settings
@@ -17,57 +17,33 @@ This manual covers the browser side of Clarix Pulse:
 
 ## 1. Public Access Pages
 
+Sign-in and sign-up are Clerk's own hosted widgets (`<SignIn/>`/`<SignUp/>`),
+embedded on Pulse's `/login` and `/register` pages inside Pulse's own page
+frame. Clerk owns every field on these forms, along with password reset,
+email verification, and account recovery - Pulse never renders a password
+or access-key field itself. What Clerk's widget shows (password, magic link,
+social sign-in, etc.) depends entirely on how the connected Clerk instance
+is configured.
+
 ### Register
+
+After completing Clerk's sign-up widget, a signed-in-but-workspace-less
+identity is prompted to create their company workspace:
 
 Fields:
 
 - `Company name`
 - `Your name`
-- `Email`
-- `Password`
 
-Buttons:
+Once created, that identity is the workspace's owner. Adding a *second*
+person to an *existing* workspace happens from the `Team` panel (see
+section 7 below), not from this page.
 
-- `Create account`
-- `Already registered? Sign in`
+### Sign in
 
-### Login
-
-Fields:
-
-- `Email`
-- `Password`
-- `Access key`
-
-Buttons:
-
-- `Sign in`
-- `Forgot password`
-- `Create a new account`
-
-### Forgot password
-
-Field:
-
-- `Email`
-
-Buttons:
-
-- `Send reset link`
-- `Back to sign in`
-
-### Reset password
-
-Fields:
-
-- `Token`
-- `New password`
-- `Confirm password`
-
-Buttons:
-
-- `Update password`
-- `Back to sign in`
+Clerk's `<SignIn/>` widget only - no separate Pulse fields. On success the
+dashboard resolves your Pulse tenant automatically (matched to your Clerk
+account, by email on first sign-in).
 
 ---
 
@@ -270,22 +246,41 @@ The mirror is read-only and helps the operator confirm what the node currently h
 Buttons per tenant:
 
 - `Open workspace`
-- `Send reset link`
 - `Enable account` or `Disable account`
 - `Delete account`
-
-Fallback buttons:
-
-- `Copy fallback key`
-- `Copy reset link`
 
 Use the admin page to:
 
 - enable new customer accounts
-- renew access keys
-- issue reset links
-- open a customer workspace for support
+- open a customer workspace for support (impersonation)
 - permanently remove an unwanted account
+
+Password reset and account recovery are handled entirely inside Clerk's own
+sign-in widget now - there is nothing for a platform admin to issue or copy
+here anymore.
+
+---
+
+## 10. Team Panel (Account Page)
+
+Visible to tenant `admin`/`super_admin` roles only. Manages who else on the
+team can sign in to this workspace.
+
+Fields:
+
+- `Email`
+- `Name`
+- `Role`
+
+Buttons:
+
+- `Send invite`
+- `Copy invite link`
+- per-member: change `Role`, `Revoke invite`, `Remove`
+
+An invited person completes Clerk sign-up via the invite link; their Pulse
+account is created already linked to this tenant, at the role they were
+invited with.
 
 ---
 

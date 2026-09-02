@@ -186,10 +186,6 @@ export async function initDb(): Promise<void> {
         disabled_reason      TEXT,
         enabled_at           TIMESTAMPTZ,
         disabled_at          TIMESTAMPTZ,
-        access_key_hash      TEXT NOT NULL DEFAULT '',
-        access_key_hint      TEXT,
-        access_key_generated_at TIMESTAMPTZ,
-        access_key_expires_at   TIMESTAMPTZ,
         created_at           TIMESTAMPTZ NOT NULL,
         updated_at           TIMESTAMPTZ NOT NULL
       );
@@ -215,24 +211,16 @@ export async function initDb(): Promise<void> {
       ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ;
     `, [], client);
 
+    // Access-key auth is retired now that Clerk verifies identity (same
+    // migration as password_hash below). Safe to drop unconditionally --
+    // IF EXISTS makes it a no-op on fresh installs where these columns were
+    // never created above.
     await exec(`
       ALTER TABLE tenants
-      ADD COLUMN IF NOT EXISTS access_key_hash TEXT NOT NULL DEFAULT '';
-    `, [], client);
-
-    await exec(`
-      ALTER TABLE tenants
-      ADD COLUMN IF NOT EXISTS access_key_hint TEXT;
-    `, [], client);
-
-    await exec(`
-      ALTER TABLE tenants
-      ADD COLUMN IF NOT EXISTS access_key_generated_at TIMESTAMPTZ;
-    `, [], client);
-
-    await exec(`
-      ALTER TABLE tenants
-      ADD COLUMN IF NOT EXISTS access_key_expires_at TIMESTAMPTZ;
+      DROP COLUMN IF EXISTS access_key_hash,
+      DROP COLUMN IF EXISTS access_key_hint,
+      DROP COLUMN IF EXISTS access_key_generated_at,
+      DROP COLUMN IF EXISTS access_key_expires_at;
     `, [], client);
 
     await exec(`
@@ -352,29 +340,13 @@ export async function initDb(): Promise<void> {
       ON sessions(impersonator_user_id);
     `, [], client);
 
+    // Password-reset tokens are retired along with password_hash - Clerk's
+    // own sign-in widget handles reset/recovery now. Drop unconditionally;
+    // IF EXISTS makes it a no-op on fresh installs where it was never
+    // created (this migration runs before the CREATE TABLE used to stand
+    // here, so a brand-new database never sees this table at all).
     await exec(`
-      CREATE TABLE IF NOT EXISTS password_reset_tokens (
-        reset_id            TEXT PRIMARY KEY,
-        user_id             TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-        token_hash          TEXT NOT NULL,
-        created_by_admin    BOOLEAN NOT NULL DEFAULT FALSE,
-        actor_user_id       TEXT REFERENCES users(user_id) ON DELETE SET NULL,
-        actor_email         TEXT,
-        expires_at          TIMESTAMPTZ NOT NULL,
-        consumed_at         TIMESTAMPTZ,
-        created_at          TIMESTAMPTZ NOT NULL,
-        updated_at          TIMESTAMPTZ NOT NULL
-      );
-    `, [], client);
-
-    await exec(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_password_reset_tokens_hash
-      ON password_reset_tokens(token_hash);
-    `, [], client);
-
-    await exec(`
-      CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id
-      ON password_reset_tokens(user_id);
+      DROP TABLE IF EXISTS password_reset_tokens;
     `, [], client);
 
     await exec(`
@@ -412,16 +384,12 @@ export async function initDb(): Promise<void> {
         disabled_reason,
         enabled_at,
         disabled_at,
-        access_key_hash,
-        access_key_hint,
-        access_key_generated_at,
-        access_key_expires_at,
         created_at,
         updated_at
       )
       VALUES (
         $1, 'Legacy Hub', 'legacy-hub', $2, $3,
-        TRUE, NULL, $4, NULL, 'legacy-access-key-disabled', NULL, $4, NULL,
+        TRUE, NULL, $4, NULL,
         $4, $4
       )
       ON CONFLICT (tenant_id) DO UPDATE SET

@@ -61,3 +61,9 @@
 
 **Decision**: serve browser downloads from authenticated hub routes, mint secure expiring links for node-side pulls, and expose deployed revision metadata through the API instead of trusting a live git checkout.  
 **Why**: public static bundle URLs do not meet the signed-in-only requirement, node-side pulls still need plain HTTPS URLs, and archive deploys should not pretend the VPS is a clean repo checkout.
+
+## ADR-013 - Replace Pulse-issued password/access-key auth with Clerk
+
+**Decision**: identity is now proven entirely by Clerk (`@clerk/express` on the hub, `@clerk/clerk-react` on the dashboard). Pulse no longer stores a password hash or issues its own access keys; `password_reset_tokens`, `password_hash`, and the `tenants.access_key_*` columns are dropped. Pulse's own tables remain authoritative for everything Clerk doesn't know about: which tenant a person belongs to, their role, whether their tenant is enabled, and (for platform admins) impersonation. A `users.clerk_user_id` column links a Pulse user to the Clerk identity that proves it, populated by matching verified email on first Clerk sign-in.  
+**Why**: maintaining password hashing, reset-token issuance, and access-key rotation correctly is a real, ongoing security surface for a small team to own; Clerk absorbs that risk and adds recovery flows (and future sign-in methods) Pulse would otherwise have to build itself. This directly supersedes ADR-011 - there is no more 365-day access key or admin-issued reset link.  
+**Note**: this was implemented in a separate work session from most of this document's other entries; see `git log` for `eb8bd0c` onward for the full change set (Clerk migration, VPS SSH-key bootstrap, deploy-script env-sync fixes).

@@ -1,40 +1,47 @@
 # Clarix Pulse - Quick Onboarding
 
-**Document Date**: `2026-03-29 -04:00`
+**Document Date**: `2026-09-02`
+
+Identity is proven entirely by [Clerk](https://clerk.com) now (see ADR-013 in
+`DECISIONS.md`) - there is no Pulse-issued password or access key anymore.
+Clerk's own sign-in widget handles password reset, verification, and whatever
+sign-in methods the connected Clerk instance is configured for; Pulse only
+decides which *tenant* a signed-in identity belongs to and what role they hold.
 
 ## Brief Step-By-Step Guide
 
 ### For a new customer
 
 1. Open [pulse.clarixtech.com](https://pulse.clarixtech.com/).
-2. Register the company with email and password.
-3. Clarix Pulse generates a 365-day access key.
-4. If SMTP is configured, the key is emailed automatically.
-5. If SMTP is unavailable, the key is shown once in the registration flow as a fallback.
-6. New accounts start disabled by default.
-7. A platform admin enables the account from the admin screen.
-8. Sign in with email, password, and the access key.
-9. Open the dashboard's `Onboarding` page.
+2. Click `Sign up` and complete Clerk's sign-up flow (email verification is
+   handled by Clerk).
+3. On first sign-in, create the company workspace (company name, your name).
+4. New workspaces start disabled by default.
+5. A platform admin enables the account from the admin screen.
+6. Once enabled, open the dashboard's `Onboarding` page.
 
 ### For the platform admin first login
 
 1. Use the email listed in `PULSE_ADMIN_EMAILS`.
-2. If that email has not been registered yet, go to `/register` and create the account once.
-3. Then sign in at `/login` with that email and password.
-4. Leave the access-key field blank for the platform admin account.
-5. Open `/app/admin`.
-6. Find the customer account and click `Enable account`.
-7. If needed, use `Open workspace` to enter the customer workspace without their password.
+2. Sign up (or sign in) through Clerk with that exact email - platform-admin
+   status is granted by matching email, not by any Pulse-side flag you set
+   yourself.
+3. Open `/app/admin`.
+4. Find the customer account and click `Enable account`.
+5. If needed, use `Open workspace` to enter the customer workspace directly
+   (impersonation - no customer credentials are ever needed for this).
 
 ### If access help is needed
 
-1. If the user forgot the password, use `Forgot password` on the login page.
-2. If SMTP is configured, Clarix Pulse emails the reset link.
-3. If SMTP is unavailable, a platform admin can issue a reset from `/app/admin` and copy the one-time fallback reset link.
-4. Platform admins can also open the customer workspace directly from `/app/admin` without asking for the customer password.
-5. When support mode is active, the app shows a banner until the admin returns to the admin workspace.
-6. Unwanted customer accounts can be deleted from `/app/admin`.
-7. Recent support and admin actions are visible in the admin activity feed.
+1. Password reset, "forgot password", and account recovery are all handled
+   inside Clerk's own sign-in widget now - there is no Pulse-side reset page
+   or admin-issued reset link anymore.
+2. Platform admins can still open a customer workspace directly from
+   `/app/admin` via `Open workspace` (impersonation), independent of Clerk.
+3. When support mode is active, the app shows a banner until the admin
+   returns to the admin workspace.
+4. Unwanted customer accounts can be deleted from `/app/admin`.
+5. Recent support and admin actions are visible in the admin activity feed.
 
 ### For a new Windows node
 
@@ -76,7 +83,6 @@ sc query ClarixPulseAgent
 - `Remote Setup` can also mint an expiring public install handoff page for one provisioned node at a time
 - the provisioned `config.yaml` flow is preferred over enrollment-key setup
 - the enrollment key still exists as a fallback on the account and onboarding screens
-- the login screen includes `Forgot password`
-- `/app/admin` can now issue password reset links and open a tenant workspace in support mode
-- `/app/admin` can also permanently delete unwanted customer accounts
+- Clerk's sign-in widget handles password reset and recovery - Pulse has no reset page of its own
+- `/app/admin` can open a tenant workspace in support mode (impersonation) and permanently delete unwanted customer accounts
 - `/app/admin` also shows the recent support audit feed
